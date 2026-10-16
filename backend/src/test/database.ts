@@ -2,12 +2,13 @@ import pg from 'pg';
 
 /**
  * Schema tests run against a real PostgreSQL database, because the thing under
- * test IS the database: an exclusion constraint, four partial unique indexes and
- * 43 CHECKs, none of which Prisma knows about. Mocking here would test nothing.
+ * test IS the database: a per-photographer exclusion constraint, composite
+ * foreign keys, partial unique indexes and dozens of CHECKs, none of which
+ * Prisma knows about. Mocking here would test nothing.
  *
- * They run against their own database, never the development one. Task 4 seeds
- * dev with the admin user and the working hours; a suite that truncates would
- * wipe them on every run.
+ * They run against their own database, never the development one. The seed
+ * fills dev with the platform admin, the platform settings and the categories;
+ * a suite that truncates would wipe them on every run.
  */
 export function testDatabaseUrl(): string {
   const explicit = process.env.TEST_DATABASE_URL;
@@ -36,7 +37,11 @@ export function databaseName(databaseUrl: string): string {
   return new URL(databaseUrl).pathname.replace(/^\//, '');
 }
 
-/** Every application table, children first, for TRUNCATE ... CASCADE. */
+/**
+ * Every application table the tests write, children first, for TRUNCATE ...
+ * CASCADE. Photographers sit below everything they own: their catalogue,
+ * calendar and bookings all reference them (marketplace-data-model.md §3.10).
+ */
 export const APPLICATION_TABLES = [
   // A booking's notes to its client (2026-09-25).
   'booking_note',
@@ -51,9 +56,22 @@ export const APPLICATION_TABLES = [
   'service',
   'availability_block',
   'working_hours',
-  'setting',
-  'admin_user',
+  'portfolio_image',
+  'photographer_category',
+  'photographer_district',
+  'category',
+  'photographer_setting',
+  'photographer',
+  'platform_setting',
+  'app_user',
 ] as const;
+
+/**
+ * Reference data the baseline migration inserts and NOTHING truncates: Rwanda's
+ * 30 districts (marketplace-data-model.md §3.4). Truncating it would leave every
+ * later test without districts, and no fixture re-creates them.
+ */
+export const REFERENCE_TABLES = ['district'] as const;
 
 export function connect(): pg.Client {
   return new pg.Client({ connectionString: testDatabaseUrl() });

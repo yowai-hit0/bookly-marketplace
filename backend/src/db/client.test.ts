@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { createPhotographer } from '../test/payment-fixtures.js';
 import { createPrismaClient } from './client.js';
 
 /**
@@ -33,11 +34,13 @@ beforeEach(async () => {
 });
 
 async function seedBooking(startsAt: Date, endsAt: Date, bufferEndsAt: Date, reference: string) {
+  const { photographerId } = await createPhotographer(prisma, { email: 'studio@example.com', handle: 'studio', displayName: 'Studio' });
   const service = await prisma.service.create({
-    data: { slug: 'portrait', nameEn: 'Portrait' },
+    data: { photographerId, slug: 'portrait', nameEn: 'Portrait' },
   });
   const pkg = await prisma.package.create({
     data: {
+      photographerId,
       serviceId: service.id,
       nameEn: 'Standard',
       priceRwf: 40000,
@@ -53,6 +56,7 @@ async function seedBooking(startsAt: Date, endsAt: Date, bufferEndsAt: Date, ref
     data: {
       reference,
       clientId: client.id,
+      photographerId,
       serviceId: service.id,
       packageId: pkg.id,
       contactName: 'Aline Uwase',
@@ -112,6 +116,7 @@ describe('the generated client', () => {
         locationText: 'Kigali Heights',
         bookingFeeRwf: 16000,
         clientId: first.clientId,
+        photographerId: first.photographerId,
         serviceId: first.serviceId,
         packageId: first.packageId,
         startsAt: TEN,

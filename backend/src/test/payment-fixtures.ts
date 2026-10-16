@@ -12,8 +12,8 @@ import type {
 } from '../payments/provider.js';
 
 /**
- * Fixtures for the payment tests (plan.md Tasks 16 and 17). Imported by tests
- * only.
+ * Fixtures for the payment tests (plan.md Tasks 16 and 17), and the world most
+ * other suites book in. Imported by tests only.
  *
  * Bookings are written directly, bypassing the claim, in whatever state a test
  * needs. A hold is stamped on the DATABASE clock (`now() + n minutes`), exactly
@@ -24,7 +24,20 @@ import type {
  */
 
 export const TEST_SECRET = 'payments-test-secret-that-is-at-least-32-chars';
+/**
+ * The world photographer's login. The name predates the marketplace, when the
+ * one admin WAS the photographer; it is kept so the suites that address mail to
+ * the photographer keep reading the same.
+ */
 export const ADMIN_EMAIL = 'photographer@bookly.example';
+export const PHOTOGRAPHER_EMAIL = ADMIN_EMAIL;
+export const PHOTOGRAPHER_HANDLE = 'kigali-lens';
+export const PHOTOGRAPHER_NAME = 'Kigali Lens';
+/** The platform admin seedWorld creates by default: the recipient of alerts that concern no booking. */
+export const PLATFORM_ADMIN_EMAIL = 'platform@bookly.example';
+/** The second photographer of the isolation tests (seedSecondPhotographer). */
+export const SECOND_PHOTOGRAPHER_EMAIL = 'second.photographer@bookly.example';
+export const SECOND_PHOTOGRAPHER_HANDLE = 'hills-and-light';
 export const API_ORIGIN = 'https://api.bookly.example';
 export const MTN_BASE_URL = 'https://mtn.test';
 export const MINUTE_MS = 60_000;
@@ -40,29 +53,104 @@ export const CLIENT = {
 } as const;
 
 export type PaymentWorld = {
+  /** The approved photographer who owns everything below. */
+  photographerId: string;
+  /** Their `app_user` login, role photographer. */
+  photographerUserId: string;
   serviceId: string;
   packageId: string;
   /** Portraits' own, 10,000 RWF, sort order 2. */
   ownAddonId: string;
-  /** Shared, 5,000 RWF, sort order 0. */
+  /** Shared across this photographer's services, 5,000 RWF, sort order 0. */
   sharedAddonId: string;
+  /** Platform-global (marketplace-data-model.md §2.8): every photographer's world shares it. */
   clientId: string;
 };
 
-/** Settings, the photographer's account, one service, one package, two add-ons, one client. */
-export async function seedWorld(prisma: PrismaClient, options: { admin?: boolean } = {}): Promise<PaymentWorld> {
-  await prisma.setting.create({ data: { id: 1 } });
-  if (options.admin ?? true) {
-    await prisma.adminUser.create({ data: { email: ADMIN_EMAIL, passwordHash: 'not-a-real-hash' } });
+export type WorldOptions = {
+  /**
+   * Also create a `platform_admin` login (PLATFORM_ADMIN_EMAIL), which receives
+   * the alerts that concern no booking (brief decision 6). Default true.
+   */
+  platformAdmin?: boolean;
+  /**
+   * @deprecated Before the marketplace this skipped the one admin account. A
+   * booking's photographer always has a login now, so it only skips the
+   * platform admin, as `platformAdmin: false` does.
+   */
+  admin?: boolean;
+};
+
+/**
+ * The platform settings row, one approved photographer with their login and
+ * settings row, their catalogue (one service, one package, two add-ons), one
+ * client and, by default, a platform admin.
+ */
+export async function seedWorld(prisma: PrismaClient, options: WorldOptions = {}): Promise<PaymentWorld> {
+  await prisma.platformSetting.create({ data: { id: 1 } });
+  if (options.platformAdmin ?? options.admin ?? true) {
+    await prisma.appUser.create({ data: { email: PLATFORM_ADMIN_EMAIL, role: 'platform_admin', passwordHash: 'not-a-real-hash' } });
   }
-  const service = await prisma.service.create({ data: { slug: 'portraits', nameEn: 'Portraits' } });
-  const pkg = await prisma.package.create({
-    data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 25, durationMinutes: 90 },
-  });
-  const ownAddon = await prisma.addon.create({ data: { serviceId: service.id, nameEn: 'Extra hour', priceRwf: 10_000, sortOrder: 2 } });
-  const sharedAddon = await prisma.addon.create({ data: { serviceId: null, nameEn: 'Rush edit', priceRwf: 5_000, sortOrder: 0 } });
+  const photographer = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: PHOTOGRAPHER_NAME });
   const client = await prisma.client.create({ data: { fullName: CLIENT.name, email: CLIENT.email, phone: CLIENT.phone } });
-  return { serviceId: service.id, packageId: pkg.id, ownAddonId: ownAddon.id, sharedAddonId: sharedAddon.id, clientId: client.id };
+  return { ...photographer, ...(await createCatalogue(prisma, photographer.photographerId)), clientId: client.id };
+}
+
+/**
+ * A second approved photographer with a catalogue of the same shape -- the same
+ * `portraits` slug included, which is unique per photographer, not globally --
+ * sharing the first world's client. For the isolation tests (T1.2-T1.4):
+ * `insertBooking(prisma, second)` books this photographer.
+ */
+export async function seedSecondPhotographer(
+  prisma: PrismaClient,
+  world: PaymentWorld,
+  options: { email?: string; handle?: string; displayName?: string } = {},
+): Promise<PaymentWorld> {
+  const photographer = await createPhotographer(prisma, {
+    email: options.email ?? SECOND_PHOTOGRAPHER_EMAIL,
+    handle: options.handle ?? SECOND_PHOTOGRAPHER_HANDLE,
+    displayName: options.displayName ?? 'Hills & Light',
+  });
+  return { ...photographer, ...(await createCatalogue(prisma, photographer.photographerId)), clientId: world.clientId };
+}
+
+/**
+ * A `photographer` login, its approved photographer and the photographer's
+ * settings row at the schema defaults (fee 40%, lead 120, buffer 30, expiry 90,
+ * cancel any time, fee not refundable) -- what approval leaves behind.
+ */
+export async function createPhotographer(
+  prisma: PrismaClient,
+  { email, handle, displayName, status = 'approved' }: { email: string; handle: string; displayName: string; status?: 'pending' | 'approved' | 'suspended' },
+): Promise<{ photographerId: string; photographerUserId: string }> {
+  const user = await prisma.appUser.create({ data: { email, role: 'photographer', passwordHash: 'not-a-real-hash', emailVerifiedAt: new Date('2026-09-01T06:00:00Z') } });
+  const photographer = await prisma.photographer.create({
+    data: {
+      userId: user.id,
+      handle,
+      displayName,
+      status,
+      ...(status === 'approved' ? { approvedAt: new Date('2026-09-02T06:00:00Z') } : {}),
+      ...(status === 'suspended' ? { suspendedAt: new Date('2026-09-03T06:00:00Z') } : {}),
+      setting: { create: {} },
+    },
+  });
+  return { photographerId: photographer.id, photographerUserId: user.id };
+}
+
+/** One service, one package and two add-ons (one the service's own, one shared), owned by `photographerId`. */
+async function createCatalogue(
+  prisma: PrismaClient,
+  photographerId: string,
+): Promise<Pick<PaymentWorld, 'serviceId' | 'packageId' | 'ownAddonId' | 'sharedAddonId'>> {
+  const service = await prisma.service.create({ data: { photographerId, slug: 'portraits', nameEn: 'Portraits' } });
+  const pkg = await prisma.package.create({
+    data: { photographerId, serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 25, durationMinutes: 90 },
+  });
+  const ownAddon = await prisma.addon.create({ data: { photographerId, serviceId: service.id, nameEn: 'Extra hour', priceRwf: 10_000, sortOrder: 2 } });
+  const sharedAddon = await prisma.addon.create({ data: { photographerId, serviceId: null, nameEn: 'Rush edit', priceRwf: 5_000, sortOrder: 0 } });
+  return { serviceId: service.id, packageId: pkg.id, ownAddonId: ownAddon.id, sharedAddonId: sharedAddon.id };
 }
 
 let referenceCounter = 0;
@@ -117,6 +205,7 @@ export async function insertBooking(prisma: PrismaClient, world: PaymentWorld, s
     data: {
       reference: seed.reference ?? nextReference(),
       clientId: world.clientId,
+      photographerId: world.photographerId,
       contactName: CLIENT.name,
       contactEmail: CLIENT.email,
       contactPhone: CLIENT.phone,

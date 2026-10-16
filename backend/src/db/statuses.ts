@@ -1,6 +1,7 @@
 /**
  * The booking status vocabulary, in code, so the exclusion constraint's
- * predicate can be asserted against it (data-model_v2.md 7.1).
+ * predicate can be asserted against it (data-model_v2.md 7.1, marketplace-data-model.md
+ * §2.9).
  *
  * This is not decoration. Adding a status to the database CHECK without adding
  * it to OCCUPYING_STATUSES -- or to the constraint predicate -- would silently
@@ -15,7 +16,11 @@ export const BOOKING_STATUSES = [
   'no_show',
   'expired',
   'cancelled_by_client',
-  'cancelled_by_admin',
+  // Was `cancelled_by_admin` before the marketplace: the photographer cancelled.
+  'cancelled_by_photographer',
+  // A platform admin cancelled one booking (marketplace-data-model.md §2.9). Like
+  // the photographer's own cancellation it frees the slot and refunds in full.
+  'cancelled_by_platform',
 ] as const;
 
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];

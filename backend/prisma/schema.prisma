@@ -1,9 +1,11 @@
-// Bookly — storage. Behaviour is specs_v2.md; this file is data-model_v2.md.
+// Bookly Marketplace -- storage. Behaviour is marketplace-spec.md; this file is
+// marketplace-data-model.md, which expands data-model_v2.md (rules it does not
+// restate still hold there).
 //
 // Prisma owns the tables, columns, relations and plain indexes. It owns NONE of
-// the guarantees. Every rule that protects the business — the exclusion
-// constraint above all — lives in hand-edited migration SQL and Prisma is
-// unaware of it (data-model_v2.md §2.1). Three rules follow from that:
+// the guarantees. Every rule that protects the business -- the per-photographer
+// exclusion constraint above all -- lives in hand-edited migration SQL and
+// Prisma is unaware of it (data-model_v2.md §2.1). Three rules follow from that:
 //
 //   1. `prisma migrate dev --create-only`, then edit the SQL before applying.
 //   2. `prisma db push` is FORBIDDEN in every environment. It reconciles the
@@ -11,6 +13,11 @@
 //      booking.
 //   3. A schema test asserts the constraints still exist. Prisma cannot tell
 //      you they went missing; a query against pg_constraint can.
+//
+// Phase 1 (marketplace-spec.md) models the photographer and the per-photographer
+// separation. Subscriptions, payouts and the subscription payment columns are
+// NOT here yet: later phases add them as incremental migrations
+// (marketplace-data-model.md §5).
 
 generator client {
   provider = "prisma-client-js"
@@ -22,81 +29,262 @@ datasource db {
 
 // --- Identity & configuration ------------------------------------------------
 
-/// One row. The photographer. No TOTP, no session epoch (data-model_v2.md §5.1).
-model AdminUser {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  /// Unique on lower(email) — a functional index in migration SQL.
-  email String
-  /// Argon2id. Never logged, never serialised by any endpoint.
-  passwordHash           String    @map("password_hash")
+/// Every login: a platform admin, a photographer or a client (marketplace-data-model.md
+/// §3.1). One role per login. `user` is reserved in PostgreSQL, hence `app_user`.
+model AppUser {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Unique on lower(email) -- a functional index in migration SQL.
+  email                  String
+  /// platform_admin | photographer | client. CHECK app_user_role_allowed.
+  role                   String
+  fullName               String?   @map("full_name")
+  /// Argon2id. Never logged, never serialised by any endpoint. Nullable BECAUSE a
+  /// Google-only client has none (R2.4); CHECK app_user_has_credential keeps at
+  /// least one of this and google_sub.
+  passwordHash           String?   @map("password_hash")
+  /// Google's stable subject id. Clients only (CHECK app_user_google_client_only);
+  /// partial unique WHERE NOT NULL.
+  googleSub              String?   @map("google_sub")
+  /// A client account links to `client` rows only after this is set (§2.8).
+  emailVerifiedAt        DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  /// Single-use, hashed. Hash and expiry both set or both null (CHECK).
+  emailVerifyTokenHash   String?   @map("email_verify_token_hash")
+  emailVerifyExpiresAt   DateTime? @map("email_verify_expires_at") @db.Timestamptz(6)
   failedLoginCount       Int       @default(0) @map("failed_login_count")
   /// Rising lockout (spec §6.23).
   lockedUntil            DateTime? @map("locked_until") @db.Timestamptz(6)
-  /// Single-use, hashed, cleared on use.
+  /// Single-use, hashed, cleared on use. Partial unique WHERE NOT NULL: with many
+  /// users a token hash must address exactly one row.
   passwordResetTokenHash String?   @map("password_reset_token_hash")
   passwordResetExpiresAt DateTime? @map("password_reset_expires_at") @db.Timestamptz(6)
   lastLoginAt            DateTime? @map("last_login_at") @db.Timestamptz(6)
+  /// A platform admin switched this login off.
+  disabledAt             DateTime? @map("disabled_at") @db.Timestamptz(6)
+  /// Erasure ran (data-model_v2.md §10.2).
+  anonymizedAt           DateTime? @map("anonymized_at") @db.Timestamptz(6)
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@map("admin_user")
+  /// Set only for role = photographer; the signup transaction enforces the role.
+  photographer          Photographer?  @relation("PhotographerOwner")
+  approvedPhotographers Photographer[] @relation("PhotographerApprovedBy")
+  clients               Client[]
+
+  @@map("app_user")
 }
 
-/// One row, CHECK (id = 1). The five editable operating values (spec P-30).
-/// `payment_provider` is deliberately absent — provider selection is an
-/// environment variable read at boot (data-model_v2.md §5.2). Slot granularity
-/// and access-token lifetime are application constants, not rows.
-model Setting {
-  id                 Int      @id @default(1)
-  bookingFeeRate     Decimal  @default(0.400) @map("booking_fee_rate") @db.Decimal(4, 3)
-  minLeadTimeMinutes Int      @default(120) @map("min_lead_time_minutes")
-  holdMinutes        Int      @default(30) @map("hold_minutes")
-  bufferMinutes      Int      @default(30) @map("buffer_minutes")
-  deliveryExpiryDays Int      @default(90) @map("delivery_expiry_days")
-  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+/// One row, CHECK (id = 1). What belongs to the payment infrastructure rather
+/// than to any photographer (marketplace-data-model.md §2.2). The subscription
+/// plan's prices, grace and reminder days arrive with Phase 5.
+model PlatformSetting {
+  id          Int      @id @default(1)
+  /// The checkout hold. Must stay inside the reconciler window
+  /// (payments/reconcile.ts, 60 minutes) and match how long MoMo prompts last.
+  holdMinutes Int      @default(30) @map("hold_minutes")
+  /// The free trial a photographer gets at approval (marketplace-spec.md decisions).
+  trialDays   Int      @default(30) @map("trial_days")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@map("setting")
+  @@map("platform_setting")
+}
+
+/// The photographer's operating values (spec P-30, now per photographer). A
+/// table of its own rather than columns on `photographer`, so the public profile
+/// row carries nothing private and `settings/repository.ts` stays the only code
+/// that touches these values (marketplace-data-model.md §2.2). Created in the
+/// same transaction as its photographer.
+model PhotographerSetting {
+  photographerId                     String   @id @map("photographer_id") @db.Uuid
+  bookingFeeRate                     Decimal  @default(0.400) @map("booking_fee_rate") @db.Decimal(4, 3)
+  minLeadTimeMinutes                 Int      @default(120) @map("min_lead_time_minutes")
+  /// Snapshotted into booking.buffer_ends_at at creation.
+  bufferMinutes                      Int      @default(30) @map("buffer_minutes")
+  deliveryExpiryDays                 Int      @default(90) @map("delivery_expiry_days")
+  /// A client may cancel until starts_at minus this many hours. 0 = any time
+  /// before the shoot, the single-photographer behaviour (R1.8).
+  clientCancelCutoffHours            Int      @default(0) @map("client_cancel_cutoff_hours")
+  /// Whether a client's own cancellation marks the booking fee refund_due (R1.8).
+  /// A photographer cancelling always refunds in full, whatever this says.
+  bookingFeeRefundableOnClientCancel Boolean  @default(false) @map("booking_fee_refundable_on_client_cancel")
+  updatedAt                          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Cascade)
+
+  @@map("photographer_setting")
+}
+
+// --- Photographers -----------------------------------------------------------
+
+/// The tenant. Every studio row hangs off one of these (marketplace-data-model.md
+/// §3.3). Bookable in Phase 1 iff status = 'approved' (photographers/bookable.ts);
+/// Phase 5 adds the subscription check there.
+model Photographer {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Must be a role = photographer user; enforced in the signup transaction.
+  userId           String    @unique @map("user_id") @db.Uuid
+  /// /p/<handle>. Lowercase, 3-30 characters, by CHECK photographer_handle_format.
+  handle           String    @unique
+  displayName      String    @map("display_name")
+  bio              String?
+  contactPhone     String?   @map("contact_phone")
+  whatsappPhone    String?   @map("whatsapp_phone")
+  /// The public contact address, and the reply-to on booking emails when set.
+  contactEmail     String?   @map("contact_email")
+  /// A pasted https URL. No upload pipeline and no blob store.
+  coverImageUrl    String?   @map("cover_image_url")
+  /// pending | approved | suspended. Suspension keeps existing bookings.
+  status           String    @default("pending")
+  /// Set by the setup checklist (R7.3).
+  submittedAt      DateTime? @map("submitted_at") @db.Timestamptz(6)
+  approvedAt       DateTime? @map("approved_at") @db.Timestamptz(6)
+  approvedByUserId String?   @map("approved_by_user_id") @db.Uuid
+  suspendedAt      DateTime? @map("suspended_at") @db.Timestamptz(6)
+  suspensionReason String?   @map("suspension_reason")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user               AppUser                @relation("PhotographerOwner", fields: [userId], references: [id], onDelete: Restrict)
+  approvedBy         AppUser?               @relation("PhotographerApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  setting            PhotographerSetting?
+  districts          PhotographerDistrict[]
+  categories         PhotographerCategory[]
+  portfolioImages    PortfolioImage[]
+  workingHours       WorkingHours[]
+  availabilityBlocks AvailabilityBlock[]
+  services           Service[]
+  packages           Package[]
+  addons             Addon[]
+  bookings           Booking[]
+  outbox             Outbox[]
+
+  @@index([status])
+  @@map("photographer")
+}
+
+/// Rwanda's 30 districts, inserted BY THE MIGRATION, never by a seed: a
+/// reference vocabulary, not data (marketplace-data-model.md §3.4).
+model District {
+  /// e.g. 'gasabo'.
+  code      String @id
+  name      String
+  /// kigali | eastern | northern | southern | western. CHECK district_province_allowed.
+  province  String
+  sortOrder Int    @default(0) @map("sort_order")
+
+  photographers PhotographerDistrict[]
+
+  @@map("district")
+}
+
+/// Where a photographer works. The directory filters on it (R6).
+model PhotographerDistrict {
+  photographerId String @map("photographer_id") @db.Uuid
+  districtCode   String @map("district_code")
+
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Cascade)
+  district     District     @relation(fields: [districtCode], references: [code], onDelete: Restrict)
+
+  @@id([photographerId, districtCode])
+  @@index([districtCode, photographerId])
+  @@map("photographer_district")
+}
+
+/// Platform-curated (wedding, portrait, ...). The seed creates the starters.
+model Category {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// CHECK category_slug_format.
+  slug      String   @unique
+  nameEn    String   @map("name_en")
+  nameFr    String?  @map("name_fr")
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  photographers PhotographerCategory[]
+
+  @@map("category")
+}
+
+/// What a photographer shoots. A category in use cannot be deleted (Restrict);
+/// the platform deactivates it instead.
+model PhotographerCategory {
+  photographerId String @map("photographer_id") @db.Uuid
+  categoryId     String @map("category_id") @db.Uuid
+
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Cascade)
+  category     Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@id([photographerId, categoryId])
+  @@index([categoryId, photographerId])
+  @@map("photographer_category")
+}
+
+/// Pasted https URLs only (CHECK); at most 24 per photographer, enforced in the app.
+model PortfolioImage {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId String   @map("photographer_id") @db.Uuid
+  url            String
+  caption        String?
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Cascade)
+
+  @@index([photographerId, sortOrder])
+  @@map("portfolio_image")
 }
 
 // --- Availability ------------------------------------------------------------
 
 /// Both the recurring weekly rule and dated overrides. A dated row wins over the
-/// weekday row for its date, in either direction (data-model_v2.md §5.3) — this
-/// is what opens a single Saturday without a migration (R-4).
+/// weekday row for its date, in either direction (data-model_v2.md §5.3) -- this
+/// is what opens a single Saturday without a migration (R-4). Both partial
+/// uniques lead with photographer_id: one rule per weekday and one override per
+/// date, PER PHOTOGRAPHER (marketplace-data-model.md §2.3).
 model WorkingHours {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId String    @map("photographer_id") @db.Uuid
   /// 0 = Sunday ... 6 = Saturday. Set for a recurring rule.
-  weekday Int?
+  weekday        Int?
   /// Set for a one-off override of a single date. Never both (CHECK).
-  effectiveDate DateTime? @map("effective_date") @db.Date
+  effectiveDate  DateTime? @map("effective_date") @db.Date
   /// Minutes since midnight, Kigali wall time. 09:00 = 540. Integers rather
   /// than `time`, which Prisma maps to a Date with a meaningless date part.
-  opensMinute Int? @map("opens_minute")
+  opensMinute    Int?      @map("opens_minute")
   /// 17:00 = 1020.
-  closesMinute Int? @map("closes_minute")
+  closesMinute   Int?      @map("closes_minute")
   /// false + effective_date = closed that date entirely.
-  isOpen    Boolean  @default(true) @map("is_open")
-  note      String?
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isOpen         Boolean   @default(true) @map("is_open")
+  note           String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Configuration only: it goes with its photographer.
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Cascade)
 
   @@map("working_hours")
 }
 
 /// Subtractive, arbitrary ranges. Blocks may overlap each other and may overlap
-/// bookings — overlap is information, not an error (spec §6.4). A multi-day
-/// absence is one row, not one row per day.
+/// bookings -- overlap is information, not an error (spec §6.4). A multi-day
+/// absence is one row, not one row per day. The GiST range index leads with
+/// photographer_id, which needs btree_gist (marketplace-data-model.md §2.4).
 model AvailabilityBlock {
-  id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  startsAt DateTime @map("starts_at") @db.Timestamptz(6)
-  endsAt   DateTime @map("ends_at") @db.Timestamptz(6)
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId String   @map("photographer_id") @db.Uuid
+  startsAt       DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt         DateTime @map("ends_at") @db.Timestamptz(6)
   /// Presentation only. The stored range is absolute, so availability logic
   /// never special-cases it.
-  isAllDay Boolean @default(false) @map("is_all_day")
+  isAllDay       Boolean  @default(false) @map("is_all_day")
   /// Private (spec P-03). Never serialised to a public endpoint.
-  reason    String?
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  reason         String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Configuration only: it goes with its photographer.
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Cascade)
 
   @@map("availability_block")
 }
@@ -104,37 +292,48 @@ model AvailabilityBlock {
 // --- Catalogue ---------------------------------------------------------------
 
 model Service {
-  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  slug          String  @unique
-  nameEn        String  @map("name_en")
-  nameFr        String? @map("name_fr")
-  descriptionEn String? @map("description_en")
-  descriptionFr String? @map("description_fr")
-  /// A URL the admin pastes. No upload pipeline and no blob store.
-  coverImageUrl String? @map("cover_image_url")
-  /// null = use setting.booking_fee_rate (spec A-4).
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId String  @map("photographer_id") @db.Uuid
+  /// Unique per photographer, not globally: /p/<handle>/<slug>. CHECK
+  /// service_slug_format keeps it URL-safe.
+  slug           String
+  nameEn         String  @map("name_en")
+  nameFr         String? @map("name_fr")
+  descriptionEn  String? @map("description_en")
+  descriptionFr  String? @map("description_fr")
+  /// A URL the photographer pastes. No upload pipeline and no blob store.
+  coverImageUrl  String? @map("cover_image_url")
+  /// null = use photographer_setting.booking_fee_rate (spec A-4).
   bookingFeeRateOverride Decimal? @map("booking_fee_rate_override") @db.Decimal(4, 3)
   isActive               Boolean  @default(true) @map("is_active")
   sortOrder              Int      @default(0) @map("sort_order")
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  packages Package[]
-  addons   Addon[]
-  bookings Booking[]
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  packages     Package[]
+  addons       Addon[]
+  bookings     Booking[]
 
+  @@unique([photographerId, slug])
+  /// The target of the composite foreign keys that keep a package's or a
+  /// booking's service inside the same photographer (marketplace-data-model.md §2.5).
+  @@unique([id, photographerId])
   @@map("service")
 }
 
 model Package {
-  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  serviceId     String  @map("service_id") @db.Uuid
-  nameEn        String  @map("name_en")
-  nameFr        String? @map("name_fr")
-  descriptionEn String? @map("description_en")
-  descriptionFr String? @map("description_fr")
-  priceRwf      Int     @map("price_rwf")
-  photoCount    Int     @map("photo_count")
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  serviceId       String   @map("service_id") @db.Uuid
+  /// Always the service's photographer: the composite foreign key below refuses
+  /// anything else (marketplace-data-model.md §2.6).
+  photographerId  String   @map("photographer_id") @db.Uuid
+  nameEn          String   @map("name_en")
+  nameFr          String?  @map("name_fr")
+  descriptionEn   String?  @map("description_en")
+  descriptionFr   String?  @map("description_fr")
+  priceRwf        Int      @map("price_rwf")
+  photoCount      Int      @map("photo_count")
   /// Drives slot length and booking.ends_at. A package longer than the widest
   /// open window can never produce a slot (spec §6.8).
   durationMinutes Int      @map("duration_minutes")
@@ -143,72 +342,91 @@ model Package {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  service  Service   @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  bookings Booking[]
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  service      Service      @relation(fields: [serviceId, photographerId], references: [id, photographerId], onDelete: Restrict)
+  bookings     Booking[]
 
+  @@unique([id, photographerId])
   @@index([serviceId])
   @@map("package")
 }
 
 model Addon {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  /// null = offered on every service.
-  serviceId String?  @map("service_id") @db.Uuid
-  nameEn    String   @map("name_en")
-  nameFr    String?  @map("name_fr")
-  priceRwf  Int      @map("price_rwf")
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId String   @map("photographer_id") @db.Uuid
+  /// null = offered on every service OF THIS PHOTOGRAPHER. A simple foreign key,
+  /// because Prisma rejects a composite relation mixing optional and required
+  /// fields; the write paths check the service's photographer instead
+  /// (marketplace-data-model.md §2.7).
+  serviceId      String?  @map("service_id") @db.Uuid
+  nameEn         String   @map("name_en")
+  nameFr         String?  @map("name_fr")
+  priceRwf       Int      @map("price_rwf")
+  isActive       Boolean  @default(true) @map("is_active")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  photographer  Photographer   @relation(fields: [photographerId], references: [id], onDelete: Restrict)
   service       Service?       @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   bookingAddons BookingAddon[]
 
+  @@index([photographerId])
   @@index([serviceId])
   @@map("addon")
 }
 
 // --- Booking -----------------------------------------------------------------
 
-/// A dedupe and linking record. NOT an account: it holds no credential and
-/// grants no access. These fields are *current* values, used to prefill a
-/// returning client's form; what a booking was made with lives on the booking.
+/// A dedupe and linking record, platform-global across photographers. It holds
+/// no credential and grants no access; an account links to it through user_id.
+/// These fields are *current* values, used to prefill a returning client's form;
+/// what a booking was made with lives on the booking. Photographers never see
+/// this row, only the booking's contact_* snapshots (R1.6).
 model Client {
-  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  fullName String @map("full_name")
-  /// Unique on lower(email) — a functional index in migration SQL.
-  email String
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fullName     String    @map("full_name")
+  /// Unique on lower(email) -- a functional index in migration SQL. Global, not
+  /// per photographer.
+  email        String
   /// Latest known number. Nullable BECAUSE erasure nulls it (§10.2); as NOT NULL
   /// every erasure raised 23502.
   phone        String?
+  /// The verified client account this record belongs to. NOT unique: one user
+  /// can own several rows after an email change (marketplace-data-model.md §2.8).
+  userId       String?   @map("user_id") @db.Uuid
   anonymizedAt DateTime? @map("anonymized_at") @db.Timestamptz(6)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  user     AppUser?  @relation(fields: [userId], references: [id], onDelete: SetNull)
   bookings Booking[]
 
+  @@index([userId])
   @@map("client")
 }
 
 /// Wide and flat by design: it absorbs the delivery record and the access token,
 /// both strictly 1:1 and lifecycle-bound (data-model_v2.md §5.9).
 model Booking {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id             String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   /// BKY-YYMM-XXXXX, Crockford base32. The id never reaches a client-facing URL;
   /// the access token addresses the booking.
-  reference String @unique
-  clientId  String @map("client_id") @db.Uuid
+  reference      String @unique
+  clientId       String @map("client_id") @db.Uuid
+  /// Resolved on the server from the package, never taken from the request body.
+  /// The composite foreign keys below hold the service and package to it.
+  photographerId String @map("photographer_id") @db.Uuid
 
-  // Contact — snapshotted, so changing a client's phone never rewrites history.
+  // Contact -- snapshotted, so changing a client's phone never rewrites history.
   contactName  String @map("contact_name")
   /// Every email for this booking goes here, not to the live client row.
   contactEmail String @map("contact_email")
   contactPhone String @map("contact_phone")
   /// Language of every message for this booking. en | fr.
-  locale String @default("en")
+  locale       String @default("en")
 
-  // Catalogue and snapshots — editing a price never changes a booking (§6.13).
+  // Catalogue and snapshots -- editing a price never changes a booking (§6.13).
   serviceId              String @map("service_id") @db.Uuid
   packageId              String @map("package_id") @db.Uuid
   serviceNameSnapshot    String @map("service_name_snapshot")
@@ -219,46 +437,49 @@ model Booking {
   packagePhotoCount      Int    @map("package_photo_count")
 
   // Schedule
-  status   String   @default("pending_payment")
-  startsAt DateTime @map("starts_at") @db.Timestamptz(6)
+  /// pending_payment | confirmed | completed | no_show | expired |
+  /// cancelled_by_client | cancelled_by_photographer | cancelled_by_platform
+  status           String    @default("pending_payment")
+  startsAt         DateTime  @map("starts_at") @db.Timestamptz(6)
   /// = starts_at + package_duration_minutes
-  endsAt DateTime @map("ends_at") @db.Timestamptz(6)
-  /// = ends_at + setting.buffer_minutes AT CREATION. This is the column the
-  /// exclusion constraint ranges over. Snapshotted so changing the setting never
-  /// moves existing reservations; recomputed on reschedule from the new ends_at.
-  bufferEndsAt DateTime @map("buffer_ends_at") @db.Timestamptz(6)
-  /// now() + hold_minutes at creation; nulled on confirmation.
-  holdExpiresAt DateTime? @map("hold_expires_at") @db.Timestamptz(6)
+  endsAt           DateTime  @map("ends_at") @db.Timestamptz(6)
+  /// = ends_at + photographer_setting.buffer_minutes AT CREATION. This is the
+  /// column the exclusion constraint ranges over, per photographer. Snapshotted
+  /// so changing the setting never moves existing reservations; recomputed on
+  /// reschedule from the new ends_at.
+  bufferEndsAt     DateTime  @map("buffer_ends_at") @db.Timestamptz(6)
+  /// = now() + platform_setting.hold_minutes at creation; nulled on confirmation.
+  holdExpiresAt    DateTime? @map("hold_expires_at") @db.Timestamptz(6)
   /// Written on the FIRST reschedule only, so the originally agreed time
   /// survives repeated moves.
   originalStartsAt DateTime? @map("original_starts_at") @db.Timestamptz(6)
   /// Most recent move.
-  rescheduledAt DateTime? @map("rescheduled_at") @db.Timestamptz(6)
+  rescheduledAt    DateTime? @map("rescheduled_at") @db.Timestamptz(6)
 
   // Details
-  locationText String @map("location_text")
+  locationText    String   @map("location_text")
   /// Null is legitimate for a product shoot.
-  partySize       Int?    @map("party_size")
-  specialRequests String? @map("special_requests")
+  partySize       Int?     @map("party_size")
+  specialRequests String?  @map("special_requests")
   /// When the client ticked the consent box. Law N° 058/2021 requires consent to
   /// be demonstrable, not merely collected. Survives erasure (§10.2).
-  consentAt DateTime @map("consent_at") @db.Timestamptz(6)
+  consentAt       DateTime @map("consent_at") @db.Timestamptz(6)
 
-  // Money quote — frozen at creation. There is no total_rwf and no
+  // Money quote -- frozen at creation. There is no total_rwf and no
   // session_fee_rwf; both are derived by bookingTotals() (§6.1).
-  /// Resolved at creation: service override, else global.
+  /// Resolved at creation: service override, else photographer_setting.booking_fee_rate.
   bookingFeeRate Decimal @map("booking_fee_rate") @db.Decimal(4, 3)
   /// round(quoted_total * booking_fee_rate). The quote the client accepted.
-  bookingFeeRwf Int @map("booking_fee_rwf")
+  bookingFeeRwf  Int     @map("booking_fee_rwf")
 
   // Lifecycle
-  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
-  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
-  cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(6)
-  /// Shown to the client when the admin cancels.
-  cancellationReason String? @map("cancellation_reason")
+  confirmedAt        DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  completedAt        DateTime? @map("completed_at") @db.Timestamptz(6)
+  cancelledAt        DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  /// Shown to the client when the photographer or the platform cancels.
+  cancellationReason String?   @map("cancellation_reason")
 
-  // Access — folded from v1's booking_access_token. SHA-256 of a >=128-bit
+  // Access -- folded from v1's booking_access_token. SHA-256 of a >=128-bit
   // random token; the plaintext exists only in the email. Resending overwrites
   // this hash, which invalidates the previous link (spec §6.21).
   accessTokenHash       String?   @unique @map("access_token_hash")
@@ -272,16 +493,16 @@ model Booking {
   pendingEmailTokenHash String?   @map("pending_email_token_hash")
   pendingEmailExpiresAt DateTime? @map("pending_email_expires_at") @db.Timestamptz(6)
 
-  // Delivery — folded from v1's delivery table. No download tracking exists:
+  // Delivery -- folded from v1's delivery table. No download tracking exists:
   // under hybrid delivery the files sit on a third party (§5.9).
   /// The external host's link. CHECK-constrained to https.
-  deliveryUrl String? @map("delivery_url")
+  deliveryUrl       String?   @map("delivery_url")
   /// Defaults to today + delivery_expiry_days when first set. End-of-day Kigali.
   deliveryExpiresOn DateTime? @map("delivery_expires_on") @db.Date
   /// Null until the delivery email goes out; a link can exist unsent.
-  deliverySentAt DateTime? @map("delivery_sent_at") @db.Timestamptz(6)
+  deliverySentAt    DateTime? @map("delivery_sent_at") @db.Timestamptz(6)
   /// Optional line in the delivery email; also holds the host name.
-  deliveryNote String? @map("delivery_note")
+  deliveryNote      String?   @map("delivery_note")
 
   /// The mirrored event. Retry state lives in outbox, not here.
   gcalEventId String? @map("gcal_event_id")
@@ -289,34 +510,43 @@ model Booking {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  client   Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
-  service  Service        @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  package  Package        @relation(fields: [packageId], references: [id], onDelete: Restrict)
-  addons   BookingAddon[]
-  payments Payment[]
-  outbox   Outbox[]
-  notes    BookingNote[]
+  client       Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  photographer Photographer   @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  /// Composite: the service must be this booking's photographer's (R1.2).
+  service      Service        @relation(fields: [serviceId, photographerId], references: [id, photographerId], onDelete: Restrict)
+  /// Composite: the package must be this booking's photographer's (R1.2).
+  package      Package        @relation(fields: [packageId, photographerId], references: [id, photographerId], onDelete: Restrict)
+  addons       BookingAddon[]
+  payments     Payment[]
+  outbox       Outbox[]
+  notes        BookingNote[]
 
+  /// Global jobs: the hold sweeper, reminders.
   @@index([status, startsAt])
+  /// The studio's calendar, list and availability.
+  @@index([photographerId, status, startsAt])
+  /// A client account, across photographers.
   @@index([clientId, startsAt(sort: Desc)])
+  @@index([photographerId, clientId, startsAt(sort: Desc)])
   @@index([serviceId])
   @@index([packageId])
   @@map("booking")
 }
 
+/// Scoped through its booking. That the add-on is the booking's photographer's is
+/// checked in the write paths (marketplace-data-model.md §2.7, R1.5).
 model BookingAddon {
-  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  bookingId String @map("booking_id") @db.Uuid
-  addonId   String @map("addon_id") @db.Uuid
-
-  nameSnapshot String @map("name_snapshot")
-  unitPriceRwf Int    @map("unit_price_rwf")
-  quantity     Int    @default(1)
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bookingId    String   @map("booking_id") @db.Uuid
+  addonId      String   @map("addon_id") @db.Uuid
+  nameSnapshot String   @map("name_snapshot")
+  unitPriceRwf Int      @map("unit_price_rwf")
+  quantity     Int      @default(1)
   /// CHECK-enforced as unit_price_rwf * quantity, so totals sum one column.
-  amountRwf Int @map("amount_rwf")
+  amountRwf    Int      @map("amount_rwf")
   /// at_booking | post_shoot
-  stage     String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  stage        String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   addon   Addon   @relation(fields: [addonId], references: [id], onDelete: Restrict)
@@ -329,40 +559,43 @@ model BookingAddon {
 // --- Money -------------------------------------------------------------------
 
 /// One row per collection attempt. Never edited except by its own state machine;
-/// never deleted. The system never moves money — no column here triggers a
-/// transfer (data-model_v2.md §5.11).
+/// never deleted. The system never moves money -- no column here triggers a
+/// transfer (data-model_v2.md §5.11). Deliberately no photographer_id: it is
+/// derivable through the booking (marketplace-data-model.md §2.11). The
+/// subscription columns of §2.11 arrive with Phase 5.
 model Payment {
-  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  bookingId String @map("booking_id") @db.Uuid
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bookingId       String    @map("booking_id") @db.Uuid
   /// booking_fee | session_fee
-  kind String
+  kind            String
   /// mtn_momo_direct | flutterwave | cash. Frozen at creation so records
   /// survive the cutover (spec §6.18). `cash` is money the photographer
-  /// recorded by hand (admin console fixes, item 7, 2026-09-27).
-  provider String
+  /// recorded by hand (admin console fixes, item 7, 2026-09-27), and is only
+  /// ever a session fee (CHECK payment_cash_is_session_fee).
+  provider        String
   /// OURS, generated before the provider is called. This is MTN's X-Reference-Id
   /// and Flutterwave's tx_ref. It exists from the first instant, so an attempt
   /// that never reaches the provider is still recorded.
-  ourRef String @unique @default(dbgenerated("gen_random_uuid()")) @map("our_ref") @db.Uuid
+  ourRef          String    @unique @default(dbgenerated("gen_random_uuid()")) @map("our_ref") @db.Uuid
   /// THEIRS, filled in when they answer. Partial unique WHERE NOT NULL.
-  providerRef String? @map("provider_ref")
+  providerRef     String?   @map("provider_ref")
   /// momo_mtn | momo_airtel | card. Null until the provider reports the choice.
-  method String?
-  /// Frozen at initiation — the contracted amount, and the reason nothing needs
+  method          String?
+  /// Frozen at initiation -- the contracted amount, and the reason nothing needs
   /// to lock a session fee. Gateway fees are absorbed and never modelled here.
-  amountRwf Int    @map("amount_rwf")
-  status    String @default("initiated")
+  amountRwf       Int       @map("amount_rwf")
+  status          String    @default("initiated")
   /// Provider decline text, for answering "why did my payment fail".
-  failureReason String?   @map("failure_reason")
-  initiatedAt   DateTime  @default(now()) @map("initiated_at") @db.Timestamptz(6)
-  settledAt     DateTime? @map("settled_at") @db.Timestamptz(6)
-  refundedAt    DateTime? @map("refunded_at") @db.Timestamptz(6)
-  /// MoMo/bank reference typed in by the admin (spec §6.16).
-  refundReference String?  @map("refund_reference")
+  failureReason   String?   @map("failure_reason")
+  initiatedAt     DateTime  @default(now()) @map("initiated_at") @db.Timestamptz(6)
+  settledAt       DateTime? @map("settled_at") @db.Timestamptz(6)
+  refundedAt      DateTime? @map("refunded_at") @db.Timestamptz(6)
+  /// MoMo/bank reference typed in by the photographer (spec §6.16).
+  refundReference String?   @map("refund_reference")
   /// What the photographer typed with a cash payment (1-500 characters).
   note            String?
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
@@ -372,26 +605,26 @@ model Payment {
 
 /// Every inbound provider callback, stored BEFORE it is interpreted. Matched to
 /// payment in application code, NOT by a foreign key: an event can arrive that
-/// matches no payment — a stray callback, a spoofed post, another environment —
+/// matches no payment -- a stray callback, a spoofed post, another environment --
 /// and it must still be stored and inspectable rather than rejected.
 model WebhookEvent {
-  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider String
-  /// The provider's own event id. Unique with provider — THIS, not provider_ref,
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider        String
+  /// The provider's own event id. Unique with provider -- THIS, not provider_ref,
   /// is what makes delivery idempotent (fix #4).
-  eventId String @map("event_id")
+  eventId         String    @map("event_id")
   /// Provider's raw type string.
-  eventType String @map("event_type")
+  eventType       String    @map("event_type")
   /// Parsed from the payload; the primary match key onto payment.
-  ourRef String? @map("our_ref") @db.Uuid
+  ourRef          String?   @map("our_ref") @db.Uuid
   /// Secondary match key.
-  providerRef String? @map("provider_ref")
+  providerRef     String?   @map("provider_ref")
   /// The payment status this event asserts, normalised to our vocabulary.
-  reportedStatus String? @map("reported_status")
+  reportedStatus  String?   @map("reported_status")
   /// Stored, not assumed. Events failing verification are recorded, not applied.
-  signatureValid Boolean @map("signature_valid")
+  signatureValid  Boolean   @map("signature_valid")
   /// Verbatim body, for dispute evidence. Nullable BECAUSE erasure nulls it.
-  payload Json? @db.JsonB
+  payload         Json?     @db.JsonB
   /// received | applied | ignored | failed. `ignored` is a first-class outcome.
   status          String    @default("received")
   processingError String?   @map("processing_error")
@@ -408,6 +641,7 @@ model WebhookEvent {
 /// A note the photographer writes to a client (2026-09-25): shown on the
 /// client's booking page, and emailed when asked. Deleting sets `deleted_at`,
 /// which hides it from the client and keeps the row. CHECK: 1-1000 characters.
+/// Authorised through booking.photographer_id (marketplace-data-model.md §2.13).
 model BookingNote {
   id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   bookingId String    @map("booking_id") @db.Uuid
@@ -423,39 +657,46 @@ model BookingNote {
 }
 
 /// One queue and one audit trail for everything the system sends. Replaces v1's
-/// notification_log and the three gcal_* columns — a queued message and a sent
+/// notification_log and the three gcal_* columns -- a queued message and a sent
 /// message are the same row at different times (fix #8).
 model Outbox {
-  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   /// email | gcal_create | gcal_update | gcal_delete. sms and whatsapp are
   /// addable without a migration when A-12 phase 2 arrives.
-  kind String
-  /// Null for admin alerts, which address the photographer, not a booking.
-  bookingId String? @map("booking_id") @db.Uuid
+  kind              String
+  /// Null for alerts that address a person rather than a booking.
+  bookingId         String?   @map("booking_id") @db.Uuid
+  /// Whose studio this row concerns. Set by enqueue() from the booking, so a row
+  /// with a booking always has one (CHECK outbox_booking_has_photographer). Null
+  /// for platform and account mail.
+  photographerId    String?   @map("photographer_id") @db.Uuid
   /// e.g. email:booking_confirmation:<booking_id>. Makes "send exactly once" a
   /// database guarantee rather than a hope.
-  dedupeKey String @unique @map("dedupe_key")
-  /// Null for calendar jobs. CHECK-constrained to the nine templates (spec §4.1).
-  template  String?
-  recipient String?
+  dedupeKey         String    @unique @map("dedupe_key")
+  /// Null for calendar jobs. CHECK-constrained to the template vocabulary
+  /// (marketplace-data-model.md §2.14).
+  template          String?
+  recipient         String?
   /// Everything the worker needs, resolved at enqueue time. Nullable BECAUSE
   /// erasure nulls it (data-model_v2.md §10.2).
-  payload Json? @db.JsonB
+  payload           Json?     @db.JsonB
   /// pending | processing | done | failed | cancelled
-  status   String @default("pending")
-  attempts Int    @default(0)
+  status            String    @default("pending")
+  attempts          Int       @default(0)
   /// Exponential backoff. The worker claims rows where status = 'pending' AND
   /// next_attempt_at <= now().
-  nextAttemptAt DateTime @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
-  /// Surfaced in the admin alert when attempts are exhausted (spec §6.17).
-  lastError String? @map("last_error")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  /// Surfaced in the alert when attempts are exhausted (spec §6.17).
+  lastError         String?   @map("last_error")
   /// Email provider's id, for tracing a bounce.
   providerMessageId String?   @map("provider_message_id")
   completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking      Booking?      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  photographer Photographer? @relation(fields: [photographerId], references: [id], onDelete: Restrict)
 
   @@index([bookingId, createdAt])
+  @@index([photographerId, createdAt])
   @@map("outbox")
 }

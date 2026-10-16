@@ -2,39 +2,107 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PrismaClient } from '@prisma/client';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
-import { seedDatabase } from '../db/seed.js';
-import { testDatabaseUrl } from '../test/database.js';
-import { ACCESS_TOKEN_LIFETIME_DAYS, SLOT_GRANULARITY_MINUTES, getSettings } from './index.js';
+import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { type PaymentWorld, seedSecondPhotographer, seedWorld } from '../test/payment-fixtures.js';
+import {
+  ACCESS_TOKEN_LIFETIME_DAYS,
+  SLOT_GRANULARITY_MINUTES,
+  getPhotographerSettings,
+  getPlatformSettings,
+  updatePhotographerSettings,
+  updatePlatformSettings,
+} from './index.js';
 
 let prisma: PrismaClient;
+let raw: ReturnType<typeof connect>;
+let world: PaymentWorld;
+
+/** The schema defaults a photographer's row is born with (marketplace-data-model.md §3.2, R1.8). */
+const PHOTOGRAPHER_DEFAULTS = {
+  bookingFeeRate: 0.4,
+  minLeadTimeMinutes: 120,
+  bufferMinutes: 30,
+  deliveryExpiryDays: 90,
+  clientCancelCutoffHours: 0,
+  bookingFeeRefundableOnClientCancel: false,
+};
 
 beforeAll(async () => {
   prisma = createPrismaClient(testDatabaseUrl());
-  // getSettings() throws on a missing row (data-model_v2.md §5.2) -- seed it
-  // the same way Task 4 requires production to be seeded.
-  await seedDatabase(prisma, { ...process.env, ADMIN_EMAIL: 'admin@example.com', ADMIN_PASSWORD: 'correct horse battery staple' });
+  raw = connect();
+  await raw.connect();
 });
 
 afterAll(async () => {
   await prisma.$disconnect();
+  await raw.end();
 });
 
-describe('getSettings', () => {
-  it('returns the five seeded defaults (plan.md Task 4)', async () => {
-    await expect(getSettings(prisma)).resolves.toEqual({
-      bookingFeeRate: 0.4,
-      minLeadTimeMinutes: 120,
-      holdMinutes: 30,
-      bufferMinutes: 30,
-      deliveryExpiryDays: 90,
-    });
+beforeEach(async () => {
+  await truncateAll(raw);
+  // The platform row and one approved photographer with their settings row, as
+  // the seed and approval leave them.
+  world = await seedWorld(prisma);
+});
+
+describe('getPhotographerSettings', () => {
+  it("returns the photographer's six values at their defaults (plan.md Task 4, R1.8)", async () => {
+    await expect(getPhotographerSettings(world.photographerId, prisma)).resolves.toEqual(PHOTOGRAPHER_DEFAULTS);
   });
 
   it('converts bookingFeeRate to a plain number, never a Decimal', async () => {
-    const settings = await getSettings(prisma);
+    const settings = await getPhotographerSettings(world.photographerId, prisma);
     expect(typeof settings.bookingFeeRate).toBe('number');
+  });
+
+  it('carries no platform value: the checkout hold is not a photographer setting', async () => {
+    const settings = await getPhotographerSettings(world.photographerId, prisma);
+    expect(settings).not.toHaveProperty('holdMinutes');
+  });
+
+  it('throws for an id with no settings row rather than inventing defaults', async () => {
+    await expect(getPhotographerSettings('00000000-0000-4000-8000-000000000000', prisma)).rejects.toThrow();
+  });
+});
+
+describe('updatePhotographerSettings', () => {
+  it('saves a subset and returns every value as stored', async () => {
+    await expect(
+      updatePhotographerSettings(world.photographerId, { bookingFeeRate: 0.125, clientCancelCutoffHours: 48, bookingFeeRefundableOnClientCancel: true }, prisma),
+    ).resolves.toEqual({ ...PHOTOGRAPHER_DEFAULTS, bookingFeeRate: 0.125, clientCancelCutoffHours: 48, bookingFeeRefundableOnClientCancel: true });
+    await expect(getPhotographerSettings(world.photographerId, prisma)).resolves.toMatchObject({ bookingFeeRate: 0.125, clientCancelCutoffHours: 48 });
+  });
+
+  it("changes one photographer's values and leaves another's alone (R1.4)", async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+
+    await updatePhotographerSettings(world.photographerId, { bufferMinutes: 90, minLeadTimeMinutes: 0 }, prisma);
+
+    await expect(getPhotographerSettings(world.photographerId, prisma)).resolves.toMatchObject({ bufferMinutes: 90, minLeadTimeMinutes: 0 });
+    await expect(getPhotographerSettings(second.photographerId, prisma)).resolves.toEqual(PHOTOGRAPHER_DEFAULTS);
+  });
+
+  it('leaves range validation to the caller, with the database CHECK as the backstop', async () => {
+    await expect(updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: -1 }, prisma)).rejects.toThrow();
+    await expect(getPhotographerSettings(world.photographerId, prisma)).resolves.toEqual(PHOTOGRAPHER_DEFAULTS);
+  });
+});
+
+describe('platform settings', () => {
+  it('returns the hold and the trial length (brief decision 5)', async () => {
+    await expect(getPlatformSettings(prisma)).resolves.toEqual({ holdMinutes: 30, trialDays: 30 });
+  });
+
+  it('saves a subset and returns every value as stored', async () => {
+    await expect(updatePlatformSettings({ holdMinutes: 15 }, prisma)).resolves.toEqual({ holdMinutes: 15, trialDays: 30 });
+    await expect(getPlatformSettings(prisma)).resolves.toEqual({ holdMinutes: 15, trialDays: 30 });
+  });
+
+  it('throws when the seed never created the row', async () => {
+    await raw.query('TRUNCATE platform_setting');
+    await expect(getPlatformSettings(prisma)).rejects.toThrow();
   });
 });
 

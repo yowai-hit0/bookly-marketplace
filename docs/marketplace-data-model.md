@@ -710,6 +710,18 @@ A future `review` table would hang off `booking`:
 
 Confirm that Neon allows `btree_gist`. It is a trusted extension since PG 13.
 
+**Phase 1 scope of the baseline (decided 2026-10-16).** The squashed baseline is `20261016000000_marketplace_init`, and it covers only Phase 1's tables, so it has **21** tables, not 26:
+- Every existing table changed per §2 (`admin_user` → `app_user`, `setting` → `photographer_setting` + `platform_setting`).
+- The new `photographer`, `district`, `photographer_district`, `category`, `photographer_category` and `portfolio_image`.
+- `btree_gist`, the 30 districts and the amendments at the top of this document.
+
+Later phases add the rest as incremental migrations:
+- `subscription`, `subscription_period`, `payout_method`, `payout` and `payout_item`, with their indexes, exclusions and CHECKs from §3.11.
+- The `payment` changes of §2.11: nullable `booking_id`, `subscription_id`, `plan_interval`, `checkout_url`, kind `subscription`, provider `flutterwave_checkout` and the CHECKs that mention them. Until then `payment` keeps its current shape, and so does `webhook_event`'s provider CHECK (§2.12).
+- `platform_setting` has only `hold_minutes` and `trial_days` (default 30). `subscription_monthly_price_rwf`, `subscription_yearly_price_rwf`, `subscription_grace_days` and `subscription_reminder_days`, with their CHECKs, come with Phase 5.
+
+The outbox template CHECK already lists the full §2.14 vocabulary, including the subscription and payout names, so those phases need no template migration. `payment_cash_is_session_fee` and `payment_pending_lookup_idx` from §2.11 hold for the current shape and are in the baseline.
+
 ## 6. Code impact: what breaks, by model
 Paths are relative to `backend/src/`.
 

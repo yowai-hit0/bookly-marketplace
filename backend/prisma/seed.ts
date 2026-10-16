@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createPrismaClient } from '../src/db/client.js';
 import { seedDatabase } from '../src/db/seed.js';
+import { DEMO_PHOTOGRAPHERS, DEMO_PHOTOGRAPHER_PASSWORD, demoPhotographerEmail } from '../src/db/seed-demo.js';
 
 const prisma = createPrismaClient();
 
@@ -9,6 +10,11 @@ try {
   const { booking, ...catalogue } = demo ?? { booking: null };
   // The token stays out of the JSON line, which may end up in a log.
   console.log(JSON.stringify({ ...summary, demo: demo === null ? null : { ...catalogue, booking: booking && { reference: booking.reference, created: booking.created } } }));
+  if (demo !== null) {
+    // Development only: the demo never runs in production (src/db/seed.ts).
+    console.log(`\nDemo photographer logins, password "${DEMO_PHOTOGRAPHER_PASSWORD}":`);
+    for (const { handle } of DEMO_PHOTOGRAPHERS) console.log(`  ${demoPhotographerEmail(handle)}  (/p/${handle})`);
+  }
   if (booking !== null) {
     const origin = (process.env.WEB_ORIGIN ?? 'http://localhost:5173').replace(/\/+$/, '');
     console.log(`\nDemo booking ${booking.reference}: the client's magic link (any earlier one no longer works):`);

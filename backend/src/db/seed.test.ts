@@ -5,10 +5,12 @@ import { findBookingByToken } from '../booking/access.js';
 import { bookingTotals } from '../booking/totals.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { createPrismaClient } from './client.js';
-import { seedDatabase } from './seed.js';
-import { DEMO_CLIENT_EMAIL } from './seed-demo.js';
+import { STARTER_CATEGORIES, seedDatabase } from './seed.js';
+import { DEMO_CLIENT_EMAIL, DEMO_PHOTOGRAPHERS, DEMO_PHOTOGRAPHER_PASSWORD, demoPhotographerEmail } from './seed-demo.js';
 
 const CREDENTIALS = { ADMIN_EMAIL: 'admin@example.com', ADMIN_PASSWORD: 'correct horse battery staple' };
+/** The platform part of the seed alone, without the demo. */
+const BASE_ENV = { ...process.env, ...CREDENTIALS, SEED_DEMO_DATA: 'false' };
 
 let prisma: PrismaClient;
 let raw: Awaited<ReturnType<typeof connect>>;
@@ -29,70 +31,144 @@ beforeEach(async () => {
 });
 
 describe('seedDatabase', () => {
-  it('creates 1 admin_user, 1 setting, and 5 working_hours rows', async () => {
-    await seedDatabase(prisma, { ...process.env, ...CREDENTIALS });
+  it('creates 1 platform admin, the platform_setting row and the 8 starter categories (R1.9)', async () => {
+    await expect(seedDatabase(prisma, BASE_ENV)).resolves.toEqual({
+      platformAdminCreated: true,
+      platformSettingCreated: true,
+      categoriesCreated: 8,
+      demo: null,
+    });
 
-    await expect(prisma.adminUser.count()).resolves.toBe(1);
-    await expect(prisma.setting.count()).resolves.toBe(1);
+    const users = await prisma.appUser.findMany();
+    expect(users.map((user) => [user.email, user.role])).toEqual([[CREDENTIALS.ADMIN_EMAIL, 'platform_admin']]);
+    await expect(prisma.photographer.count()).resolves.toBe(0);
+    await expect(prisma.platformSetting.findUniqueOrThrow({ where: { id: 1 } })).resolves.toMatchObject({ holdMinutes: 30, trialDays: 30 });
 
-    const hours = await prisma.workingHours.findMany({ orderBy: { weekday: 'asc' } });
-    expect(hours).toHaveLength(5);
-    expect(hours.map((row) => row.weekday)).toEqual([1, 2, 3, 4, 5]);
-    for (const row of hours) {
-      expect(row.opensMinute).toBe(540);
-      expect(row.closesMinute).toBe(1020);
-      expect(row.isOpen).toBe(true);
-      expect(row.effectiveDate).toBeNull();
-    }
+    const categories = await prisma.category.findMany({ orderBy: { sortOrder: 'asc' } });
+    expect(categories.map((category) => category.slug)).toEqual(['wedding', 'portrait', 'event', 'product', 'graduation', 'family', 'fashion', 'real-estate']);
+    expect(categories.every((category) => category.isActive)).toBe(true);
+  });
+
+  it('seeds no photographer, no working hours and no districts: the migration owns the districts', async () => {
+    await seedDatabase(prisma, BASE_ENV);
+
+    await expect(prisma.workingHours.count()).resolves.toBe(0);
+    await expect(prisma.photographerSetting.count()).resolves.toBe(0);
+    // The 30 the baseline migration inserted, untouched by the seed and by truncateAll.
+    await expect(prisma.district.count()).resolves.toBe(30);
   });
 
   it('is idempotent: running it twice leaves the same row counts', async () => {
-    await seedDatabase(prisma, { ...process.env, ...CREDENTIALS });
-    await seedDatabase(prisma, { ...process.env, ...CREDENTIALS });
+    await seedDatabase(prisma, BASE_ENV);
+    await expect(seedDatabase(prisma, BASE_ENV)).resolves.toEqual({
+      platformAdminCreated: false,
+      platformSettingCreated: false,
+      categoriesCreated: 0,
+      demo: null,
+    });
 
-    await expect(prisma.adminUser.count()).resolves.toBe(1);
-    await expect(prisma.setting.count()).resolves.toBe(1);
-    await expect(prisma.workingHours.count()).resolves.toBe(5);
+    await expect(prisma.appUser.count()).resolves.toBe(1);
+    await expect(prisma.platformSetting.count()).resolves.toBe(1);
+    await expect(prisma.category.count()).resolves.toBe(STARTER_CATEGORIES.length);
   });
 
-  it('stores the admin password hashed, not plain', async () => {
-    await seedDatabase(prisma, { ...process.env, ...CREDENTIALS });
+  it('keeps a category a platform admin edited, and re-adds one that was removed', async () => {
+    await seedDatabase(prisma, BASE_ENV);
+    await prisma.category.update({ where: { slug: 'wedding' }, data: { nameEn: 'Weddings & gusaba', isActive: false } });
+    await prisma.category.delete({ where: { slug: 'product' } });
 
-    const admin = await prisma.adminUser.findFirstOrThrow();
+    await expect(seedDatabase(prisma, BASE_ENV)).resolves.toMatchObject({ categoriesCreated: 1 });
+    await expect(prisma.category.findUniqueOrThrow({ where: { slug: 'wedding' } })).resolves.toMatchObject({ nameEn: 'Weddings & gusaba', isActive: false });
+  });
+
+  it('stores the platform admin password hashed, not plain', async () => {
+    await seedDatabase(prisma, BASE_ENV);
+
+    const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
     expect(admin.passwordHash).not.toBe(CREDENTIALS.ADMIN_PASSWORD);
     expect(admin.passwordHash).toMatch(/^\$argon2id\$/);
-    await expect(verifyPassword(admin.passwordHash, CREDENTIALS.ADMIN_PASSWORD)).resolves.toBe(true);
+    await expect(verifyPassword(admin.passwordHash ?? '', CREDENTIALS.ADMIN_PASSWORD)).resolves.toBe(true);
   });
 
-  it('requires ADMIN_EMAIL and ADMIN_PASSWORD only when no admin exists yet', async () => {
-    await expect(seedDatabase(prisma, {})).rejects.toThrow();
+  it('requires ADMIN_EMAIL and ADMIN_PASSWORD only when no platform admin exists yet', async () => {
+    await expect(seedDatabase(prisma, { SEED_DEMO_DATA: 'false' })).rejects.toThrow();
 
-    await seedDatabase(prisma, { ...process.env, ...CREDENTIALS });
+    await seedDatabase(prisma, BASE_ENV);
     // A reseed of an already-seeded database needs no credentials at all.
-    await expect(seedDatabase(prisma, {})).resolves.toMatchObject({ adminUserCreated: false });
+    await expect(seedDatabase(prisma, { SEED_DEMO_DATA: 'false' })).resolves.toMatchObject({ platformAdminCreated: false });
+  });
+
+  it('is not satisfied by a photographer login: only a platform admin counts', async () => {
+    await prisma.appUser.create({ data: { email: 'someone@example.com', role: 'photographer', passwordHash: 'x' } });
+
+    await expect(seedDatabase(prisma, BASE_ENV)).resolves.toMatchObject({ platformAdminCreated: true });
+    await expect(prisma.appUser.count({ where: { role: 'platform_admin' } })).resolves.toBe(1);
   });
 });
 
 describe('seedDatabase: demo data', () => {
-  const env = { ...process.env, ...CREDENTIALS, NODE_ENV: 'development' };
+  const env = { ...process.env, ...CREDENTIALS, NODE_ENV: 'development', SEED_DEMO_DATA: 'true' };
 
-  it('creates a small catalogue: two services, three packages, one own and one shared add-on', async () => {
+  it('creates three approved photographers, each with a photographer login, a settings row, hours, districts and categories', async () => {
     const summary = await seedDatabase(prisma, env);
 
-    expect(summary.demo).toMatchObject({ servicesCreated: 2, packagesCreated: 3, addonsCreated: 2 });
-    const services = await prisma.service.findMany({ include: { packages: true, addons: true }, orderBy: { sortOrder: 'asc' } });
+    expect(summary.demo).toMatchObject({ photographersCreated: 3 });
+    const photographers = await prisma.photographer.findMany({
+      include: { user: true, setting: true, workingHours: true, districts: true, categories: true },
+      orderBy: { handle: 'asc' },
+    });
+    expect(photographers.map((photographer) => photographer.handle)).toEqual(['hills-and-light', 'kigali-lens', 'umucyo-studio']);
+    for (const photographer of photographers) {
+      expect(photographer.status).toBe('approved');
+      expect(photographer.approvedAt).not.toBeNull();
+      expect(photographer.user).toMatchObject({ role: 'photographer', email: demoPhotographerEmail(photographer.handle) });
+      expect(photographer.user.emailVerifiedAt).not.toBeNull();
+      await expect(verifyPassword(photographer.user.passwordHash ?? '', DEMO_PHOTOGRAPHER_PASSWORD)).resolves.toBe(true);
+      expect(photographer.setting).not.toBeNull();
+      expect(photographer.workingHours.length).toBeGreaterThanOrEqual(5);
+      expect(photographer.districts.length).toBeGreaterThan(0);
+      expect(photographer.categories.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives them overlapping catalogues, hours and districts', async () => {
+    const summary = await seedDatabase(prisma, env);
+
+    expect(summary.demo).toMatchObject({ servicesCreated: 6, packagesCreated: 8, addonsCreated: 4 });
+    // The same slug under two photographers: unique per photographer, not globally.
+    const portraits = await prisma.service.findMany({ where: { slug: 'portraits' }, include: { photographer: true } });
+    expect(portraits.map((service) => service.photographer.handle).sort()).toEqual(['kigali-lens', 'umucyo-studio']);
+    // Every package belongs to its service's photographer (the composite foreign key).
+    const packages = await prisma.package.findMany({ include: { service: true } });
+    expect(packages.every((pkg) => pkg.photographerId === pkg.service.photographerId)).toBe(true);
+    // Everyone works Wednesday 10:00-17:00, in Gasabo.
+    const wednesday = await prisma.workingHours.findMany({ where: { weekday: 3, opensMinute: { lte: 600 }, closesMinute: { gte: 1020 } } });
+    expect(new Set(wednesday.map((row) => row.photographerId)).size).toBe(3);
+    await expect(prisma.photographerDistrict.count({ where: { districtCode: 'gasabo' } })).resolves.toBe(3);
+  });
+
+  it('keeps the first photographer\'s catalogue as the single-photographer demo had it', async () => {
+    await seedDatabase(prisma, env);
+
+    const first = DEMO_PHOTOGRAPHERS[0]?.handle ?? '';
+    const services = await prisma.service.findMany({
+      where: { photographer: { handle: first } },
+      include: { packages: true, addons: true },
+      orderBy: { sortOrder: 'asc' },
+    });
     expect(services.map((service) => [service.slug, service.packages.length, service.addons.length])).toEqual([
       ['portraits', 2, 1],
       ['events', 1, 0],
     ]);
-    await expect(prisma.addon.count({ where: { serviceId: null } })).resolves.toBe(1);
+    await expect(prisma.addon.count({ where: { serviceId: null, photographer: { handle: first } } })).resolves.toBe(1);
   });
 
-  it('creates one confirmed booking, upcoming on a weekday at 10:00 Kigali, whose booking fee is paid', async () => {
+  it('creates one confirmed booking with the first photographer, upcoming on a weekday at 10:00 Kigali, whose booking fee is paid', async () => {
     const summary = await seedDatabase(prisma, env);
 
-    const booking = await prisma.booking.findFirstOrThrow({ where: { contactEmail: DEMO_CLIENT_EMAIL }, include: { addons: true, payments: true } });
+    const booking = await prisma.booking.findFirstOrThrow({ where: { contactEmail: DEMO_CLIENT_EMAIL }, include: { addons: true, payments: true, photographer: true } });
     expect(summary.demo?.booking).toMatchObject({ reference: booking.reference, created: true });
+    expect(booking.photographer.handle).toBe(DEMO_PHOTOGRAPHERS[0]?.handle);
     expect(booking.reference).toMatch(/^BKY-\d{4}-[0-9A-Z]{5}$/);
     expect(booking.status).toBe('confirmed');
     expect(booking.startsAt.getTime()).toBeGreaterThan(Date.now());
@@ -122,8 +198,16 @@ describe('seedDatabase: demo data', () => {
     const first = (await seedDatabase(prisma, env)).demo?.booking;
     const second = (await seedDatabase(prisma, env)).demo;
 
-    expect(second).toMatchObject({ servicesCreated: 0, packagesCreated: 0, addonsCreated: 0, booking: { reference: first?.reference, created: false } });
-    await expect(prisma.service.count()).resolves.toBe(2);
+    expect(second).toMatchObject({
+      photographersCreated: 0,
+      servicesCreated: 0,
+      packagesCreated: 0,
+      addonsCreated: 0,
+      booking: { reference: first?.reference, created: false },
+    });
+    await expect(prisma.photographer.count()).resolves.toBe(3);
+    await expect(prisma.appUser.count()).resolves.toBe(4);
+    await expect(prisma.service.count()).resolves.toBe(6);
     await expect(prisma.booking.count()).resolves.toBe(1);
     await expect(prisma.payment.count()).resolves.toBe(1);
     await expect(prisma.client.count()).resolves.toBe(1);
@@ -131,13 +215,17 @@ describe('seedDatabase: demo data', () => {
     await expect(findBookingByToken(prisma, second?.booking?.accessToken ?? '')).resolves.not.toBeNull();
   });
 
-  it('leaves an existing catalogue alone, and then books nothing', async () => {
-    await prisma.service.create({ data: { slug: 'weddings', nameEn: 'Weddings' } });
+  it('leaves a photographer of someone else\'s making alone, and then books nothing', async () => {
+    const handle = DEMO_PHOTOGRAPHERS[0]?.handle ?? '';
+    const user = await prisma.appUser.create({ data: { email: 'real@example.com', role: 'photographer', passwordHash: 'x' } });
+    const photographer = await prisma.photographer.create({ data: { userId: user.id, handle, displayName: 'Someone real', setting: { create: {} } } });
+    await prisma.service.create({ data: { photographerId: photographer.id, slug: 'weddings', nameEn: 'Weddings' } });
 
     const summary = await seedDatabase(prisma, env);
 
-    expect(summary.demo).toEqual({ servicesCreated: 0, packagesCreated: 0, addonsCreated: 0, booking: null });
-    await expect(prisma.service.count()).resolves.toBe(1);
+    expect(summary.demo).toMatchObject({ photographersCreated: 2, booking: null });
+    await expect(prisma.photographer.findUniqueOrThrow({ where: { handle } })).resolves.toMatchObject({ displayName: 'Someone real', status: 'pending' });
+    await expect(prisma.service.count({ where: { photographerId: photographer.id } })).resolves.toBe(1);
     await expect(prisma.booking.count()).resolves.toBe(0);
   });
 
@@ -148,6 +236,7 @@ describe('seedDatabase: demo data', () => {
     const summary = await seedDatabase(prisma, { ...env, ...extra });
 
     expect(summary.demo).toBeNull();
+    await expect(prisma.photographer.count()).resolves.toBe(0);
     await expect(prisma.service.count()).resolves.toBe(0);
     await expect(prisma.booking.count()).resolves.toBe(0);
   });
