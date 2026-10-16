@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { type Response, Router } from 'express';
 import { z } from 'zod';
+import { photographerLocals } from '../auth/middleware.js';
 import {
   type AdminActionResult,
   type RescheduleResult,
@@ -26,7 +27,11 @@ import { kigaliDate, parseOrReject } from './validation.js';
 /**
  * The bookings list, one booking, and everything the photographer does to it
  * (plan.md Task 19; spec §3.6, §6.11, §6.12, §6.16, §6.21). Mounted behind
- * `requireAdmin`, so every route here is his alone (spec §2.2).
+ * `requirePhotographer`, and every route here acts on the signed-in
+ * photographer's own bookings alone (marketplace-spec.md R1.4): the scope is
+ * `photographerLocals(res).photographerId`, handed to every lookup and action.
+ * A booking, payment, add-on line or note id of another photographer's is the
+ * same 404 as an id that names nothing, and nothing of it is changed.
  *
  *   GET  /bookings?stage=&status=&from=&to=&search=&page=&pageSize=   (`stage` since 2026-09-25; `status` still read; numbered pages since 2026-09-27)
  *        200 { bookings, total, page, pageSize, pageCount }
@@ -64,7 +69,8 @@ import { kigaliDate, parseOrReject } from './validation.js';
  *
  * A 409 carries the booking as it now stands, so a screen acting on a stale
  * view -- a booking cancelled in another tab, a slot taken while he chose --
- * can show what is true rather than only what failed.
+ * can show what is true rather than only what failed. It is reloaded through
+ * the same scope, so it is never another photographer's.
  */
 
 export type AdminBookingsDeps = {
@@ -191,12 +197,15 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
   const { prisma, now, paymentProviderId } = deps;
   const router = Router();
 
+  /** What every action is handed: the clock, and the photographer the token names. */
+  const scoped = (res: Response) => ({ prisma, now, photographerId: photographerLocals(res).photographerId });
+
   router.get('/bookings', async (req, res) => {
     const query = parseOrReject(listQuery, req.query, res);
     if (query === undefined) return;
 
     res.json(
-      await findBookings(prisma, {
+      await findBookings(prisma, photographerLocals(res).photographerId, {
         ...(query.status === undefined ? {} : { statuses: query.status }),
         ...(query.stage === undefined ? {} : { stages: query.stage }),
         now: now(),
@@ -213,7 +222,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const id = parseOrReject(rowId, req.params.id, res);
     if (id === undefined) return;
 
-    const booking = await findAdminBooking(prisma, id);
+    const booking = await findAdminBooking(prisma, photographerLocals(res).photographerId, id);
     if (booking === null) {
       res.status(404).json({ error: 'not_found' });
       return;
@@ -227,7 +236,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const body = parseOrReject(rescheduleBody, req.body, res);
     if (body === undefined) return;
 
-    await answer(prisma, now, res, await rescheduleBooking({ prisma, now }, id, body.startsAt), id);
+    await answer(scoped(res), res, await rescheduleBooking(scoped(res), id, body.startsAt), id);
   });
 
   router.post('/bookings/:id/cancel', async (req, res) => {
@@ -236,25 +245,25 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const body = parseOrReject(cancelBody, req.body ?? {}, res);
     if (body === undefined) return;
 
-    await answer(prisma, now, res, await cancelByAdmin({ prisma, now }, id, body.reason), id);
+    await answer(scoped(res), res, await cancelByAdmin(scoped(res), id, body.reason), id);
   });
 
   router.post('/bookings/:id/complete', async (req, res) => {
     const id = parseOrReject(rowId, req.params.id, res);
     if (id === undefined) return;
-    await answer(prisma, now, res, await markCompleted({ prisma, now }, id), id);
+    await answer(scoped(res), res, await markCompleted(scoped(res), id), id);
   });
 
   router.post('/bookings/:id/no-show', async (req, res) => {
     const id = parseOrReject(rowId, req.params.id, res);
     if (id === undefined) return;
-    await answer(prisma, now, res, await markNoShow({ prisma, now }, id), id);
+    await answer(scoped(res), res, await markNoShow(scoped(res), id), id);
   });
 
   router.post('/bookings/:id/resend-link', async (req, res) => {
     const id = parseOrReject(rowId, req.params.id, res);
     if (id === undefined) return;
-    await answer(prisma, now, res, await resendAccessLink({ prisma, now }, id), id);
+    await answer(scoped(res), res, await resendAccessLink(scoped(res), id), id);
   });
 
   // --- Post-shoot (Task 20) --------------------------------------------------
@@ -265,7 +274,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const body = parseOrReject(addonBody, req.body, res);
     if (body === undefined) return;
 
-    await answer(prisma, now, res, await addPostShootAddon({ prisma, now }, id, body), id);
+    await answer(scoped(res), res, await addPostShootAddon(scoped(res), id, body), id);
   });
 
   router.delete('/bookings/:id/addons/:addonId', async (req, res) => {
@@ -274,7 +283,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const addonId = parseOrReject(rowId, req.params.addonId, res);
     if (addonId === undefined) return;
 
-    await answer(prisma, now, res, await removePostShootAddon({ prisma, now }, id, addonId), id);
+    await answer(scoped(res), res, await removePostShootAddon(scoped(res), id, addonId), id);
   });
 
   if (paymentProviderId !== undefined) {
@@ -282,7 +291,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
       const id = parseOrReject(rowId, req.params.id, res);
       if (id === undefined) return;
 
-      await answer(prisma, now, res, await requestSessionFee({ prisma, now, providerId: paymentProviderId }, id), id);
+      await answer(scoped(res), res, await requestSessionFee({ ...scoped(res), providerId: paymentProviderId }, id), id);
     });
   }
 
@@ -292,7 +301,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const body = parseOrReject(cashBody, req.body, res);
     if (body === undefined) return;
 
-    await answer(prisma, now, res, await recordCashPayment({ prisma, now }, id, body), id);
+    await answer(scoped(res), res, await recordCashPayment(scoped(res), id, body), id);
   });
 
   // --- Delivery (Task 21) ----------------------------------------------------
@@ -304,10 +313,9 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     if (body === undefined) return;
 
     await answer(
-      prisma,
-      now,
+      scoped(res),
       res,
-      await saveDelivery({ prisma, now }, id, {
+      await saveDelivery(scoped(res), id, {
         url: body.url,
         ...(body.expiresOn === undefined ? {} : { expiresOn: body.expiresOn }),
         ...(body.note === undefined ? {} : { note: body.note }),
@@ -324,7 +332,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const body = parseOrReject(deliverySendBody, req.body ?? {}, res);
     if (body === undefined) return;
 
-    await answer(prisma, now, res, await sendDelivery({ prisma, now }, id, { recipient: body.recipient }), id);
+    await answer(scoped(res), res, await sendDelivery(scoped(res), id, { recipient: body.recipient }), id);
   });
 
   router.post('/bookings/:id/notes', async (req, res) => {
@@ -333,7 +341,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const body = parseOrReject(noteBody, req.body ?? {}, res);
     if (body === undefined) return;
 
-    await answer(prisma, now, res, await addNote({ prisma, now }, id, body), id);
+    await answer(scoped(res), res, await addNote(scoped(res), id, body), id);
   });
 
   router.delete('/bookings/:id/notes/:noteId', async (req, res) => {
@@ -342,7 +350,7 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const noteId = parseOrReject(rowId, req.params.noteId, res);
     if (noteId === undefined) return;
 
-    await answer(prisma, now, res, await deleteNote({ prisma, now }, id, noteId), id);
+    await answer(scoped(res), res, await deleteNote(scoped(res), id, noteId), id);
   });
 
   router.post('/payments/:id/refund', async (req, res) => {
@@ -351,8 +359,9 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
     const body = parseOrReject(refundBody, req.body, res);
     if (body === undefined) return;
 
+    const scope = scoped(res);
     const result = await recordRefund(
-      { prisma, now },
+      scope,
       id,
       { reference: body.reference, ...(body.refundedAt === undefined ? {} : { refundedAt: body.refundedAt }) },
     );
@@ -361,16 +370,19 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
       return;
     }
     if (result.status === 'not_refundable') {
-      const payment = await prisma.payment.findUnique({ where: { id }, select: { bookingId: true } });
+      const payment = await prisma.payment.findFirst({
+        where: { id, booking: { photographerId: scope.photographerId } },
+        select: { bookingId: true },
+      });
       if (payment === null) {
         res.status(404).json({ error: 'not_found' });
         return;
       }
-      await answerConflict(prisma, now, res, payment.bookingId, 'not_refundable');
+      await answerConflict(scope, res, payment.bookingId, 'not_refundable');
       return;
     }
 
-    const booking = await findAdminBooking(prisma, result.payment.bookingId);
+    const booking = await findAdminBooking(prisma, scope.photographerId, result.payment.bookingId);
     res.json({ booking: booking === null ? null : adminBookingView(booking, now()) });
   });
 
@@ -380,16 +392,18 @@ export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
 /** Everything an action can answer with: the booking, or the reason it refused. */
 type ActionAnswer = AdminActionResult | RescheduleResult | AddonEditResult | SessionFeeResult | CashPaymentResult | DeliveryResult;
 
+/** The photographer's scope an answer is reloaded through. */
+type Scope = { prisma: PrismaClient; now: () => Date; photographerId: string };
+
 /** One shape for every action: the booking as it now stands, or why not. */
 async function answer(
-  prisma: PrismaClient,
-  now: () => Date,
+  scope: Scope,
   res: Response,
   result: ActionAnswer,
   bookingId: string,
 ): Promise<void> {
   if (result.status === 'ok') {
-    res.json({ booking: adminBookingView(result.booking satisfies AdminBooking, now()) });
+    res.json({ booking: adminBookingView(result.booking satisfies AdminBooking, scope.now()) });
     return;
   }
   if (result.status === 'not_found') {
@@ -397,17 +411,11 @@ async function answer(
     return;
   }
   // Every other refusal is a 409 carrying the booking it refused.
-  await answerConflict(prisma, now, res, bookingId, result.status);
+  await answerConflict(scope, res, bookingId, result.status);
 }
 
 /** A refusal, with the booking it refused: the screen that asked was out of date. */
-async function answerConflict(
-  prisma: PrismaClient,
-  now: () => Date,
-  res: Response,
-  bookingId: string,
-  error: string,
-): Promise<void> {
-  const booking = await findAdminBooking(prisma, bookingId);
-  res.status(409).json({ error, booking: booking === null ? null : adminBookingView(booking, now()) });
+async function answerConflict(scope: Scope, res: Response, bookingId: string, error: string): Promise<void> {
+  const booking = await findAdminBooking(scope.prisma, scope.photographerId, bookingId);
+  res.status(409).json({ error, booking: booking === null ? null : adminBookingView(booking, scope.now()) });
 }

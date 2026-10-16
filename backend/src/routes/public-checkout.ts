@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { type Response, Router } from 'express';
 import { z } from 'zod';
+import { cancellationDeadline } from '../booking/client-view.js';
 import { normalizePhone } from '../booking/phone.js';
 import { verifyCheckoutToken } from '../payments/checkout-link.js';
 import { startBookingFeePayment } from '../payments/initiate.js';
@@ -17,8 +18,11 @@ import { parseOrReject } from './validation.js';
  *
  *   GET  /api/checkout/:reference/:token
  *        200 { checkout: { reference, serviceName, packageName, startsAt,
- *              endsAt, holdExpiresAt, bookingFeeRwf, state, waitingPayment } }
+ *              endsAt, holdExpiresAt, bookingFeeRwf, state, waitingPayment,
+ *              cancellation: { deadline, bookingFeeRefundable } } }
  *            state: payable | paid | expired | closed
+ *            cancellation: the policy the booking was made under (R1.8), so
+ *            the pay page states the terms before the client pays
  *        404 not_found               unknown reference or wrong token, alike
  *
  *   POST /api/checkout/:reference/:token/payments   { method, phone }
@@ -82,7 +86,7 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
 
     const rows = await prisma.$queryRaw<CheckoutRow[]>`
       SELECT b.id::text AS id, b.status, b.service_name_snapshot, b.package_name_snapshot, b.starts_at, b.ends_at,
-             b.hold_expires_at, b.booking_fee_rwf,
+             b.hold_expires_at, b.booking_fee_rwf, b.client_cancel_cutoff_hours, b.booking_fee_refundable_on_client_cancel,
              (b.hold_expires_at IS NOT NULL AND b.hold_expires_at > now()) AS hold_live,
              EXISTS (SELECT 1 FROM payment p
                       WHERE p.booking_id = b.id AND p.kind = 'booking_fee' AND p.status = 'succeeded') AS paid,
@@ -108,6 +112,11 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
         bookingFeeRwf: booking.booking_fee_rwf,
         state: checkoutState(booking),
         waitingPayment: booking.waiting_our_ref === null ? null : { ourRef: booking.waiting_our_ref },
+        // The same shape as the client's booking page (booking/client-view.ts).
+        cancellation: {
+          deadline: cancellationDeadline({ startsAt: booking.starts_at, clientCancelCutoffHours: booking.client_cancel_cutoff_hours }).toISOString(),
+          bookingFeeRefundable: booking.booking_fee_refundable_on_client_cancel,
+        },
       },
     });
   });
@@ -210,6 +219,8 @@ type CheckoutRow = {
   ends_at: Date;
   hold_expires_at: Date | null;
   booking_fee_rwf: number;
+  client_cancel_cutoff_hours: number;
+  booking_fee_refundable_on_client_cancel: boolean;
   hold_live: boolean;
   paid: boolean;
   waiting_our_ref: string | null;

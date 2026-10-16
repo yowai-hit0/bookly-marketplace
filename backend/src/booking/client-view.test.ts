@@ -13,7 +13,7 @@ import {
   seedSecondPhotographer,
   seedWorld,
 } from '../test/payment-fixtures.js';
-import { type AccessedBooking, FULL_BOOKING, cancellationPolicyOf } from './access.js';
+import { type AccessedBooking, FULL_BOOKING } from './access.js';
 import { canCancel, clientBookingView } from './client-view.js';
 import { saveDelivery, sendDelivery } from './delivery.js';
 
@@ -61,15 +61,14 @@ beforeEach(async () => {
 
 // --- Helpers ----------------------------------------------------------------------------
 
-/** The booking as `findBookingByToken` hands it over, with its own include and its photographer's policy. */
+/** The booking as `findBookingByToken` hands it over, with its own include (and so its own policy snapshot). */
 async function accessed(bookingId: string): Promise<AccessedBooking> {
-  const booking = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: FULL_BOOKING });
-  return { ...booking, cancellationPolicy: await cancellationPolicyOf(prisma, booking.photographerId) };
+  return prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: FULL_BOOKING });
 }
 
-/** A booking row as `canCancel` reads it: with its photographer's cut-off. */
-function withCutoff<T extends object>(booking: T, clientCancelCutoffHours = 0): T & { cancellationPolicy: { clientCancelCutoffHours: number } } {
-  return { ...booking, cancellationPolicy: { clientCancelCutoffHours } };
+/** A booking row as `canCancel` reads it: with the cut-off it was made under. */
+function withCutoff<T extends object>(booking: T, clientCancelCutoffHours = 0): T & { clientCancelCutoffHours: number } {
+  return { ...booking, clientCancelCutoffHours };
 }
 
 async function viewOf(bookingId: string, now: Date = NOW) {
@@ -143,6 +142,8 @@ describe('the whole view', () => {
       bookingFeeRwf: 22_000,
       payments: [{ kind: 'booking_fee', status: 'succeeded', amountRwf: 22_000, settledAt: '2026-10-01T06:05:00.000Z' }],
       canCancel: true,
+      // The policy the booking was made under (R1.8): the fixture's "any time before the shoot", fee forfeited.
+      cancellation: { deadline: booking.startsAt.toISOString(), bookingFeeRefundable: false },
       cancellationReason: null,
       cancelledAt: null,
       sessionFee: { outstandingRwf: 48_000, waitingPayment: null },
@@ -373,20 +374,81 @@ describe('canCancel', () => {
     expect(canCancel(withCutoff(booking, 24), cutoff)).toBe(false);
     expect(canCancel(withCutoff(booking, 24), new Date(startsAt.getTime() - 1))).toBe(false);
 
-    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 24 }, prisma);
-    expect((await viewOf(booking.id, new Date(cutoff.getTime() - 1))).canCancel).toBe(true);
-    expect((await viewOf(booking.id, cutoff)).canCancel).toBe(false);
+    const snapshotted = await insertBooking(prisma, world, { status: 'confirmed', startsAt: new Date('2027-03-02T07:00:00Z'), clientCancelCutoffHours: 24 });
+    const itsCutoff = new Date(snapshotted.startsAt.getTime() - 24 * 3_600_000);
+    expect((await viewOf(snapshotted.id, new Date(itsCutoff.getTime() - 1))).canCancel).toBe(true);
+    expect((await viewOf(snapshotted.id, itsCutoff)).canCancel).toBe(false);
   });
 
-  it('reads the cut-off of the booking’s own photographer, never another’s', async () => {
+  it('reads the cut-off the booking was made under, never its photographer’s current setting', async () => {
+    const lenient = await insertBooking(prisma, world, { status: 'confirmed' });
+    const strict = await insertBooking(prisma, world, { status: 'confirmed', clientCancelCutoffHours: 8760 });
+    // The photographer tightens, then loosens, their policy after both were made.
+    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 8760 }, prisma);
+    expect((await viewOf(lenient.id)).canCancel).toBe(true);
+    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 0 }, prisma);
+    expect((await viewOf(strict.id)).canCancel).toBe(false);
+  });
+
+  it('is never another photographer’s cut-off', async () => {
     const second = await seedSecondPhotographer(prisma, world);
     await updatePhotographerSettings(second.photographerId, { clientCancelCutoffHours: 8760 }, prisma);
     const mine = await insertBooking(prisma, world, { status: 'confirmed' });
-    const theirs = await insertBooking(prisma, second, { status: 'confirmed' });
+    const theirs = await insertBooking(prisma, second, { status: 'confirmed', clientCancelCutoffHours: 8760 });
 
     expect((await viewOf(mine.id)).canCancel).toBe(true);
     expect((await viewOf(theirs.id)).canCancel).toBe(false);
   });
+});
+
+describe('the cancellation terms (R1.8)', () => {
+  it('states the deadline and whether the fee is refunded, from the booking’s own snapshot', async () => {
+    const startsAt = new Date('2027-03-01T07:00:00Z');
+    const booking = await insertBooking(prisma, world, {
+      status: 'confirmed',
+      startsAt,
+      clientCancelCutoffHours: 48,
+      bookingFeeRefundableOnClientCancel: true,
+    });
+
+    expect((await viewOf(booking.id)).cancellation).toEqual({
+      deadline: new Date(startsAt.getTime() - 48 * 3_600_000).toISOString(),
+      bookingFeeRefundable: true,
+    });
+  });
+
+  it('is the start itself with no cut-off, and a forfeited fee by default', async () => {
+    const startsAt = new Date('2027-03-01T07:00:00Z');
+    const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt });
+
+    expect((await viewOf(booking.id)).cancellation).toEqual({ deadline: startsAt.toISOString(), bookingFeeRefundable: false });
+  });
+
+  it('keeps the terms the booking was made under when the photographer edits their policy', async () => {
+    const startsAt = new Date('2027-03-01T07:00:00Z');
+    const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt, clientCancelCutoffHours: 24 });
+    const before = (await viewOf(booking.id)).cancellation;
+
+    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 72, bookingFeeRefundableOnClientCancel: true }, prisma);
+
+    expect((await viewOf(booking.id)).cancellation).toEqual(before);
+    expect(before).toEqual({ deadline: new Date(startsAt.getTime() - 24 * 3_600_000).toISOString(), bookingFeeRefundable: false });
+  });
+
+  it('still states the terms on a hold awaiting payment', async () => {
+    const booking = await insertBooking(prisma, world, { status: 'pending_payment' });
+
+    expect((await viewOf(booking.id)).cancellation.deadline).toBe(booking.startsAt.toISOString());
+  });
+
+  it.each(['completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_photographer'])(
+    'has no deadline for a %s booking: nothing is left to cancel',
+    async (status) => {
+      const booking = await insertBooking(prisma, world, { status, bookingFeeRefundableOnClientCancel: true });
+
+      expect((await viewOf(booking.id)).cancellation).toEqual({ deadline: null, bookingFeeRefundable: true });
+    },
+  );
 });
 
 // --- Delivery ------------------------------------------------------------------------------
@@ -484,7 +546,7 @@ describe('the delivery the photographer actually saved (plan.md Task 21)', () =>
   }
 
   function deps(now: Date = NOW) {
-    return { prisma, now: () => now };
+    return { prisma, now: () => now, photographerId: world.photographerId };
   }
 
   it('shows nothing at all while the link is saved but unsent', async () => {

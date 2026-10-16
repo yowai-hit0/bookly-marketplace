@@ -308,6 +308,9 @@ async function seedDemoBooking(prisma: PrismaClient, now: Date): Promise<DemoSum
             consentAt: now,
             bookingFeeRate: rate.toFixed(3),
             bookingFeeRwf,
+            // The photographer's cancellation policy, frozen as booking creation freezes it (R1.8).
+            clientCancelCutoffHours: setting.clientCancelCutoffHours,
+            bookingFeeRefundableOnClientCancel: setting.bookingFeeRefundableOnClientCancel,
             confirmedAt: now,
             accessTokenHash: hash,
             accessTokenExpiresAt: accessTokenExpiry(now),

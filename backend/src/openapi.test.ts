@@ -11,6 +11,7 @@ import { createPrismaClient } from './db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from './test/database.js';
 import {
   ADMIN_EMAIL,
+  PHOTOGRAPHER_HANDLE,
   type PaymentWorld,
   TEST_SECRET,
   insertBookingWithToken,
@@ -69,9 +70,10 @@ function app(): Express {
   });
 }
 
+/** The world photographer's studio token. */
 async function adminToken(): Promise<string> {
-  const admin = await prisma.adminUser.findFirstOrThrow();
-  return (await issueAdminToken(TEST_SECRET, admin, NOW)).token;
+  const user = await prisma.appUser.findUniqueOrThrow({ where: { id: world.photographerUserId } });
+  return (await issueAdminToken(TEST_SECRET, user, NOW)).token;
 }
 
 describe('the OpenAPI spec', () => {
@@ -145,8 +147,18 @@ describe('responses match the spec', () => {
   it('public catalogue and availability', async () => {
     const server = app();
     await expectMatchesSpec(await request(server).get('/api/health'), 'getHealth', 200);
-    await expectMatchesSpec(await request(server).get('/api/services'), 'listServices', 200);
-    await expectMatchesSpec(await request(server).get('/api/services/portraits'), 'getService', 200);
+    await expectMatchesSpec(await request(server).get('/api/photographers'), 'listPhotographers', 200);
+    await expectMatchesSpec(await request(server).get(`/api/photographers/${PHOTOGRAPHER_HANDLE}`), 'getPhotographer', 200);
+    await expectMatchesSpec(
+      await request(server).get(`/api/photographers/${PHOTOGRAPHER_HANDLE}/services`),
+      'listPhotographerServices',
+      200,
+    );
+    await expectMatchesSpec(
+      await request(server).get(`/api/photographers/${PHOTOGRAPHER_HANDLE}/services/portraits`),
+      'getPhotographerService',
+      200,
+    );
     await expectMatchesSpec(
       await request(server).post('/api/quote').send({ packageId: world.packageId, addonIds: [world.sharedAddonId] }),
       'createQuote',
@@ -197,7 +209,7 @@ describe('responses match the spec', () => {
   });
 
   it('admin auth', async () => {
-    await prisma.adminUser.updateMany({ data: { passwordHash: await hashPassword('a-good-enough-password') } });
+    await prisma.appUser.update({ where: { id: world.photographerUserId }, data: { passwordHash: await hashPassword('a-good-enough-password') } });
     const server = app();
     const login = await request(server).post('/api/admin/auth/login').send({ email: ADMIN_EMAIL, password: 'a-good-enough-password' });
     await expectMatchesSpec(login, 'adminLogin', 200);
@@ -234,9 +246,9 @@ describe('responses match the spec', () => {
   });
 });
 
-/** Mon–Fri 09:00–17:00, as the real seed sets, so availability offers slots. */
+/** Mon–Fri 09:00–17:00, as the demo seed sets, so availability offers slots. */
 async function seedWorkingHours(client: PrismaClient): Promise<void> {
   await client.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020, isOpen: true })),
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: world.photographerId, weekday, opensMinute: 540, closesMinute: 1020, isOpen: true })),
   });
 }

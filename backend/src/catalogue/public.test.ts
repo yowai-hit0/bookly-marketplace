@@ -450,6 +450,8 @@ describe('a deactivated service with bookings (spec §6.14)', () => {
         consentAt: new Date('2026-10-01T06:00:00Z'),
         bookingFeeRate: '0.400',
         bookingFeeRwf: 22_000,
+        clientCancelCutoffHours: 0,
+        bookingFeeRefundableOnClientCancel: false,
         status: 'confirmed',
         startsAt,
         endsAt: new Date('2026-10-07T08:00:00Z'),

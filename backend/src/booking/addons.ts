@@ -22,9 +22,18 @@ import { bookingTotals } from './totals.js';
  * silently turn their payment into an overpayment nobody was told about. The
  * booking row is locked while the totals are read, so two edits at once cannot
  * each see the other's money as unspent.
+ *
+ * Only on the signed-in photographer's own bookings (marketplace-spec.md
+ * R1.4): the row lock itself is by id and photographer, so another
+ * photographer's booking is `not_found` before anything is read from it.
  */
 
-export type AddonEditDeps = { prisma: PrismaClient; now: () => Date };
+export type AddonEditDeps = {
+  prisma: PrismaClient;
+  now: () => Date;
+  /** The photographer whose booking this must be: from the token, never the request. */
+  photographerId: string;
+};
 
 /** Enough for "20 extra prints"; a typo of 10,000 is not an add-on. */
 export const ADDON_MAX_QUANTITY = 99;
@@ -66,7 +75,7 @@ export async function addPostShootAddon(
   request: { addonId: string; quantity: number },
 ): Promise<AddonEditResult> {
   const outcome = await deps.prisma.$transaction(async (tx): Promise<Outcome> => {
-    const booking = await lockBooking(tx, bookingId);
+    const booking = await lockBooking(tx, deps.photographerId, bookingId);
     if (booking === null) return 'not_found';
     if (!editable(booking, deps.now())) return 'not_allowed';
 
@@ -109,7 +118,7 @@ export async function addPostShootAddon(
 /** Takes one post-shoot line off again, while nobody has paid for it. */
 export async function removePostShootAddon(deps: AddonEditDeps, bookingId: string, bookingAddonId: string): Promise<AddonEditResult> {
   const outcome = await deps.prisma.$transaction(async (tx): Promise<Outcome> => {
-    const booking = await lockBooking(tx, bookingId);
+    const booking = await lockBooking(tx, deps.photographerId, bookingId);
     if (booking === null) return 'not_found';
     if (!editable(booking, deps.now())) return 'not_allowed';
 
@@ -139,14 +148,15 @@ function editable(booking: LockedBooking, now: Date): boolean {
   return booking.status === 'confirmed' && booking.startsAt <= now;
 }
 
-/** The booking row, held for the length of the edit so its totals cannot move. */
-async function lockBooking(tx: Prisma.TransactionClient, bookingId: string): Promise<LockedBooking | null> {
+/** The photographer's booking row, held for the length of the edit so its totals cannot move. */
+async function lockBooking(tx: Prisma.TransactionClient, photographerId: string, bookingId: string): Promise<LockedBooking | null> {
   const rows = await tx.$queryRaw<
     { id: string; photographer_id: string; status: string; service_id: string; package_price_rwf: number; starts_at: Date }[]
   >`
     SELECT id::text AS id, photographer_id::text AS photographer_id, status, service_id::text AS service_id, package_price_rwf, starts_at
       FROM booking
      WHERE id = ${bookingId}::uuid
+       AND photographer_id = ${photographerId}::uuid
        FOR UPDATE`;
   const row = rows[0];
   if (row === undefined) return null;
@@ -163,6 +173,6 @@ async function lockBooking(tx: Prisma.TransactionClient, bookingId: string): Pro
 /** Every edit answers with the booking as it now stands, refusals included. */
 async function finish(deps: AddonEditDeps, bookingId: string, outcome: Outcome): Promise<AddonEditResult> {
   if (outcome !== 'ok') return { status: outcome };
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   return booking === null ? { status: 'not_found' } : { status: 'ok', booking };
 }

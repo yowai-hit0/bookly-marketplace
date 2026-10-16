@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { enqueue } from '../outbox/enqueue.js';
 import { bookingPhotographerRecipient } from '../outbox/recipients.js';
-import { type AccessedBooking, findBookingByToken } from './access.js';
+import { type AccessedBooking, cancellationPolicyOf, findBookingByToken } from './access.js';
 import { canCancel } from './client-view.js';
 
 /**
@@ -12,8 +12,10 @@ import { canCancel } from './client-view.js';
  * the slot and its buffer to the public calendar (data-model_v2.md §9.1).
  *
  * The photographer's cancellation policy decides the rest (marketplace-spec.md
- * R1.8, brief decision 5): the client may cancel until `clientCancelCutoffHours`
- * before the shoot (`canCancel`), and the booking fee is refunded only when
+ * R1.8, brief decision 5) -- the policy as it stood when the booking was made,
+ * snapshotted on the booking, not as the photographer has set it since: the
+ * client may cancel until `clientCancelCutoffHours` before the shoot
+ * (`canCancel`), and the booking fee is refunded only when
  * `bookingFeeRefundableOnClientCancel` says so. By default it is not: it stays
  * `succeeded`, forfeited, as the summary said before payment and the
  * cancellation email says again. A session fee already paid is different money:
@@ -132,10 +134,11 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
 
 /**
  * Session fees already collected are owed back; the booking fee only when the
- * photographer's policy refunds it on a client's cancellation (spec §6.10, R1.8).
+ * policy the booking was made under refunds it on a client's cancellation
+ * (spec §6.10, R1.8).
  */
 async function flagRefunds(tx: Prisma.TransactionClient, booking: AccessedBooking): Promise<AccessedBooking['payments']> {
-  const refundsBookingFee = booking.cancellationPolicy.bookingFeeRefundableOnClientCancel;
+  const refundsBookingFee = cancellationPolicyOf(booking).bookingFeeRefundableOnClientCancel;
   const paid = booking.payments.filter(
     (payment) => payment.status === 'succeeded' && (payment.kind === 'session_fee' || (refundsBookingFee && payment.kind === 'booking_fee')),
   );

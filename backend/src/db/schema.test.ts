@@ -108,14 +108,16 @@ async function insertBooking(
        service_name_snapshot, package_name_snapshot,
        package_price_rwf, package_duration_minutes, package_photo_count,
        status, starts_at, ends_at, buffer_ends_at,
-       location_text, consent_at, booking_fee_rate, booking_fee_rwf
+       location_text, consent_at, booking_fee_rate, booking_fee_rwf,
+       client_cancel_cutoff_hours, booking_fee_refundable_on_client_cancel
      ) VALUES (
        $1, $2, $3, $4, $5,
        'Aline Uwase', 'aline@example.com', '+250788000000',
        'Portrait', 'Standard',
        40000, 60, 20,
        $6, $7, $8, $9,
-       'Kigali Heights', now(), 0.400, 16000
+       'Kigali Heights', now(), 0.400, 16000,
+       0, false
      ) RETURNING id`,
     [reference, ids.clientId, ids.photographerId, ids.serviceId, ids.packageId, status, startsAt, endsAt, bufferEndsAt],
   );
@@ -926,6 +928,30 @@ describe('CHECK constraints', () => {
   it('refuses a booking status outside the vocabulary', async () => {
     const ids = await insertWorld();
     expect(await sqlstateOf(db, () => insertBooking(ids, 'BKY-2610-AAAAA', { ...SLOT, status: 'declined' }))).toBe('23514');
+  });
+
+  it('refuses a negative cancellation cut-off snapshotted on a booking (R1.8)', async () => {
+    const ids = await insertWorld();
+    const bookingId = await insertBooking(ids, 'BKY-2610-AAAAA', SLOT);
+
+    expect(
+      await sqlstateOf(db, () => db.query('UPDATE booking SET client_cancel_cutoff_hours = -1 WHERE id = $1', [bookingId])),
+    ).toBe('23514');
+  });
+
+  it('gives the cancellation-policy snapshot no default: a booking insert that skips it is refused (R1.8)', async () => {
+    const columns = await db.query<{ column_name: string; is_nullable: string; column_default: string | null }>(
+      `SELECT column_name, is_nullable, column_default
+         FROM information_schema.columns
+        WHERE table_name = 'booking'
+          AND column_name IN ('client_cancel_cutoff_hours', 'booking_fee_refundable_on_client_cancel')
+        ORDER BY column_name`,
+    );
+
+    expect(columns.rows).toEqual([
+      { column_name: 'booking_fee_refundable_on_client_cancel', is_nullable: 'NO', column_default: null },
+      { column_name: 'client_cancel_cutoff_hours', is_nullable: 'NO', column_default: null },
+    ]);
   });
 });
 

@@ -26,9 +26,18 @@ import { latestSessionFee, moneyMoving, PAYABLE_STATUSES } from './session-fee.j
  *
  * Paid in full after the shoot has begun, the booking completes in the same
  * transaction (item 6, `auto-complete.ts`).
+ *
+ * Only on the signed-in photographer's own booking (marketplace-spec.md R1.4):
+ * the row lock is by id and photographer, so another photographer's booking
+ * is `not_found`.
  */
 
-export type CashPaymentDeps = { prisma: PrismaClient; now: () => Date };
+export type CashPaymentDeps = {
+  prisma: PrismaClient;
+  now: () => Date;
+  /** The photographer whose booking this must be: from the token, never the request. */
+  photographerId: string;
+};
 
 export type CashPaymentInput = { amountRwf: number; note: string | null };
 
@@ -56,7 +65,10 @@ export async function recordCashPayment(deps: CashPaymentDeps, bookingId: string
   const outcome = await prisma.$transaction(async (tx): Promise<Outcome> => {
     // The lock every money edit takes: the balance read here cannot move.
     const bookings = await tx.$queryRaw<{ id: string; status: string; package_price_rwf: number }[]>`
-      SELECT id::text AS id, status, package_price_rwf FROM booking WHERE id = ${bookingId}::uuid FOR UPDATE`;
+      SELECT id::text AS id, status, package_price_rwf
+        FROM booking
+       WHERE id = ${bookingId}::uuid AND photographer_id = ${deps.photographerId}::uuid
+         FOR UPDATE`;
     const booking = bookings[0];
     if (booking === undefined) return 'not_found';
     if (!PAYABLE_STATUSES.includes(booking.status)) return 'not_allowed';
@@ -93,6 +105,6 @@ export async function recordCashPayment(deps: CashPaymentDeps, bookingId: string
   });
 
   if (outcome !== 'ok') return { status: outcome };
-  const booking = await findAdminBooking(prisma, bookingId);
+  const booking = await findAdminBooking(prisma, deps.photographerId, bookingId);
   return booking === null ? { status: 'not_found' } : { status: 'ok', booking };
 }

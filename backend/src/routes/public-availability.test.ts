@@ -196,6 +196,8 @@ function bookingData({
     consentAt: NOW,
     bookingFeeRate: '0.400',
     bookingFeeRwf: 16_000,
+    clientCancelCutoffHours: 0,
+    bookingFeeRefundableOnClientCancel: false,
     status,
     startsAt,
     endsAt,

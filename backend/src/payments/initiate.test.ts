@@ -979,7 +979,7 @@ describe('a request made from the admin screen, then paid by the client', () => 
   }
 
   async function ask(bookingId: string, providerId: 'mtn_momo_direct' | 'flutterwave' = 'mtn_momo_direct') {
-    const result = await requestSessionFee({ prisma, providerId, now: () => ASK_CLOCK }, bookingId);
+    const result = await requestSessionFee({ prisma, providerId, now: () => ASK_CLOCK, photographerId: world.photographerId }, bookingId);
     if (result.status !== 'ok') throw new Error(`Expected the request to be made, got ${result.status}`);
   }
 

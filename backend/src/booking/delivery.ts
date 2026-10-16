@@ -25,9 +25,17 @@ import { type AdminBooking, findAdminBooking } from './admin-view.js';
  * afterwards. Sending is repeatable -- a replaced link, an email that never
  * arrived (§6.20) -- and each send is its own message with its own dedupe key,
  * leaving every earlier one in the booking's history.
+ *
+ * Both act on the signed-in photographer's own bookings only
+ * (marketplace-spec.md R1.4): another photographer's is `not_found`.
  */
 
-export type DeliveryDeps = { prisma: PrismaClient; now: () => Date };
+export type DeliveryDeps = {
+  prisma: PrismaClient;
+  now: () => Date;
+  /** The photographer whose booking this must be: from the token, never the request. */
+  photographerId: string;
+};
 
 export type DeliveryResult =
   | { status: 'ok'; booking: AdminBooking }
@@ -49,7 +57,7 @@ const MS_PER_DAY = 86_400_000;
 
 /** Saves, or replaces, the link and the date it stops working. */
 export async function saveDelivery(deps: DeliveryDeps, bookingId: string, edit: DeliveryEdit): Promise<DeliveryResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   if (booking === null) return { status: 'not_found' };
   if (booking.status !== 'completed') return { status: 'not_allowed' };
 
@@ -88,7 +96,7 @@ export async function sendDelivery(
   /** Another address for this one email only; the booking's contact email stays (decided 2026-09-25). */
   options: { recipient?: string | undefined } = {},
 ): Promise<DeliveryResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   if (booking === null) return { status: 'not_found' };
   if (booking.status !== 'completed') return { status: 'not_allowed' };
   if (booking.deliveryUrl === null) return { status: 'no_link' };
@@ -142,6 +150,6 @@ async function defaultExpiry(deps: DeliveryDeps, photographerId: string): Promis
 
 /** The booking as it now stands, which is what every action answers with. */
 async function reload(deps: DeliveryDeps, bookingId: string): Promise<DeliveryResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   return booking === null ? { status: 'not_found' } : { status: 'ok', booking };
 }

@@ -520,8 +520,7 @@ describe('a cancellation cut-off', () => {
   const startsAt = new Date('2027-02-03T07:00:00Z');
 
   it('closes cancellation that many hours before the shoot: allowed a millisecond before, refused at it', async () => {
-    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 48 }, prisma);
-    const { booking, token } = await insertBookingWithToken(prisma, world, { startsAt });
+    const { booking, token } = await insertBookingWithToken(prisma, world, { startsAt, clientCancelCutoffHours: 48 });
     const cutoff = new Date(startsAt.getTime() - 48 * HOUR_MS);
 
     for (const late of [cutoff, new Date(cutoff.getTime() + HOUR_MS), new Date(startsAt.getTime() - 1)]) {
@@ -534,17 +533,16 @@ describe('a cancellation cut-off', () => {
   });
 
   it('of 0 hours leaves cancellation open until the shoot itself, as before the marketplace', async () => {
-    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 0 }, prisma);
-    const { token } = await insertBookingWithToken(prisma, world, { startsAt });
+    const { token } = await insertBookingWithToken(prisma, world, { startsAt, clientCancelCutoffHours: 0 });
 
     await expect(cancelByClient(deps(new Date(startsAt.getTime() - 1)), token)).resolves.toMatchObject({ status: 'cancelled' });
   });
 
-  it('is read from the booking’s own photographer, as it stands at cancellation', async () => {
+  it('is the one the booking was made under: never another photographer’s, and never a later edit', async () => {
     const second = await seedSecondPhotographer(prisma, world);
     await updatePhotographerSettings(second.photographerId, { clientCancelCutoffHours: 720 }, prisma);
     const mine = await insertBookingWithToken(prisma, world, { startsAt });
-    const theirs = await insertBookingWithToken(prisma, second, { startsAt: new Date(startsAt.getTime() + 7 * 24 * HOUR_MS) });
+    const theirs = await insertBookingWithToken(prisma, second, { startsAt: new Date(startsAt.getTime() + 7 * 24 * HOUR_MS), clientCancelCutoffHours: 720 });
     const now = new Date(startsAt.getTime() - 24 * HOUR_MS);
 
     // The other photographer's 30 days do not bind this one's client...
@@ -552,19 +550,18 @@ describe('a cancellation cut-off', () => {
     // ...and bind their own.
     await expect(cancelByClient(deps(now), theirs.token)).resolves.toStrictEqual({ status: 'not_cancellable' });
 
-    // An edit applies to bookings already made: the policy is not snapshotted.
+    // An edit applies to new bookings only: the booking keeps the terms it was made under (R1.8).
     await updatePhotographerSettings(second.photographerId, { clientCancelCutoffHours: 1 }, prisma);
-    await expect(cancelByClient(deps(now), theirs.token)).resolves.toMatchObject({ status: 'cancelled' });
+    await expect(cancelByClient(deps(now), theirs.token)).resolves.toStrictEqual({ status: 'not_cancellable' });
   });
 });
 
 describe('a booking fee the photographer refunds on a client’s cancellation', () => {
-  beforeEach(async () => {
-    await updatePhotographerSettings(world.photographerId, { bookingFeeRefundableOnClientCancel: true }, prisma);
-  });
+  /** A booking made while its photographer's policy refunded the fee (R1.8, snapshotted on the booking). */
+  const REFUNDABLE = { bookingFeeRefundableOnClientCancel: true } as const;
 
   it('is marked refund_due with an alert of its own, and promised to the client', async () => {
-    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRwf: 18_000 });
+    const { booking, token } = await insertBookingWithToken(prisma, world, { ...REFUNDABLE, bookingFeeRwf: 18_000 });
     const fee = await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 18_000, providerRef: '4100000777' });
 
     await cancelByClient(deps(), token);
@@ -592,7 +589,7 @@ describe('a booking fee the photographer refunds on a client’s cancellation', 
   });
 
   it('is owed back together with a paid session fee, one alert each, and summed for the client', async () => {
-    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRwf: 18_000 });
+    const { booking, token } = await insertBookingWithToken(prisma, world, { ...REFUNDABLE, bookingFeeRwf: 18_000 });
     await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 18_000, ageSeconds: 300 });
     await insertPayment(prisma, booking.id, { status: 'succeeded', kind: 'session_fee', amountRwf: 27_000, ageSeconds: 100 });
 
@@ -608,7 +605,7 @@ describe('a booking fee the photographer refunds on a client’s cancellation', 
   });
 
   it('owes nothing when the fee was never collected', async () => {
-    const { booking, token } = await insertBookingWithToken(prisma, world);
+    const { booking, token } = await insertBookingWithToken(prisma, world, REFUNDABLE);
     await insertPayment(prisma, booking.id, { status: 'failed' });
 
     await cancelByClient(deps(), token);
@@ -619,7 +616,7 @@ describe('a booking fee the photographer refunds on a client’s cancellation', 
   });
 
   it('renders emails that no longer call the fee non-refundable', async () => {
-    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRwf: 18_000 });
+    const { booking, token } = await insertBookingWithToken(prisma, world, { ...REFUNDABLE, bookingFeeRwf: 18_000 });
     await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 18_000 });
 
     await cancelByClient(deps(), token);
@@ -636,10 +633,9 @@ describe('a booking fee the photographer refunds on a client’s cancellation', 
   });
 
   it('is the booking’s own photographer’s choice: another photographer’s refundable policy refunds nothing here', async () => {
-    await updatePhotographerSettings(world.photographerId, { bookingFeeRefundableOnClientCancel: false }, prisma);
     const second = await seedSecondPhotographer(prisma, world);
     await updatePhotographerSettings(second.photographerId, { bookingFeeRefundableOnClientCancel: true }, prisma);
-    const { booking, token } = await insertBookingWithToken(prisma, world);
+    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRefundableOnClientCancel: false });
     await insertPayment(prisma, booking.id, { status: 'succeeded' });
 
     await cancelByClient(deps(), token);
@@ -725,5 +721,27 @@ describe('scope comes from the token alone', () => {
     await cancelByClient(deps(), token);
 
     expect(await bookingRow(orphan.id)).toMatchObject({ status: 'confirmed' });
+  });
+});
+
+describe('a policy edited after the booking was made (R1.8)', () => {
+  it('refunds the fee the client was promised, though the photographer has since withdrawn the refund', async () => {
+    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRefundableOnClientCancel: true });
+    await insertPayment(prisma, booking.id, { status: 'succeeded' });
+    await updatePhotographerSettings(world.photographerId, { bookingFeeRefundableOnClientCancel: false }, prisma);
+
+    await cancelByClient(deps(), token);
+
+    expect((await paymentStatuses(booking.id)).map((row) => row.status)).toEqual(['refund_due']);
+  });
+
+  it('keeps the fee the client agreed to forfeit, though the photographer refunds it on new bookings now', async () => {
+    const { booking, token } = await insertBookingWithToken(prisma, world);
+    await insertPayment(prisma, booking.id, { status: 'succeeded' });
+    await updatePhotographerSettings(world.photographerId, { bookingFeeRefundableOnClientCancel: true }, prisma);
+
+    await cancelByClient(deps(), token);
+
+    expect((await paymentStatuses(booking.id)).map((row) => row.status)).toEqual(['succeeded']);
   });
 });

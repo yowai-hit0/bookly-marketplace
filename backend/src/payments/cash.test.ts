@@ -53,7 +53,7 @@ beforeEach(async () => {
 });
 
 function deps(now: Date = NOW) {
-  return { prisma, now: () => now };
+  return { prisma, now: () => now, photographerId: world.photographerId };
 }
 
 function cash(bookingId: string, amountRwf: number, note: string | null = null, now: Date = NOW) {
@@ -72,7 +72,7 @@ async function sessionFees(bookingId: string) {
 }
 
 async function view(bookingId: string, now: Date = NOW) {
-  const booking = await findAdminBooking(prisma, bookingId);
+  const booking = await findAdminBooking(prisma, world.photographerId, bookingId);
   if (booking === null) throw new Error('gone');
   return adminBookingView(booking, now);
 }
@@ -172,7 +172,7 @@ describe('an open online request', () => {
   it('is voided by the cash, so its link cannot collect the same money, and the client sees nothing to pay', async () => {
     const { booking } = await insertBookingWithToken(prisma, world);
     await insertPayment(prisma, booking.id, { status: 'succeeded', ageSeconds: 3600 });
-    expect((await requestSessionFee({ prisma, providerId: 'mtn_momo_direct', now: () => NOW }, booking.id)).status).toBe('ok');
+    expect((await requestSessionFee({ prisma, providerId: 'mtn_momo_direct', now: () => NOW, photographerId: world.photographerId }, booking.id)).status).toBe('ok');
     const [request] = await sessionFees(booking.id);
     const token = (await prisma.outbox.findFirstOrThrow({ where: { template: 'session_fee_request' } })).payload as { accessToken: string };
 
@@ -188,10 +188,10 @@ describe('an open online request', () => {
 
   it('is voided by part-payment in cash too; the next ask is for what is left', async () => {
     const booking = await owingBooking();
-    await requestSessionFee({ prisma, providerId: 'mtn_momo_direct', now: () => NOW }, booking.id);
+    await requestSessionFee({ prisma, providerId: 'mtn_momo_direct', now: () => NOW, photographerId: world.photographerId }, booking.id);
 
     expect((await cash(booking.id, 10_000)).status).toBe('ok');
-    expect((await requestSessionFee({ prisma, providerId: 'mtn_momo_direct', now: () => NOW }, booking.id)).status).toBe('ok');
+    expect((await requestSessionFee({ prisma, providerId: 'mtn_momo_direct', now: () => NOW, photographerId: world.photographerId }, booking.id)).status).toBe('ok');
 
     const open = (await sessionFees(booking.id)).filter((row) => row.status === 'initiated');
     expect(open.map((row) => row.amountRwf)).toEqual([20_000]);

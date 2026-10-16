@@ -9,6 +9,7 @@ import {
   CLIENT,
   insertBooking,
   insertPayment,
+  seedSecondPhotographer,
   seedWorld,
 } from '../test/payment-fixtures.js';
 import { BOOKINGS_MAX_PAGE_SIZE, BOOKINGS_PAGE_SIZE, findBookings } from './admin-list.js';
@@ -97,6 +98,7 @@ async function bulkBookings(count: number, firstStart: Date): Promise<void> {
     data: Array.from({ length: count }, (_unused, index) => ({
       reference: `BKY-2703-${String(index).padStart(5, '0')}`,
       clientId: world.clientId,
+      photographerId: world.photographerId,
       contactName: CLIENT.name,
       contactEmail: CLIENT.email,
       contactPhone: CLIENT.phone,
@@ -115,14 +117,16 @@ async function bulkBookings(count: number, firstStart: Date): Promise<void> {
       consentAt: new Date('2026-10-01T06:00:00Z'),
       bookingFeeRate: '0.400',
       bookingFeeRwf: 20_000,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
       cancelledAt: new Date('2026-10-01T06:10:00Z'),
     })),
   });
 }
 
 /** The references a query answers, in the order it answered them. */
-async function references(query: Parameters<typeof findBookings>[1] = {}): Promise<string[]> {
-  const page = await findBookings(prisma, query);
+async function references(query: Parameters<typeof findBookings>[2] = {}): Promise<string[]> {
+  const page = await findBookings(prisma, world.photographerId, query);
   return page.bookings.map((row) => row.reference);
 }
 
@@ -162,7 +166,7 @@ describe('filtering by status', () => {
   it('answers nothing for a status nothing holds', async () => {
     await book({ status: 'confirmed' });
 
-    expect(await findBookings(prisma, { statuses: ['expired'] })).toStrictEqual({
+    expect(await findBookings(prisma, world.photographerId, { statuses: ['expired'] })).toStrictEqual({
       bookings: [],
       total: 0,
       page: 1,
@@ -289,6 +293,29 @@ describe('searching', () => {
   });
 });
 
+// --- One photographer's bookings ------------------------------------------------------------
+
+describe('scoped to one photographer (marketplace-spec.md R1.4)', () => {
+  it('lists only the photographer’s own bookings, and counts only them', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const mine = await book({ status: 'confirmed' });
+    const theirs = await insertBooking(prisma, second, { status: 'confirmed' });
+
+    expect(await references()).toEqual([mine.reference]);
+    expect((await findBookings(prisma, world.photographerId)).total).toBe(1);
+    expect(await findBookings(prisma, second.photographerId)).toMatchObject({ total: 1, bookings: [{ reference: theirs.reference }] });
+  });
+
+  it('never finds another photographer’s booking by search, even by its exact reference or the shared client’s details', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const theirs = await insertBooking(prisma, second, { status: 'confirmed', reference: 'BKY-2703-ZZZZZ' });
+
+    for (const search of [theirs.reference, 'zzzzz', CLIENT.name, CLIENT.email, CLIENT.phone.slice(-6)]) {
+      expect(await references({ search })).toEqual([]);
+    }
+  });
+});
+
 // --- Filters together ---------------------------------------------------------------------
 
 describe('filters combined', () => {
@@ -356,15 +383,15 @@ describe('paging by number', () => {
   it('walks the whole list two rows at a time, with the total and the page count on every page', async () => {
     const shoots = await inOrder();
 
-    const first = await findBookings(prisma, { page: 1, pageSize: 2 });
+    const first = await findBookings(prisma, world.photographerId, { page: 1, pageSize: 2 });
     expect(first.bookings.map((row) => row.reference)).toEqual([shoots[0], shoots[1]]);
     expect(first).toMatchObject({ total: 5, page: 1, pageSize: 2, pageCount: 3 });
 
-    const second = await findBookings(prisma, { page: 2, pageSize: 2 });
+    const second = await findBookings(prisma, world.photographerId, { page: 2, pageSize: 2 });
     expect(second.bookings.map((row) => row.reference)).toEqual([shoots[2], shoots[3]]);
     expect(second).toMatchObject({ total: 5, page: 2, pageCount: 3 });
 
-    const third = await findBookings(prisma, { page: 3, pageSize: 2 });
+    const third = await findBookings(prisma, world.photographerId, { page: 3, pageSize: 2 });
     expect(third.bookings.map((row) => row.reference)).toEqual([shoots[4]]);
     expect(third).toMatchObject({ total: 5, page: 3, pageCount: 3 });
 
@@ -376,8 +403,8 @@ describe('paging by number', () => {
   it('answers the same rows for the same page asked twice over an unchanged table', async () => {
     await inOrder();
 
-    const once = await findBookings(prisma, { page: 2, pageSize: 2 });
-    const again = await findBookings(prisma, { page: 2, pageSize: 2 });
+    const once = await findBookings(prisma, world.photographerId, { page: 2, pageSize: 2 });
+    const again = await findBookings(prisma, world.photographerId, { page: 2, pageSize: 2 });
 
     expect(again.bookings.map((row) => row.id)).toEqual(once.bookings.map((row) => row.id));
   });
@@ -385,7 +412,7 @@ describe('paging by number', () => {
   it('counts a last page that is exactly full as the last page', async () => {
     await inOrder();
 
-    const page = await findBookings(prisma, { page: 1, pageSize: 5 });
+    const page = await findBookings(prisma, world.photographerId, { page: 1, pageSize: 5 });
 
     expect(page.bookings).toHaveLength(5);
     expect(page).toMatchObject({ total: 5, page: 1, pageCount: 1 });
@@ -394,7 +421,7 @@ describe('paging by number', () => {
   it('answers the last page for a page past the end, so a stale link still shows bookings', async () => {
     const shoots = await inOrder();
 
-    const past = await findBookings(prisma, { page: 99, pageSize: 2 });
+    const past = await findBookings(prisma, world.photographerId, { page: 99, pageSize: 2 });
 
     expect(past.page).toBe(3);
     expect(past.bookings.map((row) => row.reference)).toEqual([shoots[4]]);
@@ -404,14 +431,14 @@ describe('paging by number', () => {
     const shoots = await inOrder();
 
     for (const page of [0, -3]) {
-      const answer = await findBookings(prisma, { page, pageSize: 2 });
+      const answer = await findBookings(prisma, world.photographerId, { page, pageSize: 2 });
       expect(answer.page).toBe(1);
       expect(answer.bookings.map((row) => row.reference)).toEqual([shoots[0], shoots[1]]);
     }
   });
 
   it('is page 1 of 1 for an empty list, not page 0 of 0', async () => {
-    expect(await findBookings(prisma, { page: 4 })).toMatchObject({ bookings: [], total: 0, page: 1, pageCount: 1 });
+    expect(await findBookings(prisma, world.photographerId, { page: 4 })).toMatchObject({ bookings: [], total: 0, page: 1, pageCount: 1 });
   });
 
   it('carries its filter with it: the total, the page count and every page are filtered', async () => {
@@ -419,11 +446,11 @@ describe('paging by number', () => {
     const cancelledLate = await book({ startsAt: at('2027-03-11', '12:00'), status: 'cancelled_by_photographer' });
     const cancelledEarly = await book({ startsAt: at('2027-03-11', '06:00'), status: 'cancelled_by_photographer' });
 
-    const first = await findBookings(prisma, { statuses: ['cancelled_by_photographer'], page: 1, pageSize: 1 });
+    const first = await findBookings(prisma, world.photographerId, { statuses: ['cancelled_by_photographer'], page: 1, pageSize: 1 });
     expect(first.bookings.map((row) => row.reference)).toEqual([cancelledLate.reference]);
     expect(first).toMatchObject({ total: 2, pageCount: 2 });
 
-    const second = await findBookings(prisma, { statuses: ['cancelled_by_photographer'], page: 2, pageSize: 1 });
+    const second = await findBookings(prisma, world.photographerId, { statuses: ['cancelled_by_photographer'], page: 2, pageSize: 1 });
     expect(second.bookings.map((row) => row.reference)).toEqual([cancelledEarly.reference]);
   });
 });
@@ -434,7 +461,7 @@ describe('the page size', () => {
   it('defaults to 25, and the total says how many more there are', async () => {
     await bulkBookings(BOOKINGS_PAGE_SIZE + 1, at('2027-03-11', '09:00'));
 
-    const page = await findBookings(prisma);
+    const page = await findBookings(prisma, world.photographerId);
 
     expect(BOOKINGS_PAGE_SIZE).toBe(25);
     expect(page.bookings).toHaveLength(BOOKINGS_PAGE_SIZE);
@@ -445,15 +472,15 @@ describe('the page size', () => {
     await bulkBookings(BOOKINGS_MAX_PAGE_SIZE + 1, at('2027-03-11', '09:00'));
 
     expect(BOOKINGS_MAX_PAGE_SIZE).toBe(100);
-    expect((await findBookings(prisma, { pageSize: 1_000_000 })).bookings).toHaveLength(BOOKINGS_MAX_PAGE_SIZE);
-    expect((await findBookings(prisma, { pageSize: BOOKINGS_MAX_PAGE_SIZE })).bookings).toHaveLength(BOOKINGS_MAX_PAGE_SIZE);
+    expect((await findBookings(prisma, world.photographerId, { pageSize: 1_000_000 })).bookings).toHaveLength(BOOKINGS_MAX_PAGE_SIZE);
+    expect((await findBookings(prisma, world.photographerId, { pageSize: BOOKINGS_MAX_PAGE_SIZE })).bookings).toHaveLength(BOOKINGS_MAX_PAGE_SIZE);
   });
 
   it('clamps a zero or negative size up to one row', async () => {
     await bulkBookings(3, at('2027-03-11', '09:00'));
 
-    expect((await findBookings(prisma, { pageSize: 0 })).bookings).toHaveLength(1);
-    expect((await findBookings(prisma, { pageSize: -10 })).bookings).toHaveLength(1);
+    expect((await findBookings(prisma, world.photographerId, { pageSize: 0 })).bookings).toHaveLength(1);
+    expect((await findBookings(prisma, world.photographerId, { pageSize: -10 })).bookings).toHaveLength(1);
   });
 });
 
@@ -464,7 +491,7 @@ describe('each row’s money', () => {
     const booking = await book({ status: 'confirmed', addons: ['own', 'shared'] });
     await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 22_000 });
 
-    const row = (await findBookings(prisma)).bookings[0];
+    const row = (await findBookings(prisma, world.photographerId)).bookings[0];
     const expected = bookingTotals(
       { status: 'confirmed', packagePriceRwf: 40_000 },
       [
@@ -499,7 +526,7 @@ describe('each row’s money', () => {
     });
     await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
 
-    const row = (await findBookings(prisma)).bookings[0];
+    const row = (await findBookings(prisma, world.photographerId)).bookings[0];
 
     expect(row).toMatchObject({ grandTotalRwf: 65_000, collectedRwf: 20_000, outstandingRwf: 45_000 });
   });
@@ -508,7 +535,7 @@ describe('each row’s money', () => {
     const booking = await book({ status: 'cancelled_by_photographer' });
     await insertPayment(prisma, booking.id, { status: 'refund_due', amountRwf: 20_000 });
 
-    const row = (await findBookings(prisma)).bookings[0];
+    const row = (await findBookings(prisma, world.photographerId)).bookings[0];
 
     expect(row).toMatchObject({ collectedRwf: 0, refundDueRwf: 20_000, hasRefundDue: true, outstandingRwf: 0 });
   });
@@ -519,7 +546,7 @@ describe('each row’s money', () => {
       const booking = await book({ status });
       await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
 
-      const row = (await findBookings(prisma)).bookings[0];
+      const row = (await findBookings(prisma, world.photographerId)).bookings[0];
 
       expect(row).toMatchObject({ reference: booking.reference, status, grandTotalRwf: 50_000, outstandingRwf: 0 });
     },
@@ -529,7 +556,7 @@ describe('each row’s money', () => {
     const booking = await book({ status, startsAt: at('2027-03-01', '09:00') });
     await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
 
-    const row = (await findBookings(prisma)).bookings[0];
+    const row = (await findBookings(prisma, world.photographerId)).bookings[0];
 
     expect(row).toMatchObject({ reference: booking.reference, outstandingRwf: 30_000 });
   });
@@ -539,7 +566,7 @@ describe('each row’s money', () => {
     await insertPayment(prisma, booking.id, { status: 'pending', amountRwf: 20_000, ageSeconds: 300 });
     await insertPayment(prisma, booking.id, { status: 'failed', amountRwf: 20_000, ageSeconds: 200 });
 
-    const row = (await findBookings(prisma)).bookings[0];
+    const row = (await findBookings(prisma, world.photographerId)).bookings[0];
 
     expect(row).toMatchObject({ collectedRwf: 0, refundDueRwf: 0, outstandingRwf: 50_000 });
   });
@@ -547,7 +574,7 @@ describe('each row’s money', () => {
   it('carries the contact and catalogue snapshots a list needs, and no access token', async () => {
     const booking = await book({ status: 'confirmed' });
 
-    const row = (await findBookings(prisma)).bookings[0];
+    const row = (await findBookings(prisma, world.photographerId)).bookings[0];
 
     expect(row).toMatchObject({
       id: booking.id,
@@ -588,6 +615,7 @@ describe('filtering by display stage', () => {
       { seed: { status: 'expired', startsAt: at('2027-03-02T07:00:00Z') } },
       { seed: { status: 'cancelled_by_client', holdMinutes: null, startsAt: at('2027-03-01T07:00:00Z') } },
       { seed: { status: 'cancelled_by_photographer', holdMinutes: null, startsAt: at('2027-02-28T07:00:00Z') } },
+      { seed: { status: 'cancelled_by_platform', holdMinutes: null, startsAt: at('2027-02-27T07:00:00Z') } },
     ];
     const made: Booking[] = [];
     for (const { seed, delivered } of seeds) {
@@ -609,7 +637,7 @@ describe('filtering by display stage', () => {
 
     for (const stage of BOOKING_STAGES) {
       const expected = bookings.filter((booking) => bookingStage(booking, NOW, 'admin') === stage).map((b) => b.id).sort();
-      const page = await findBookings(prisma, { stages: [stage], now: NOW, pageSize: 100 });
+      const page = await findBookings(prisma, world.photographerId, { stages: [stage], now: NOW, pageSize: 100 });
       expect([stage, page.bookings.map((row) => row.id).sort()]).toEqual([stage, expected]);
       for (const row of page.bookings) expect(row.stage).toBe(stage);
     }
@@ -621,17 +649,17 @@ describe('filtering by display stage', () => {
     const bookings = await everyStage();
     const ids = (stage: string) => bookings.filter((b) => bookingStage(b, NOW, 'admin') === stage).map((b) => b.id);
 
-    const several = await findBookings(prisma, { stages: ['in_progress', 'needs_review'], now: NOW, pageSize: 100 });
+    const several = await findBookings(prisma, world.photographerId, { stages: ['in_progress', 'needs_review'], now: NOW, pageSize: 100 });
     expect(several.bookings.map((row) => row.id).sort()).toEqual([...ids('in_progress'), ...ids('needs_review')].sort());
 
-    const byStatus = await findBookings(prisma, { statuses: ['completed'], now: NOW, pageSize: 100 });
+    const byStatus = await findBookings(prisma, world.photographerId, { statuses: ['completed'], now: NOW, pageSize: 100 });
     expect(byStatus.bookings.map((row) => row.id).sort()).toEqual([...ids('completed'), ...ids('closed')].sort());
   });
 
   it('stages every row it returns, filtered or not', async () => {
     const bookings = await everyStage();
 
-    const page = await findBookings(prisma, { now: NOW, pageSize: 100 });
+    const page = await findBookings(prisma, world.photographerId, { now: NOW, pageSize: 100 });
 
     for (const row of page.bookings) {
       const booking = bookings.find((b) => b.id === row.id);

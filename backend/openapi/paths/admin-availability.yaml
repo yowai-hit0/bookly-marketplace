@@ -224,7 +224,7 @@ settings:
   get:
     operationId: getSettings
     tags: [Admin settings]
-    summary: The five operating values
+    summary: The photographer's operating values and cancellation policy
     responses:
       '200':
         description: Settings.
@@ -237,7 +237,10 @@ settings:
     operationId: updateSettings
     tags: [Admin settings]
     summary: Change settings
-    description: Any subset of the five. Each is range-checked here, so a value out of range is a 422 rather than a database error.
+    description: |
+      Any subset of the six. Each is range-checked here, so a value out of
+      range is a 422 rather than a database error. Applies to bookings made
+      from now on; existing bookings keep the terms they were made under.
     requestBody:
       required: true
       content:

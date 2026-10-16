@@ -2,12 +2,13 @@ import type { Addon, Package, PrismaClient, Service } from '@prisma/client';
 import { type Response, Router } from 'express';
 import { z } from 'zod';
 import { kigaliDateOf } from '../availability/engine.js';
+import { photographerLocals } from '../auth/middleware.js';
 import { SQLSTATE, sqlstateOf } from '../db/errors.js';
 import { INT4_MAX, feeRate, parseOrReject } from './validation.js';
 
 /**
  * The catalogue CMS (plan.md Task 10, spec §3.4, §6.8, §6.14, P-17 to P-20).
- * Mounted behind `requireAdmin`.
+ * Mounted behind `requirePhotographer`.
  *
  *   GET    /catalogue          every service with its packages and add-ons,
  *                              plus the add-ons offered on every service
@@ -23,6 +24,12 @@ import { INT4_MAX, feeRate, parseOrReject } from './validation.js';
  * Deactivating is how something stops being sold (§6.14). A hard delete is
  * allowed only for a row nothing references -- a typo, a duplicate -- and the
  * database's `RESTRICT` foreign keys decide that, answered as 409.
+ *
+ * Everything is the signed-in photographer's own catalogue (marketplace-spec.md
+ * R1.4). The id to scope to is `photographerLocals(res).photographerId`, never
+ * a value from the request; a path id naming another photographer's row is the
+ * same 404 as one naming nothing, and a body `serviceId` naming another
+ * photographer's service is the same 422 as one naming nothing.
  */
 
 const NAME_MAX_LENGTH = 200;
@@ -76,7 +83,7 @@ const createServiceBody = z.strictObject({
   descriptionEn: optionalDescription,
   descriptionFr: optionalDescription,
   coverImageUrl,
-  /** null = the global `setting.booking_fee_rate` (spec A-4). */
+  /** null = the photographer's own `photographer_setting.booking_fee_rate` (spec A-4). */
   bookingFeeRateOverride: feeRate.nullable().optional(),
   isActive,
   sortOrder,
@@ -99,7 +106,7 @@ const createPackageBody = z.strictObject({
 const updatePackageBody = createPackageBody.omit({ serviceId: true }).partial();
 
 const createAddonBody = z.strictObject({
-  /** Required, and fixed at creation: null means offered on every service. */
+  /** Required, and fixed at creation: null means offered on every one of this photographer's services. */
   serviceId: rowId.nullable(),
   nameEn: name,
   nameFr: optionalName,
@@ -116,12 +123,17 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
   const router = Router();
 
   router.get('/catalogue', async (_req, res) => {
+    const { photographerId } = photographerLocals(res);
+    // A service's packages and add-ons are its photographer's by construction
+    // (the composite foreign key, and the add-on write path below), so scoping
+    // the services scopes what they include.
     const [services, sharedAddons] = await Promise.all([
       prisma.service.findMany({
+        where: { photographerId },
         orderBy: [...ORDER],
         include: { packages: { orderBy: [...ORDER] }, addons: { orderBy: [...ORDER] } },
       }),
-      prisma.addon.findMany({ where: { serviceId: null }, orderBy: [...ORDER] }),
+      prisma.addon.findMany({ where: { photographerId, serviceId: null }, orderBy: [...ORDER] }),
     ]);
 
     res.json({
@@ -141,7 +153,8 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
     if (body === undefined) return;
 
     try {
-      const created = await prisma.service.create({ data: { ...body, ...feeRateData(body) } });
+      const { photographerId } = photographerLocals(res);
+      const created = await prisma.service.create({ data: { ...body, ...feeRateData(body), photographerId } });
       res.status(201).json({ service: toAdminService(created) });
     } catch (error) {
       if (!rejectTakenSlug(error, res)) throw error;
@@ -154,12 +167,13 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
     const body = parseOrReject(updateServiceBody, req.body, res);
     if (body === undefined) return;
 
+    const { photographerId } = photographerLocals(res);
     try {
       const { count } = await prisma.service.updateMany({
-        where: { id: id.data },
+        where: { id: id.data, photographerId },
         data: { ...body, ...feeRateData(body) },
       });
-      const updated = count === 0 ? null : await prisma.service.findUnique({ where: { id: id.data } });
+      const updated = count === 0 ? null : await prisma.service.findFirst({ where: { id: id.data, photographerId } });
       if (updated === null) return notFound(res);
       res.json({ service: toAdminService(updated) });
     } catch (error) {
@@ -168,7 +182,8 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
   });
 
   router.delete('/services/:id', async (req, res) => {
-    await deleteRow(res, req.params.id, (id) => prisma.service.deleteMany({ where: { id } }));
+    const { photographerId } = photographerLocals(res);
+    await deleteRow(res, req.params.id, (id) => prisma.service.deleteMany({ where: { id, photographerId } }));
   });
 
   // --- Packages ------------------------------------------------------------------
@@ -177,9 +192,12 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
     const body = parseOrReject(createPackageBody, req.body, res);
     if (body === undefined) return;
 
+    // The composite foreign key (service_id, photographer_id) refuses another
+    // photographer's service exactly as it refuses an unknown one: 422.
+    const { photographerId } = photographerLocals(res);
     try {
-      const created = await prisma.package.create({ data: body });
-      res.status(201).json(await withDurationWarning(prisma, now(), created));
+      const created = await prisma.package.create({ data: { ...body, photographerId } });
+      res.status(201).json(await withDurationWarning(prisma, photographerId, now(), created));
     } catch (error) {
       if (!rejectUnknownService(error, res)) throw error;
     }
@@ -191,14 +209,16 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
     const body = parseOrReject(updatePackageBody, req.body, res);
     if (body === undefined) return;
 
-    const { count } = await prisma.package.updateMany({ where: { id: id.data }, data: body });
-    const updated = count === 0 ? null : await prisma.package.findUnique({ where: { id: id.data } });
+    const { photographerId } = photographerLocals(res);
+    const { count } = await prisma.package.updateMany({ where: { id: id.data, photographerId }, data: body });
+    const updated = count === 0 ? null : await prisma.package.findFirst({ where: { id: id.data, photographerId } });
     if (updated === null) return notFound(res);
-    res.json(await withDurationWarning(prisma, now(), updated));
+    res.json(await withDurationWarning(prisma, photographerId, now(), updated));
   });
 
   router.delete('/packages/:id', async (req, res) => {
-    await deleteRow(res, req.params.id, (id) => prisma.package.deleteMany({ where: { id } }));
+    const { photographerId } = photographerLocals(res);
+    await deleteRow(res, req.params.id, (id) => prisma.package.deleteMany({ where: { id, photographerId } }));
   });
 
   // --- Add-ons -------------------------------------------------------------------
@@ -207,8 +227,17 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
     const body = parseOrReject(createAddonBody, req.body, res);
     if (body === undefined) return;
 
+    // `addon.service_id` is a plain foreign key (marketplace-data-model.md §2.7),
+    // so the database would accept another photographer's service. Checked here
+    // instead, and answered exactly like a service that does not exist.
+    const { photographerId } = photographerLocals(res);
+    if (body.serviceId !== null && (await prisma.service.count({ where: { id: body.serviceId, photographerId } })) === 0) {
+      res.status(422).json({ error: 'validation_failed', fields: ['serviceId'] });
+      return;
+    }
+
     try {
-      const created = await prisma.addon.create({ data: body });
+      const created = await prisma.addon.create({ data: { ...body, photographerId } });
       res.status(201).json({ addon: toAdminAddon(created) });
     } catch (error) {
       if (!rejectUnknownService(error, res)) throw error;
@@ -221,14 +250,16 @@ export function catalogueRouter(prisma: PrismaClient, now: () => Date): Router {
     const body = parseOrReject(updateAddonBody, req.body, res);
     if (body === undefined) return;
 
-    const { count } = await prisma.addon.updateMany({ where: { id: id.data }, data: body });
-    const updated = count === 0 ? null : await prisma.addon.findUnique({ where: { id: id.data } });
+    const { photographerId } = photographerLocals(res);
+    const { count } = await prisma.addon.updateMany({ where: { id: id.data, photographerId }, data: body });
+    const updated = count === 0 ? null : await prisma.addon.findFirst({ where: { id: id.data, photographerId } });
     if (updated === null) return notFound(res);
     res.json({ addon: toAdminAddon(updated) });
   });
 
   router.delete('/addons/:id', async (req, res) => {
-    await deleteRow(res, req.params.id, (id) => prisma.addon.deleteMany({ where: { id } }));
+    const { photographerId } = photographerLocals(res);
+    await deleteRow(res, req.params.id, (id) => prisma.addon.deleteMany({ where: { id, photographerId } }));
   });
 
   return router;
@@ -285,13 +316,14 @@ type OpenWindow = { opensMinute: number; closesMinute: number };
  * names the longest window, so he is not left wondering why clients see an
  * empty calendar.
  *
- * "Open days" are the weekly rules plus today's and future dated overrides; an
- * override that has already passed opens nothing any more. With no open day at
- * all, `longestWindow` is null and every package warns.
+ * "Open days" are the photographer's own weekly rules plus today's and future
+ * dated overrides; an override that has already passed opens nothing any more.
+ * With no open day at all, `longestWindow` is null and every package warns.
  */
-async function withDurationWarning(prisma: PrismaClient, now: Date, pkg: Package) {
+async function withDurationWarning(prisma: PrismaClient, photographerId: string, now: Date, pkg: Package) {
   const rows = await prisma.workingHours.findMany({
     where: {
+      photographerId,
       isOpen: true,
       OR: [
         { effectiveDate: null },

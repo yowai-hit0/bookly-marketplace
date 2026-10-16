@@ -157,6 +157,8 @@ describe('GET /api/checkout/:reference/:token', () => {
         bookingFeeRwf: 19_500,
         state: 'payable',
         waitingPayment: null,
+        // The fixture's policy snapshot: any time before the shoot, the fee forfeited (R1.8).
+        cancellation: { deadline: booking.startsAt.toISOString(), bookingFeeRefundable: false },
       },
     });
     await expectNothingPrivate(res, booking.id);

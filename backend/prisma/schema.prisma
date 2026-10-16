@@ -472,6 +472,14 @@ model Booking {
   /// round(quoted_total * booking_fee_rate). The quote the client accepted.
   bookingFeeRwf  Int     @map("booking_fee_rwf")
 
+  // Client cancellation policy -- frozen at creation from the photographer's
+  // settings (R1.8), so editing the policy never changes the terms of a booking
+  // already made. CHECK booking_cancel_cutoff_non_negative.
+  /// The client may cancel until starts_at minus this many hours; 0 = any time before the shoot.
+  clientCancelCutoffHours            Int     @map("client_cancel_cutoff_hours")
+  /// Whether the client's own cancellation refunds the booking fee.
+  bookingFeeRefundableOnClientCancel Boolean @map("booking_fee_refundable_on_client_cancel")
+
   // Lifecycle
   confirmedAt        DateTime? @map("confirmed_at") @db.Timestamptz(6)
   completedAt        DateTime? @map("completed_at") @db.Timestamptz(6)

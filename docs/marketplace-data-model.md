@@ -5,6 +5,7 @@ Companion to `docs/marketplace-spec.md`. Supersedes `docs/data-model_v2.md` for 
 
 **Amendments from later decisions** (apply on top of the sections below):
 - `photographer_setting` gains `client_cancel_cutoff_hours int NOT NULL DEFAULT 0 CHECK (>= 0)` and `booking_fee_refundable_on_client_cancel boolean NOT NULL DEFAULT false` (R1.8).
+- `booking` snapshots both at creation: `client_cancel_cutoff_hours int NOT NULL CHECK (>= 0)` and `booking_fee_refundable_on_client_cancel boolean NOT NULL`, no defaults (R1.8, §2.9). Incremental migration `20261017000000_booking_cancellation_policy`.
 - `app_user.password_hash` becomes **nullable**. Add `google_sub text` with a partial unique index `WHERE google_sub IS NOT NULL`, and the CHECKs `app_user_google_client_only (google_sub IS NULL OR role = 'client')` and `app_user_has_credential (password_hash IS NOT NULL OR google_sub IS NOT NULL)` (R2.4).
 - `platform_setting.trial_days` defaults to **30**, matching the decision.
 
@@ -134,6 +135,10 @@ model Booking {
   holdExpiresAt DateTime?
   /// Resolved at creation: service override, else photographer_setting.booking_fee_rate.
   bookingFeeRate Decimal
++ /// = photographer_setting.client_cancel_cutoff_hours AT CREATION (R1.8).
++ clientCancelCutoffHours            Int     @map("client_cancel_cutoff_hours")
++ /// = photographer_setting.booking_fee_refundable_on_client_cancel AT CREATION (R1.8).
++ bookingFeeRefundableOnClientCancel Boolean @map("booking_fee_refundable_on_client_cancel")
 + photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Restrict)
 - service  Service @relation(fields: [serviceId], references: [id], onDelete: Restrict)
 - package  Package @relation(fields: [packageId], references: [id], onDelete: Restrict)
@@ -162,6 +167,12 @@ ALTER TABLE "booking" ADD CONSTRAINT "booking_no_overlap"
 **Status CHECK replaced:** `cancelled_by_admin` → `cancelled_by_photographer`, and `cancelled_by_platform` is added (a platform admin cancelling an individual booking). Both release the slot, and both refund the booking fee in full. `OCCUPYING_STATUSES` is unchanged.
 
 All other CHECKs, uniques and indexes are carried over verbatim. The hold sweeper stays global.
+
+**Cancellation policy snapshot (decided 2026-10-16, R1.8).** A booking keeps the client cancellation policy it was made under, exactly as it keeps its price, fee rate and buffer. `photographer_setting` holds what a photographer offers *now*; editing it must never change the terms of a booking the client has already paid for. So `booking` carries its own copy:
+- `client_cancel_cutoff_hours int NOT NULL`, with `CHECK booking_cancel_cutoff_non_negative (client_cancel_cutoff_hours >= 0)`.
+- `booking_fee_refundable_on_client_cancel boolean NOT NULL`.
+
+Both are written by `booking/create.ts` inside the slot claim, from the photographer's settings at that moment, and have no column default, so no insert can skip them. `booking/access.ts` (`cancellationPolicyOf`), `canCancel` and `booking/cancel.ts` read the booking's columns, never the settings. The client's booking page and the checkout expose them as `cancellation: { deadline, bookingFeeRefundable }`. The incremental migration `20261017000000_booking_cancellation_policy` adds the columns with temporary defaults, backfills any existing rows from their photographer's current settings, then drops the defaults.
 
 ### 2.10 `BookingAddon`: KEEP
 Unchanged. Cross-tenant add-ons are prevented in the write paths listed in §2.7.
@@ -737,6 +748,7 @@ Paths are relative to `backend/src/`.
 - `db/seed.ts:47,52`, `test/payment-fixtures.ts:56`.
 
 **Setting**
+- The studio settings API (`routes/admin-settings.ts`) reads and writes the signed-in photographer's row only. It drops `holdMinutes` (the platform's now) and gains the two cancellation-policy fields (brief decision 5).
 - `settings/repository.ts:20,28`, `settings/index.ts:25,38`.
 - Callers: `availability/query.ts:45`, `booking/admin-actions.ts:66`, `booking/delivery.ts:138`, `catalogue/basket.ts:61`, `catalogue/public.ts:77`, `booking/create.ts:132` (hold now comes from the platform), `routes/admin-settings.ts:23-39`.
 - Seeds and fixtures.
@@ -767,6 +779,7 @@ Paths are relative to `backend/src/`.
   - `payments/webhooks.ts:219`: lock order is payment row lock, then the photographer lock, then the booking `FOR UPDATE`.
   - `webhooks.ts:330-341`: `slotOccupied` is scoped to the photographer.
 - **IDOR-scope sites:** `booking/admin-actions.ts:79,146,236,245`, `admin-list.ts:84,90`, `admin-view.ts:96`, `delivery.ts:67,100`, `cancel.ts:43`, `calendar/query.ts:71`, `routes/admin-availability.ts:294`.
+  - Done in Phase 1: every studio action takes `photographerId` from `photographerLocals(res)` and looks the booking up by id **and** photographer (`findAdminBooking(prisma, photographerId, id)`, and the row locks in `addons.ts`, `payments/cash.ts` and `payments/session-fee.ts`). Notes and refunds are scoped through their booking's photographer. The admin booking view no longer includes the shared `client` row (R1.6). `routes/studio-isolation.test.ts` is the T1.2 sweep.
 - `booking/link-lookup.ts:57`: the email names each booking's photographer, and the F1 fix applies here.
 - **Status rename** across `db/statuses.ts`, `booking/stage.ts`, `admin-actions.ts`, `webhooks.ts`, `email/render.ts`, frontend `admin/bookings.ts`, `catalogue/booking-access.ts`, `components/ui/status-badge.tsx`, `en.json` and `openapi/components/common.yaml`.
 

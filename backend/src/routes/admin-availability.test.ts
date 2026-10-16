@@ -9,6 +9,7 @@ import { issueAdminToken } from '../auth/token.js';
 import { findAvailability } from '../availability/query.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * `/api/admin/working-hours` and `/api/admin/blocks` over HTTP, against real
@@ -23,6 +24,10 @@ import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/databas
  * Validation follows one rule (routes/validation.ts): a malformed request is a
  * 400, a well-formed one breaking a rule is a 422 naming the fields.
  *
+ * Every route is the signed-in photographer's own calendar (marketplace-spec.md
+ * R1.4): another photographer's hours, blocks and bookings are neither listed,
+ * nor changed, nor named in a conflict warning.
+ *
  * Kigali is UTC+2 with no DST. 2026-10-07 is a Wednesday, 2026-10-10 a Saturday.
  * The clock is fixed a week before every fixture date, so lead time never bites.
  */
@@ -33,6 +38,8 @@ let raw: pg.Client;
 let passwordHash: string;
 let token: string;
 let app: Express;
+/** The signed-in photographer, whose calendar every route edits. */
+let photographerId: string;
 
 const SECRET = 'admin-availability-test-secret-at-least-32-characters';
 const WEB_ORIGIN = 'https://admin.bookly.example';
@@ -82,13 +89,17 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
-  // truncateAll empties `setting`, and findAvailability reads it. Schema
-  // defaults: 0.400 / 120 / 30 / 30 / 90.
-  await prisma.setting.create({ data: { id: 1 } });
-  const admin = await prisma.adminUser.create({
-    data: { email: 'photographer@bookly.example', passwordHash },
+  // findAvailability reads the photographer's settings row, which
+  // createPhotographer makes at the schema defaults: 0.400 / 120 / 30 / 90.
+  await prisma.platformSetting.create({ data: { id: 1 } });
+  const created = await createPhotographer(prisma, {
+    email: 'photographer@bookly.example',
+    handle: 'kigali-lens',
+    displayName: 'Kigali Lens',
   });
-  token = (await issueAdminToken(SECRET, admin, NOW)).token;
+  photographerId = created.photographerId;
+  const user = await prisma.appUser.update({ where: { id: created.photographerUserId }, data: { passwordHash } });
+  token = (await issueAdminToken(SECRET, user, NOW)).token;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
     admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
@@ -140,15 +151,15 @@ function kigaliTime(iso: string): string {
 }
 
 /** What the public calendar offers, as Kigali start times keyed by date. */
-async function offered(from: string, to = from): Promise<Record<string, string[]>> {
-  const days = await findAvailability(prisma, { from, to, packageDurationMinutes: 60, now: NOW });
+async function offered(from: string, to = from, whose: string = photographerId): Promise<Record<string, string[]>> {
+  const days = await findAvailability(prisma, { photographerId: whose, from, to, packageDurationMinutes: 60, now: NOW });
   return Object.fromEntries(days.map((day) => [day.date, day.starts.map(kigaliTime)]));
 }
 
 /** The seeded weekly rule: Mon–Fri 09:00–17:00 (data-model_v2.md §13). */
-async function seedWeekdayHours(): Promise<void> {
+async function seedWeekdayHours(whose: string = photographerId): Promise<void> {
   await prisma.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })),
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: whose, weekday, opensMinute: 540, closesMinute: 1020 })),
   });
 }
 
@@ -222,17 +233,17 @@ async function pgErrorOf(run: () => Promise<unknown>): Promise<{ code?: string; 
   }
 }
 
-type Catalogue = { serviceId: string; packageId: string; clientId: string };
+type Catalogue = { photographerId: string; serviceId: string; packageId: string; clientId: string };
 
-async function insertCatalogue(): Promise<Catalogue> {
-  const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+async function insertCatalogue(whose: string = photographerId): Promise<Catalogue> {
+  const service = await prisma.service.create({ data: { photographerId: whose, slug: 'portrait', nameEn: 'Portrait' } });
   const pkg = await prisma.package.create({
-    data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
+    data: { photographerId: whose, serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
   });
   const client = await prisma.client.create({
-    data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
+    data: { fullName: 'Aline Uwase', email: `aline.${service.id.slice(0, 8)}@example.com`, phone: '+250788000000' },
   });
-  return { serviceId: service.id, packageId: pkg.id, clientId: client.id };
+  return { photographerId: whose, serviceId: service.id, packageId: pkg.id, clientId: client.id };
 }
 
 type BookingFixture = {
@@ -252,6 +263,7 @@ function insertBooking(ids: Catalogue, fixture: BookingFixture): Promise<Booking
   return prisma.booking.create({
     data: {
       reference: fixture.reference,
+      photographerId: ids.photographerId,
       clientId: ids.clientId,
       contactName: fixture.contactName ?? 'Aline Uwase',
       contactEmail: fixture.contactEmail ?? 'aline@example.com',
@@ -267,6 +279,8 @@ function insertBooking(ids: Catalogue, fixture: BookingFixture): Promise<Booking
       consentAt: NOW,
       bookingFeeRate: '0.400',
       bookingFeeRwf: 16_000,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
       status: fixture.status ?? 'confirmed',
       startsAt: kigali(fixture.date, fixture.from),
       endsAt: kigali(fixture.date, fixture.to),
@@ -306,10 +320,10 @@ describe('working-hours and blocks routes without a valid token', () => {
 
   it.each([null, 'garbage-token'])('runs no handler for writes with bearer %j', async (bearer) => {
     const hours = await prisma.workingHours.create({
-      data: { weekday: 6, opensMinute: 540, closesMinute: 1020 },
+      data: { photographerId, weekday: 6, opensMinute: 540, closesMinute: 1020 },
     });
     const block = await prisma.availabilityBlock.create({
-      data: { startsAt: kigali(WEDNESDAY, '14:00'), endsAt: kigali(WEDNESDAY, '16:00') },
+      data: { photographerId, startsAt: kigali(WEDNESDAY, '14:00'), endsAt: kigali(WEDNESDAY, '16:00') },
     });
     const before = [await prisma.workingHours.findMany(), await prisma.availabilityBlock.findMany()];
 
@@ -455,18 +469,18 @@ describe('weekday XOR effective date, in the schema and in the database', () => 
     [
       'both',
       { weekday: 6, effectiveDate: SATURDAY, opensMinute: 540, closesMinute: 1020 },
-      `INSERT INTO working_hours (weekday, effective_date, opens_minute, closes_minute)
-       VALUES (6, '2026-10-10', 540, 1020)`,
+      `INSERT INTO working_hours (photographer_id, weekday, effective_date, opens_minute, closes_minute)
+       VALUES ($1, 6, '2026-10-10', 540, 1020)`,
     ],
     [
       'neither',
       { opensMinute: 540, closesMinute: 1020 },
-      `INSERT INTO working_hours (opens_minute, closes_minute) VALUES (540, 1020)`,
+      `INSERT INTO working_hours (photographer_id, opens_minute, closes_minute) VALUES ($1, 540, 1020)`,
     ],
   ])('refuses %s with 400 over HTTP, and with 23514 when the schema is bypassed', async (_label, body, sql) => {
     expectInvalidRequest(await send('post', HOURS, body));
 
-    const error = await pgErrorOf(() => raw.query(sql));
+    const error = await pgErrorOf(() => raw.query(sql, [photographerId]));
 
     expect(error).toMatchObject({ code: '23514', constraint: 'working_hours_weekday_xor_date' });
     await expect(prisma.workingHours.count()).resolves.toBe(0);
@@ -1115,7 +1129,7 @@ describe('block reasons in the public availability (spec P-03)', () => {
     const adminText = (await send('get', BLOCKS)).text;
     for (const reason of REASONS) expect(adminText).toContain(reason);
 
-    const days = await findAvailability(prisma, { from: WEDNESDAY, to: FRIDAY, packageDurationMinutes: 60, now: NOW });
+    const days = await findAvailability(prisma, { photographerId, from: WEDNESDAY, to: FRIDAY, packageDurationMinutes: 60, now: NOW });
     const json = JSON.stringify(days);
 
     const secrets = [
@@ -1136,5 +1150,84 @@ describe('block reasons in the public availability (spec P-03)', () => {
       [],
       ['11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00'],
     ]);
+  });
+});
+
+// --- One photographer's calendar (marketplace-spec.md R1.4) ------------------------
+
+describe('another photographer’s calendar', () => {
+  /** A second approved photographer with Mon-Fri hours, a block and a confirmed booking on Wednesday. */
+  async function otherPhotographer() {
+    const other = await createPhotographer(prisma, {
+      email: 'second.photographer@bookly.example',
+      handle: 'hills-and-light',
+      displayName: 'Hills & Light',
+    });
+    await seedWeekdayHours(other.photographerId);
+    const hours = await prisma.workingHours.create({
+      data: { photographerId: other.photographerId, effectiveDate: new Date(`${SATURDAY}T00:00:00Z`), opensMinute: 600, closesMinute: 720 },
+    });
+    const block = await prisma.availabilityBlock.create({
+      data: { photographerId: other.photographerId, startsAt: kigali(THURSDAY, '09:00'), endsAt: kigali(THURSDAY, '12:00'), reason: 'THEIR-REASON' },
+    });
+    const booking = await insertBooking(await insertCatalogue(other.photographerId), {
+      reference: 'BKY-2610-THEIR', date: WEDNESDAY, from: '10:00', to: '11:00', bufferTo: '11:30', contactName: 'THEIR-CLIENT',
+    });
+    return { ...other, hours, block, booking };
+  }
+
+  it('is never listed', async () => {
+    await seedWeekdayHours();
+    await createBlock(allDay(FRIDAY));
+    await otherPhotographer();
+
+    const hours = (await send('get', HOURS)).body as { workingHours: WorkingHoursJson[] };
+    const blocks = (await send('get', BLOCKS)).body as { blocks: BlockJson[] };
+
+    expect(hours.workingHours).toHaveLength(5);
+    expect(hours.workingHours.every((row) => row.weekday !== null)).toBe(true);
+    expect(blocks.blocks).toHaveLength(1);
+    expect(JSON.stringify(blocks)).not.toContain('THEIR-REASON');
+  });
+
+  it('cannot be replaced or deleted: 404, and their rows stay exactly as they were', async () => {
+    const other = await otherPhotographer();
+    const before = [
+      await prisma.workingHours.findMany({ where: { photographerId: other.photographerId }, orderBy: { id: 'asc' } }),
+      await prisma.availabilityBlock.findMany({ where: { photographerId: other.photographerId } }),
+    ];
+
+    expectNotFound(await send('put', `${HOURS}/${other.hours.id}`, { weekday: 6, isOpen: false }));
+    expectNotFound(await send('delete', `${HOURS}/${other.hours.id}`));
+    expectNotFound(await send('put', `${BLOCKS}/${other.block.id}`, allDay(SATURDAY, SATURDAY, { confirm: true })));
+    expectNotFound(await send('delete', `${BLOCKS}/${other.block.id}`));
+
+    expect([
+      await prisma.workingHours.findMany({ where: { photographerId: other.photographerId }, orderBy: { id: 'asc' } }),
+      await prisma.availabilityBlock.findMany({ where: { photographerId: other.photographerId } }),
+    ]).toEqual(before);
+  });
+
+  it('shapes neither what is offered nor the conflict warning', async () => {
+    await seedWeekdayHours();
+    const other = await otherPhotographer();
+
+    // Their Wednesday booking and Thursday block take nothing from this calendar.
+    expect(await offered(WEDNESDAY, THURSDAY)).toEqual({ [WEDNESDAY]: FULL_DAY, [THURSDAY]: FULL_DAY });
+    // A block over their confirmed booking warns of nothing and saves at once.
+    const res = await send('post', BLOCKS, allDay(WEDNESDAY));
+    expect(res.status).toBe(201);
+    expect(res.text).not.toContain(other.booking.reference);
+    // And mine shapes nothing of theirs.
+    expect((await offered(WEDNESDAY, WEDNESDAY, other.photographerId))[WEDNESDAY]).not.toContain('10:00');
+    expect((await offered(WEDNESDAY, WEDNESDAY, other.photographerId))[WEDNESDAY]).toContain('12:00');
+  });
+
+  it('keeps a weekday rule of mine from colliding with theirs: the uniqueness is per photographer', async () => {
+    await otherPhotographer();
+
+    const created = await send('post', HOURS, { weekday: 1, opensMinute: 600, closesMinute: 900 });
+
+    expect(created.status).toBe(201);
   });
 });

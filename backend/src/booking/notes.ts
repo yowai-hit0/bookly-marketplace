@@ -11,6 +11,10 @@ import { findAdminBooking } from './admin-view.js';
  * Any booking may carry a note, whatever its status: a cancelled one is
  * exactly where a word to the client may be owed. Only a booking with no
  * confirmed client cannot, because nobody was ever sent its page.
+ *
+ * Only on the photographer's own bookings (marketplace-data-model.md §6): the
+ * booking is looked up by id and `deps.photographerId`, and a note is deleted
+ * only through a booking of theirs.
  */
 
 export const NOTE_MAX_LENGTH = 1000;
@@ -20,7 +24,7 @@ export async function addNote(
   bookingId: string,
   note: { body: string; email: boolean },
 ): Promise<AdminActionResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   if (booking === null) return { status: 'not_found' };
   // Never confirmed: no client has the page this note would appear on.
   if (booking.confirmedAt === null) return { status: 'not_allowed' };
@@ -54,7 +58,9 @@ export async function addNote(
 /** Hides a note from the client. An email already sent stays sent. */
 export async function deleteNote(deps: AdminActionDeps, bookingId: string, noteId: string): Promise<AdminActionResult> {
   const { count } = await deps.prisma.bookingNote.updateMany({
-    where: { id: noteId, bookingId, deletedAt: null },
+    // Through the booking's photographer: a note on another photographer's
+    // booking matches nothing, whichever booking id is named with it.
+    where: { id: noteId, bookingId, deletedAt: null, booking: { photographerId: deps.photographerId } },
     data: { deletedAt: deps.now() },
   });
   if (count === 0) {
@@ -65,6 +71,6 @@ export async function deleteNote(deps: AdminActionDeps, bookingId: string, noteI
 }
 
 async function reload(deps: AdminActionDeps, bookingId: string): Promise<AdminActionResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   return booking === null ? { status: 'not_found' } : { status: 'ok', booking };
 }

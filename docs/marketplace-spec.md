@@ -79,6 +79,8 @@ Everything in **`marketplace-data-model.md`** applies; that is the specification
   - `booking_fee_refundable_on_client_cancel boolean NOT NULL DEFAULT false` (today's behaviour)
 
   `cancel.ts` and `canCancel` read these. A photographer cancelling always refunds in full.
+
+  **Snapshotted per booking (decided 2026-10-16).** Each booking copies both values from its photographer's settings when it is created (`booking.client_cancel_cutoff_hours`, `booking.booking_fee_refundable_on_client_cancel`; `marketplace-data-model.md` §2.9), and `cancel.ts` and `canCancel` read the booking's copy. Editing the settings changes the terms of new bookings only, never of one already made. The client's booking page and the checkout show the terms as `cancellation: { deadline, bookingFeeRefundable }`.
 - **R1.9** Seed: one platform admin from env, a `platform_setting` row (trial 30, prices as placeholders), and the starter categories. The demo seed adds **3 photographers** whose catalogues and calendars overlap.
 
 **Test criteria**

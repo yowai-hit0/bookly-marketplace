@@ -3,7 +3,7 @@ import { kigaliDateOf } from '../availability/engine.js';
 import { findAvailability } from '../availability/query.js';
 import { type ResolvedBasket, resolveBasket } from '../catalogue/basket.js';
 import { SQLSTATE, sqlstateOf } from '../db/errors.js';
-import { getPlatformSettings } from '../settings/index.js';
+import { getPhotographerSettings, getPlatformSettings } from '../settings/index.js';
 import { claimSlot } from './claim.js';
 import { upsertClient } from './client.js';
 import { generateReference } from './reference.js';
@@ -128,6 +128,10 @@ export async function createBooking(deps: CreateBookingDeps, request: BookingReq
                AND hold_expires_at > now()
                AND lower(contact_email) = lower(${request.email})`;
           if ((held?.live ?? 0) >= MAX_LIVE_HOLDS_PER_EMAIL) throw new TooManyHolds();
+          // The client cancellation policy is the photographer's as it stands
+          // at this moment, read inside the claim and frozen on the booking
+          // (R1.8): a later edit of the settings never changes these terms.
+          const policy = await getPhotographerSettings(pkg.photographerId, tx);
           return {
             reference,
             // Inside the claim's transaction: a lost race leaves no client row
@@ -158,6 +162,8 @@ export async function createBooking(deps: CreateBookingDeps, request: BookingReq
             // numeric(4,3), written as a three-place string so no float reaches it.
             bookingFeeRate: bookingFeeRate.toFixed(3),
             bookingFeeRwf: quote.bookingFeeRwf,
+            clientCancelCutoffHours: policy.clientCancelCutoffHours,
+            bookingFeeRefundableOnClientCancel: policy.bookingFeeRefundableOnClientCancel,
             addons: {
               create: addons.map((addon) => ({
                 addonId: addon.id,

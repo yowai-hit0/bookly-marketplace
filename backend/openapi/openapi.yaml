@@ -10,8 +10,11 @@ info:
       services, checking availability, booking a slot and paying its booking fee.
     - **A booking's client**: no account; every client request carries a
       **capability token** in its path, emailed when the booking is confirmed.
-    - **The admin** (the photographer): an `Authorization: Bearer` JWT from
-      `POST /api/admin/auth/login`.
+    - **A photographer** (the studio, under `/api/admin/*` until Phase 2 moves
+      it to `/api/studio/*`): an `Authorization: Bearer` JWT from
+      `POST /api/admin/auth/login`. Every studio route is scoped to the
+      photographer the token names; an id of another photographer's row is a
+      404, exactly like an id that names nothing.
 
     Read [the API conventions](/api/conventions) first: error shapes, the
     400-versus-422 rule, time zones and money are the same on every operation.
@@ -43,11 +46,11 @@ tags:
   - name: Email confirmations
     description: Confirming a booking's change of contact email from the new address.
   - name: Admin auth
-    description: Login and password reset for the one admin account.
+    description: Login and password reset for a photographer's studio account.
   - name: Admin availability
     description: Working hours and blocked time.
   - name: Admin settings
-    description: The five operating values.
+    description: The photographer's operating values and client cancellation policy.
   - name: Admin calendar
   - name: Admin bookings
     description: The bookings list, one booking, and everything done to it.

@@ -1,5 +1,5 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
-import { type PhotographerSettings, getPhotographerSettings } from '../settings/index.js';
+import type { Booking, Prisma, PrismaClient } from '@prisma/client';
+import type { PhotographerSettings } from '../settings/index.js';
 import { hashAccessToken } from './access-token.js';
 
 /**
@@ -30,14 +30,17 @@ export const FULL_BOOKING = {
 } satisfies Prisma.BookingInclude;
 
 /**
- * The booking's photographer's client cancellation policy (marketplace-spec.md
+ * The client cancellation policy a booking was made under (marketplace-spec.md
  * R1.8): until when the client may cancel, and whether that refunds the booking
- * fee. Read live from the photographer's settings -- the booking keeps no copy
- * of it -- through the one settings accessor.
+ * fee. Its photographer's settings at the moment the booking was created,
+ * snapshotted on the booking itself (`booking.client_cancel_cutoff_hours`,
+ * `booking.booking_fee_refundable_on_client_cancel`) -- so a photographer who
+ * edits their policy later changes the terms of new bookings only, never of
+ * one a client has already paid for.
  */
 export type CancellationPolicy = Pick<PhotographerSettings, 'clientCancelCutoffHours' | 'bookingFeeRefundableOnClientCancel'>;
 
-export type AccessedBooking = Prisma.BookingGetPayload<{ include: typeof FULL_BOOKING }> & { cancellationPolicy: CancellationPolicy };
+export type AccessedBooking = Prisma.BookingGetPayload<{ include: typeof FULL_BOOKING }>;
 
 /**
  * The booking a token addresses, or null when there is none to show. Records the
@@ -56,13 +59,15 @@ export async function findBookingByToken(prisma: PrismaClient, token: string): P
   const id = used[0]?.id;
   if (id === undefined) return null;
 
-  const booking = await prisma.booking.findUnique({ where: { id }, include: FULL_BOOKING });
-  if (booking === null) return null;
-  return { ...booking, cancellationPolicy: await cancellationPolicyOf(prisma, booking.photographerId) };
+  return prisma.booking.findUnique({ where: { id }, include: FULL_BOOKING });
 }
 
-/** The policy a client's cancellation is judged by: their booking's photographer's, as it stands now. */
-export async function cancellationPolicyOf(prisma: PrismaClient, photographerId: string): Promise<CancellationPolicy> {
-  const { clientCancelCutoffHours, bookingFeeRefundableOnClientCancel } = await getPhotographerSettings(photographerId, prisma);
-  return { clientCancelCutoffHours, bookingFeeRefundableOnClientCancel };
+/** The policy a client's cancellation is judged by: the one the booking was made under, never the current settings. */
+export function cancellationPolicyOf(
+  booking: Pick<Booking, 'clientCancelCutoffHours' | 'bookingFeeRefundableOnClientCancel'>,
+): CancellationPolicy {
+  return {
+    clientCancelCutoffHours: booking.clientCancelCutoffHours,
+    bookingFeeRefundableOnClientCancel: booking.bookingFeeRefundableOnClientCancel,
+  };
 }

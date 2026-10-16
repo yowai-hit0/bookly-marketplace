@@ -1,4 +1,4 @@
-import type { AdminUser, Booking, Prisma, PrismaClient } from '@prisma/client';
+import type { AppUser, Booking, Prisma, PrismaClient } from '@prisma/client';
 import type { Express } from 'express';
 import type pg from 'pg';
 import request, { type Response } from 'supertest';
@@ -8,6 +8,7 @@ import { issueAdminToken } from '../auth/token.js';
 import { listPublicCatalogue } from '../catalogue/public.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * The catalogue CMS over HTTP, against real PostgreSQL (plan.md Task 10; spec
@@ -21,13 +22,19 @@ import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/databas
  * fields. Referenced rows are protected by the database's RESTRICT foreign
  * keys, answered as 409 `in_use`.
  *
+ * Everything is the signed-in photographer's own catalogue (marketplace-spec.md
+ * R1.4): another photographer's rows are never listed, never changed, and a
+ * body naming their service is refused exactly like an unknown one.
+ *
  * Kigali is UTC+2 with no DST. The clock starts at Thursday 1 October 2026,
  * 08:00 in Kigali; the §6.8 warning reads "today" off it.
  */
 
 let prisma: PrismaClient;
 let raw: pg.Client;
-let admin: AdminUser;
+let admin: AppUser;
+/** The signed-in photographer, who owns every row the fixtures below insert. */
+let photographerId: string;
 let token: string;
 let clock: Date;
 let app: Express;
@@ -68,8 +75,15 @@ beforeEach(async () => {
   await truncateAll(raw);
   // No login happens in this file, so no Argon2 is spent: the token only needs
   // the stored hash to fingerprint it.
-  admin = await prisma.adminUser.create({
-    data: { email: 'photographer@bookly.example', passwordHash: '$argon2id$placeholder-never-verified' },
+  const created = await createPhotographer(prisma, {
+    email: 'photographer@bookly.example',
+    handle: 'kigali-lens',
+    displayName: 'Kigali Lens',
+  });
+  photographerId = created.photographerId;
+  admin = await prisma.appUser.update({
+    where: { id: created.photographerUserId },
+    data: { passwordHash: '$argon2id$placeholder-never-verified' },
   });
   await setClock(START);
   app = createApp({
@@ -190,23 +204,23 @@ const SERVICE_DEFAULTS = {
 } as const;
 
 function insertService(slug: string, data: Partial<Prisma.ServiceUncheckedCreateInput> = {}) {
-  return prisma.service.create({ data: { slug, nameEn: 'Portraits', ...data } });
+  return prisma.service.create({ data: { photographerId, slug, nameEn: 'Portraits', ...data } });
 }
 
 function insertPackage(serviceId: string, data: Partial<Prisma.PackageUncheckedCreateInput> = {}) {
   return prisma.package.create({
-    data: { serviceId, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
+    data: { photographerId, serviceId, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
   });
 }
 
 function insertAddon(serviceId: string | null, data: Partial<Prisma.AddonUncheckedCreateInput> = {}) {
-  return prisma.addon.create({ data: { serviceId, nameEn: 'Extra hour', priceRwf: 15_000, ...data } });
+  return prisma.addon.create({ data: { photographerId, serviceId, nameEn: 'Extra hour', priceRwf: 15_000, ...data } });
 }
 
 /** Mon–Fri 09:00–17:00, the seeded weekly rule (data-model_v2.md §13): a 480-minute window. */
 async function seedWeekdayHours(): Promise<void> {
   await prisma.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })),
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId, weekday, opensMinute: 540, closesMinute: 1020 })),
   });
 }
 
@@ -215,12 +229,17 @@ async function seedWeekdayHours(): Promise<void> {
  * 09:00 Kigali so no two fixtures trip the exclusion constraint. Every
  * snapshot column carries what the catalogue said when it was sold.
  */
-function insertBooking(ids: { serviceId: string; packageId: string }, reference: string, slot = 0): Promise<Booking> {
+function insertBooking(
+  ids: { serviceId: string; packageId: string; photographerId?: string },
+  reference: string,
+  slot = 0,
+): Promise<Booking> {
   const startsAt = new Date(Date.parse('2026-10-07T07:00:00Z') + slot * 120 * MINUTE_MS);
   const endsAt = new Date(startsAt.getTime() + 60 * MINUTE_MS);
   return prisma.booking.create({
     data: {
       reference,
+      photographerId: ids.photographerId ?? photographerId,
       clientId,
       contactName: 'Aline Uwase',
       contactEmail: 'aline@example.com',
@@ -236,6 +255,8 @@ function insertBooking(ids: { serviceId: string; packageId: string }, reference:
       consentAt: START,
       bookingFeeRate: '0.400',
       bookingFeeRwf: 22_000,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
       status: 'confirmed',
       startsAt,
       endsAt,
@@ -396,7 +417,7 @@ describe('plan.md Task 10 verification', () => {
     ).addon;
 
     expect(saved.warning).toBeNull();
-    expect(await listPublicCatalogue(prisma)).toEqual([
+    expect(await listPublicCatalogue(prisma, photographerId)).toEqual([
       {
         id: service.id,
         slug: 'portraits',
@@ -464,7 +485,7 @@ describe('plan.md Task 10 verification', () => {
     const res = await send('patch', `${SERVICES}/${portraits.id}`, { isActive: false });
 
     expect(bodyOf<{ service: ServiceJson }>(res, 200).service).toMatchObject({ id: portraits.id, isActive: false });
-    expect((await listPublicCatalogue(prisma)).map((service) => service.slug)).toEqual(['events']);
+    expect((await listPublicCatalogue(prisma, photographerId)).map((service) => service.slug)).toEqual(['events']);
 
     const readable = await prisma.booking.findUniqueOrThrow({
       where: { id: booking.id },
@@ -488,7 +509,7 @@ describe('plan.md Task 10 verification', () => {
       ['portraits', false],
     ]);
     bodyOf(await send('patch', `${SERVICES}/${portraits.id}`, { isActive: true }), 200);
-    expect((await listPublicCatalogue(prisma)).map((service) => service.slug)).toEqual(['events', 'portraits']);
+    expect((await listPublicCatalogue(prisma, photographerId)).map((service) => service.slug)).toEqual(['events', 'portraits']);
   });
 
   it('refuses to hard-delete a package a booking references with 409, and the row survives', async () => {
@@ -1363,11 +1384,11 @@ describe('DELETE a referenced row (RESTRICT foreign keys, data-model_v2.md §9.4
 type HoursRow = Prisma.WorkingHoursCreateManyInput;
 
 function weekly(weekday: number, opensMinute: number, closesMinute: number, isOpen = true): HoursRow {
-  return { weekday, opensMinute, closesMinute, isOpen };
+  return { photographerId, weekday, opensMinute, closesMinute, isOpen };
 }
 
 function dated(date: string, opensMinute: number, closesMinute: number, isOpen = true): HoursRow {
-  return { effectiveDate: new Date(`${date}T00:00:00Z`), opensMinute, closesMinute, isOpen };
+  return { photographerId, effectiveDate: new Date(`${date}T00:00:00Z`), opensMinute, closesMinute, isOpen };
 }
 
 describe('the duration warning (spec §6.8)', () => {
@@ -1408,7 +1429,8 @@ describe('the duration warning (spec §6.8)', () => {
     ['any duration with no working hours at all', [], 1, warning(null)],
     ['any duration when every row is closed or past', [weekly(0, 0, 1440, false), dated('2026-09-30', 0, 1440)], 1, warning(null)],
   ])('saving a package of %s answers the expected warning', async (_label, hours, durationMinutes, expected) => {
-    await prisma.workingHours.createMany({ data: hours });
+    // The table is built before any photographer exists: stamp the rows with this test's.
+    await prisma.workingHours.createMany({ data: hours.map((row) => ({ ...row, photographerId })) });
 
     const saved = await postPackage(durationMinutes);
 
@@ -1571,5 +1593,99 @@ describe('the booking-fee override', () => {
     expect(await overrideColumn(service.id)).toBe('0.125');
     expect(await patch({ bookingFeeRateOverride: null })).toBeNull();
     expect(await overrideColumn(service.id)).toBeNull();
+  });
+});
+
+// --- One photographer's catalogue (marketplace-spec.md R1.4) -------------------------------
+
+describe('another photographer’s catalogue', () => {
+  /** A second photographer with a service (the same slug), a package and two add-ons. */
+  async function theirCatalogue() {
+    const other = await createPhotographer(prisma, { email: 'second.photographer@bookly.example', handle: 'hills-and-light', displayName: 'Hills & Light' });
+    const owner = { photographerId: other.photographerId };
+    const service = await prisma.service.create({ data: { ...owner, slug: 'portraits', nameEn: 'THEIR-SERVICE' } });
+    const pkg = await prisma.package.create({
+      data: { ...owner, serviceId: service.id, nameEn: 'THEIR-PACKAGE', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
+    });
+    const own = await prisma.addon.create({ data: { ...owner, serviceId: service.id, nameEn: 'THEIR-ADDON', priceRwf: 5_000 } });
+    const shared = await prisma.addon.create({ data: { ...owner, serviceId: null, nameEn: 'THEIR-SHARED', priceRwf: 5_000 } });
+    // Hours that would make every duration fit, were they mine.
+    await prisma.workingHours.create({ data: { ...owner, weekday: 1, opensMinute: 0, closesMinute: 1440 } });
+    return { ...other, service, pkg, own, shared };
+  }
+
+  async function theirRows(id: string) {
+    return {
+      services: await prisma.service.findMany({ where: { photographerId: id }, orderBy: { id: 'asc' } }),
+      packages: await prisma.package.findMany({ where: { photographerId: id }, orderBy: { id: 'asc' } }),
+      addons: await prisma.addon.findMany({ where: { photographerId: id }, orderBy: { id: 'asc' } }),
+    };
+  }
+
+  it('is never listed', async () => {
+    await insertService('weddings');
+    await theirCatalogue();
+
+    const catalogue = await getCatalogue();
+
+    expect(catalogue.services.map((service) => service.slug)).toEqual(['weddings']);
+    expect(catalogue.sharedAddons).toEqual([]);
+    expect(JSON.stringify(catalogue)).not.toMatch(/THEIR-/);
+  });
+
+  it('answers 404 to every edit and delete naming their rows, and leaves them exactly as they were', async () => {
+    const theirs = await theirCatalogue();
+    const before = await theirRows(theirs.photographerId);
+
+    const answers = [
+      await send('patch', `${SERVICES}/${theirs.service.id}`, { nameEn: 'Mine now', isActive: false }),
+      await send('delete', `${SERVICES}/${theirs.service.id}`),
+      await send('patch', `${PACKAGES}/${theirs.pkg.id}`, { priceRwf: 1 }),
+      await send('delete', `${PACKAGES}/${theirs.pkg.id}`),
+      await send('patch', `${ADDONS}/${theirs.own.id}`, { priceRwf: 1 }),
+      await send('delete', `${ADDONS}/${theirs.own.id}`),
+      await send('patch', `${ADDONS}/${theirs.shared.id}`, { isActive: false }),
+      await send('delete', `${ADDONS}/${theirs.shared.id}`),
+    ];
+
+    for (const res of answers) {
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: 'not_found' });
+    }
+    expect(await theirRows(theirs.photographerId)).toEqual(before);
+  });
+
+  it('refuses their service as a new package’s or add-on’s service, exactly as an unknown one', async () => {
+    const theirs = await theirCatalogue();
+    const before = await theirRows(theirs.photographerId);
+
+    for (const serviceId of [theirs.service.id, NONEXISTENT_ID]) {
+      const pkg = await send('post', PACKAGES, packageBody(serviceId));
+      expect(pkg.status).toBe(422);
+      expect(pkg.body).toEqual({ error: 'validation_failed', fields: ['serviceId'] });
+      const addon = await send('post', ADDONS, addonBody(serviceId));
+      expect(addon.status).toBe(422);
+      expect(addon.body).toEqual({ error: 'validation_failed', fields: ['serviceId'] });
+    }
+    expect(await theirRows(theirs.photographerId)).toEqual(before);
+    await expect(prisma.package.count({ where: { photographerId } })).resolves.toBe(0);
+    await expect(prisma.addon.count({ where: { photographerId } })).resolves.toBe(0);
+  });
+
+  it('writes a new row as mine, whatever the body says, and a slug of theirs is free for me', async () => {
+    await theirCatalogue();
+
+    const service = bodyOf<{ service: ServiceJson }>(await send('post', SERVICES, SERVICE_BODY), 201).service;
+    expect(await prisma.service.findUniqueOrThrow({ where: { id: service.id } })).toMatchObject({ photographerId });
+    expect((await send('post', SERVICES, { ...SERVICE_BODY, slug: 'other', photographerId: NONEXISTENT_ID })).status).toBe(400);
+  });
+
+  it('never decides the duration warning: their hours are not mine', async () => {
+    await theirCatalogue();
+    const service = await insertService('weddings');
+
+    const saved = bodyOf<PackageSavedJson>(await send('post', PACKAGES, packageBody(service.id, { durationMinutes: 600 })), 201);
+
+    expect(saved.warning).toEqual({ code: 'duration_exceeds_longest_window', longestWindow: null });
   });
 });

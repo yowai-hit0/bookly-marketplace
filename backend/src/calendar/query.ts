@@ -3,8 +3,10 @@ import { type KigaliDate, kigaliMinuteToUtc } from '../availability/engine.js';
 import { OCCUPYING_STATUSES } from '../db/statuses.js';
 
 /**
- * What the admin calendar shows for a run of Kigali dates (plan.md Task 9,
- * spec §3.3 step 1): every booking that occupies time, and every block.
+ * What the studio calendar shows for a run of Kigali dates (plan.md Task 9,
+ * spec §3.3 step 1): every booking of one photographer that occupies time, and
+ * every block of theirs. Both queries are scoped to `photographerId`, which the
+ * caller takes from the verified token (marketplace-spec.md R1.4).
  *
  * Exactly two queries, however many bookings the range holds. Service and
  * package names come from the booking's own snapshots (data-model_v2.md §5.9),
@@ -47,6 +49,8 @@ export type Calendar = {
 };
 
 export type FindCalendarOptions = {
+  /** Whose calendar: from the verified token, never from the request. */
+  photographerId: string;
   /** First Kigali date, inclusive. */
   from: KigaliDate;
   /** Last Kigali date, inclusive. */
@@ -59,7 +63,7 @@ const MINUTES_PER_DAY = 1440;
 
 export async function findCalendar(
   prisma: PrismaClient,
-  { from, to, now }: FindCalendarOptions,
+  { photographerId, from, to, now }: FindCalendarOptions,
 ): Promise<Calendar> {
   const rangeStart = kigaliMinuteToUtc(from, 0);
   const rangeEnd = kigaliMinuteToUtc(to, MINUTES_PER_DAY);
@@ -70,6 +74,7 @@ export async function findCalendar(
   const [bookings, blocks] = await Promise.all([
     prisma.booking.findMany({
       where: {
+        photographerId,
         status: { in: [...OCCUPYING_STATUSES] },
         startsAt: { lt: rangeEnd },
         endsAt: { gt: rangeStart },
@@ -88,7 +93,7 @@ export async function findCalendar(
       },
     }),
     prisma.availabilityBlock.findMany({
-      where: { startsAt: { lt: rangeEnd }, endsAt: { gt: rangeStart } },
+      where: { photographerId, startsAt: { lt: rangeEnd }, endsAt: { gt: rangeStart } },
       orderBy: { startsAt: 'asc' },
       select: { id: true, startsAt: true, endsAt: true, isAllDay: true, reason: true },
     }),

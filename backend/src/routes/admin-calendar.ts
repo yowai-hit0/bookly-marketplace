@@ -1,13 +1,15 @@
 import type { PrismaClient } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
+import { photographerLocals } from '../auth/middleware.js';
 import { findCalendar } from '../calendar/query.js';
 import { kigaliDate, parseOrReject } from './validation.js';
 
 /**
  * `GET /api/admin/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` -- bookings, live
  * holds and blocks for the month, week and day views (plan.md Task 9). Mounted
- * behind `requireAdmin`.
+ * behind `requirePhotographer`, and always the signed-in photographer's own
+ * calendar (marketplace-spec.md R1.4).
  */
 
 const MS_PER_DAY = 86_400_000;
@@ -34,7 +36,8 @@ export function calendarRouter(prisma: PrismaClient, now: () => Date): Router {
     const query = parseOrReject(calendarQuery, req.query, res);
     if (query === undefined) return;
 
-    res.json(await findCalendar(prisma, { ...query, now: now() }));
+    const { photographerId } = photographerLocals(res);
+    res.json(await findCalendar(prisma, { ...query, photographerId, now: now() }));
   });
 
   return router;

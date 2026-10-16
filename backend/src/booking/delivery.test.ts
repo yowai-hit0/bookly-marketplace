@@ -7,7 +7,7 @@ import { renderEmail } from '../email/render.js';
 import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, firstRow, sqlstateOf, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { CLIENT, type PaymentWorld, insertBooking, insertPayment, seedWorld } from '../test/payment-fixtures.js';
-import { FULL_BOOKING, cancellationPolicyOf } from './access.js';
+import { FULL_BOOKING } from './access.js';
 import { adminBookingView, findAdminBooking } from './admin-view.js';
 import { clientBookingView } from './client-view.js';
 import { saveDelivery, sendDelivery } from './delivery.js';
@@ -83,7 +83,7 @@ beforeEach(async () => {
 // --- Helpers ----------------------------------------------------------------------------
 
 function deps(now: Date = NOW) {
-  return { prisma, now: () => now };
+  return { prisma, now: () => now, photographerId: world.photographerId };
 }
 
 type DeliveryRow = {
@@ -156,7 +156,7 @@ async function setDeliveryRaw(
 }
 
 async function adminView(bookingId: string, at: Date = NOW) {
-  const booking = await findAdminBooking(prisma, bookingId);
+  const booking = await findAdminBooking(prisma, world.photographerId, bookingId);
   if (booking === null) throw new Error('No such booking');
   return adminBookingView(booking, at);
 }
@@ -752,7 +752,7 @@ describe('nothing counts downloads', () => {
     await sendDelivery(deps(), booking.id);
     const accessed = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id }, include: FULL_BOOKING });
 
-    const view = clientBookingView({ ...accessed, cancellationPolicy: await cancellationPolicyOf(prisma, accessed.photographerId) }, NOW);
+    const view = clientBookingView(accessed, NOW);
 
     expect(Object.keys(view.delivery ?? {}).sort()).toEqual(['expired', 'expiresOn', 'note', 'url']);
     expect(JSON.stringify(view)).not.toMatch(/download/i);

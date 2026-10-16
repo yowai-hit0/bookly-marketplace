@@ -5,7 +5,8 @@ import { createPrismaClient } from '../db/client.js';
 import { sqlstateOf } from '../db/errors.js';
 import { updatePhotographerSettings, updatePlatformSettings } from '../settings/index.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer, grantAccessToken, insertPayment } from '../test/payment-fixtures.js';
+import { cancelByClient } from './cancel.js';
 import { type BookingRequest, type CreateBookingResult, MAX_LIVE_HOLDS_PER_EMAIL, MAX_REFERENCE_ATTEMPTS, createBooking } from './create.js';
 
 /**
@@ -296,6 +297,8 @@ async function insertExistingBooking(options: {
       consentAt: NOW,
       bookingFeeRate: '0.400',
       bookingFeeRwf: 16_000,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
     },
   });
 }
@@ -1184,5 +1187,49 @@ describe('a booking of one photographer among several', () => {
 
     const winners = results.flatMap((r) => (r.status === 'created' ? [r.booking.photographerId] : []));
     expect(winners.sort()).toEqual([photographerId, other.photographerId].sort());
+  });
+});
+
+// --- The cancellation policy, snapshotted (R1.8) ------------------------------------------
+
+describe('the client cancellation policy a booking is made under', () => {
+  const HOUR_MS = 60 * MINUTE_MS;
+
+  async function policyColumns(id: string) {
+    return prisma.booking.findUniqueOrThrow({
+      where: { id },
+      select: { clientCancelCutoffHours: true, bookingFeeRefundableOnClientCancel: true },
+    });
+  }
+
+  it('is the photographer’s at the moment of booking, written on the booking', async () => {
+    const lenient = created(await create()).booking;
+    await updatePhotographerSettings(photographerId, { clientCancelCutoffHours: 48, bookingFeeRefundableOnClientCancel: true }, prisma);
+    const strict = created(await create({ startsAt: kigali(THURSDAY, '09:00'), email: 'eric@example.com' })).booking;
+
+    await expect(policyColumns(lenient.id)).resolves.toEqual({ clientCancelCutoffHours: 0, bookingFeeRefundableOnClientCancel: false });
+    await expect(policyColumns(strict.id)).resolves.toEqual({ clientCancelCutoffHours: 48, bookingFeeRefundableOnClientCancel: true });
+  });
+
+  it('is not changed by the photographer editing their settings afterwards, and is what a cancellation obeys', async () => {
+    await updatePhotographerSettings(photographerId, { clientCancelCutoffHours: 48, bookingFeeRefundableOnClientCancel: true }, prisma);
+    const booking = created(await create()).booking;
+    // Paid and confirmed, as the webhook would leave it.
+    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'confirmed', holdExpiresAt: null, confirmedAt: NOW } });
+    await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: booking.bookingFeeRwf });
+    const token = await grantAccessToken(prisma, booking.id);
+
+    // The photographer loosens one term and withdraws the other.
+    await updatePhotographerSettings(photographerId, { clientCancelCutoffHours: 0, bookingFeeRefundableOnClientCancel: false }, prisma);
+
+    await expect(policyColumns(booking.id)).resolves.toEqual({ clientCancelCutoffHours: 48, bookingFeeRefundableOnClientCancel: true });
+    // A day before the shoot is inside the 48 hours the client agreed to, whatever the setting says now...
+    const dayBefore = new Date(booking.startsAt.getTime() - 24 * HOUR_MS);
+    await expect(cancelByClient({ prisma, now: () => dayBefore }, token)).resolves.toStrictEqual({ status: 'not_cancellable' });
+    // ...and three days before, the booking fee they were promised back is owed back.
+    const threeDaysBefore = new Date(booking.startsAt.getTime() - 72 * HOUR_MS);
+    await expect(cancelByClient({ prisma, now: () => threeDaysBefore }, token)).resolves.toMatchObject({ status: 'cancelled' });
+    const payments = await prisma.payment.findMany({ where: { bookingId: booking.id }, select: { kind: true, status: true } });
+    expect(payments).toEqual([{ kind: 'booking_fee', status: 'refund_due' }]);
   });
 });

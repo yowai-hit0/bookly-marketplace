@@ -110,6 +110,8 @@ function claimInput(ids: Catalogue, ref: string, when: Slot): ClaimSlotInput {
     consentAt: new Date(),
     bookingFeeRate: '0.400',
     bookingFeeRwf: 16_000,
+    clientCancelCutoffHours: 0,
+    bookingFeeRefundableOnClientCancel: false,
     ...when,
   };
 }

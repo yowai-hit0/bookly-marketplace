@@ -2,14 +2,20 @@ import type { AvailabilityBlock, PrismaClient, WorkingHours } from '@prisma/clie
 import { type Response, Router } from 'express';
 import { z } from 'zod';
 import { kigaliMinuteToUtc } from '../availability/engine.js';
+import { photographerLocals } from '../auth/middleware.js';
 import { SQLSTATE, sqlstateOf } from '../db/errors.js';
 import type { BookingStatus } from '../db/statuses.js';
 import { kigaliDate, parseOrReject } from './validation.js';
 
 /**
  * `/api/admin/working-hours` and `/api/admin/blocks` (plan.md Task 8, spec
- * §3.3, §6.3, §6.4, P-15, P-16). Mounted behind `requireAdmin`, so nothing here
- * checks auth itself.
+ * §3.3, §6.3, §6.4, P-15, P-16). Mounted behind `requirePhotographer`, so
+ * nothing here checks auth itself.
+ *
+ * Every query is scoped to the signed-in photographer, read from
+ * `photographerLocals(res)` and never from the request (marketplace-spec.md
+ * R1.4). An id that names another photographer's row is the same 404 as an id
+ * that names nothing, and a write to it changes nothing.
  *
  * These are the only endpoints that serialise a block's `reason` (spec P-03).
  * The public side reads availability through `availability/query.ts`, which
@@ -66,7 +72,9 @@ export function workingHoursRouter(prisma: PrismaClient): Router {
   const router = Router();
 
   router.get('/', async (_req, res) => {
+    const { photographerId } = photographerLocals(res);
     const rows = await prisma.workingHours.findMany({
+      where: { photographerId },
       orderBy: [{ weekday: { sort: 'asc', nulls: 'last' } }, { effectiveDate: 'asc' }],
     });
     res.json({ workingHours: rows.map(toAdminWorkingHours) });
@@ -78,7 +86,7 @@ export function workingHoursRouter(prisma: PrismaClient): Router {
 
     const data = toWorkingHoursData(body);
     try {
-      const created = await prisma.workingHours.create({ data });
+      const created = await prisma.workingHours.create({ data: { ...data, photographerId: photographerLocals(res).photographerId } });
       res.status(201).json({ workingHours: toAdminWorkingHours(created) });
     } catch (error) {
       if (!rejectDuplicateHours(error, res)) throw error;
@@ -94,7 +102,8 @@ export function workingHoursRouter(prisma: PrismaClient): Router {
 
     const data = toWorkingHoursData(body);
     try {
-      const { count } = await prisma.workingHours.updateMany({ where: { id: id.data }, data });
+      const { photographerId } = photographerLocals(res);
+      const { count } = await prisma.workingHours.updateMany({ where: { id: id.data, photographerId }, data });
       if (count === 0) return notFound(res);
       res.json({ workingHours: toAdminWorkingHours({ id: id.data, ...data }) });
     } catch (error) {
@@ -108,7 +117,8 @@ export function workingHoursRouter(prisma: PrismaClient): Router {
     const id = rowId.safeParse(req.params.id);
     if (!id.success) return notFound(res);
 
-    const { count } = await prisma.workingHours.deleteMany({ where: { id: id.data } });
+    const { photographerId } = photographerLocals(res);
+    const { count } = await prisma.workingHours.deleteMany({ where: { id: id.data, photographerId } });
     if (count === 0) return notFound(res);
     res.status(204).end();
   });
@@ -130,7 +140,7 @@ function toWorkingHoursData(body: WorkingHoursBody) {
   };
 }
 
-/** One rule per weekday, one override per date: the partial unique indexes. */
+/** One rule per weekday, one override per date, per photographer: the partial unique indexes. */
 function rejectDuplicateHours(error: unknown, res: Response): boolean {
   if (sqlstateOf(error) !== SQLSTATE.UNIQUE_VIOLATION) return false;
   res.status(409).json({ error: 'working_hours_exists' });
@@ -211,7 +221,8 @@ export function blocksRouter(prisma: PrismaClient): Router {
   const router = Router();
 
   router.get('/', async (_req, res) => {
-    const rows = await prisma.availabilityBlock.findMany({ orderBy: { startsAt: 'asc' } });
+    const { photographerId } = photographerLocals(res);
+    const rows = await prisma.availabilityBlock.findMany({ where: { photographerId }, orderBy: { startsAt: 'asc' } });
     res.json({ blocks: rows.map(toAdminBlock) });
   });
 
@@ -219,10 +230,11 @@ export function blocksRouter(prisma: PrismaClient): Router {
     const body = parseOrReject(blockBody, req.body, res);
     if (body === undefined) return;
 
+    const { photographerId } = photographerLocals(res);
     const data = toBlockData(body);
-    if (!body.confirm && (await warnOfConfirmedBookings(prisma, data, res))) return;
+    if (!body.confirm && (await warnOfConfirmedBookings(prisma, photographerId, data, res))) return;
 
-    const created = await prisma.availabilityBlock.create({ data });
+    const created = await prisma.availabilityBlock.create({ data: { ...data, photographerId } });
     res.status(201).json({ block: toAdminBlock(created) });
   });
 
@@ -232,18 +244,19 @@ export function blocksRouter(prisma: PrismaClient): Router {
     const body = parseOrReject(blockBody, req.body, res);
     if (body === undefined) return;
 
-    // Existence first, so a missing block is a 404 rather than a conflict
-    // warning about a save that could never happen.
-    const existing = await prisma.availabilityBlock.findUnique({
-      where: { id: id.data },
+    // Existence first, so a missing block -- or another photographer's -- is a
+    // 404 rather than a conflict warning about a save that could never happen.
+    const { photographerId } = photographerLocals(res);
+    const existing = await prisma.availabilityBlock.findFirst({
+      where: { id: id.data, photographerId },
       select: { id: true },
     });
     if (existing === null) return notFound(res);
 
     const data = toBlockData(body);
-    if (!body.confirm && (await warnOfConfirmedBookings(prisma, data, res))) return;
+    if (!body.confirm && (await warnOfConfirmedBookings(prisma, photographerId, data, res))) return;
 
-    const { count } = await prisma.availabilityBlock.updateMany({ where: { id: id.data }, data });
+    const { count } = await prisma.availabilityBlock.updateMany({ where: { id: id.data, photographerId }, data });
     if (count === 0) return notFound(res);
     res.json({ block: toAdminBlock({ id: id.data, ...data }) });
   });
@@ -252,7 +265,8 @@ export function blocksRouter(prisma: PrismaClient): Router {
     const id = rowId.safeParse(req.params.id);
     if (!id.success) return notFound(res);
 
-    const { count } = await prisma.availabilityBlock.deleteMany({ where: { id: id.data } });
+    const { photographerId } = photographerLocals(res);
+    const { count } = await prisma.availabilityBlock.deleteMany({ where: { id: id.data, photographerId } });
     if (count === 0) return notFound(res);
     res.status(204).end();
   });
@@ -283,16 +297,20 @@ const CONFIRMED = 'confirmed' satisfies BookingStatus;
  * Measured against the session, not the buffer: the buffer is slack, and a
  * block over it takes nothing the client paid for.
  *
+ * Only this photographer's bookings: another photographer's calendar is not
+ * theirs to be warned about, nor to learn of (R1.4).
+ *
  * A warning, not a guarantee: a booking confirmed between this read and the
  * save is not named. That is the §6.4 aftermath the calendar shows (Task 9).
  */
 async function warnOfConfirmedBookings(
   prisma: PrismaClient,
+  photographerId: string,
   range: { startsAt: Date; endsAt: Date },
   res: Response,
 ): Promise<boolean> {
   const bookings = await prisma.booking.findMany({
-    where: { status: CONFIRMED, startsAt: { lt: range.endsAt }, endsAt: { gt: range.startsAt } },
+    where: { photographerId, status: CONFIRMED, startsAt: { lt: range.endsAt }, endsAt: { gt: range.startsAt } },
     orderBy: { startsAt: 'asc' },
     select: { id: true, reference: true, contactName: true, startsAt: true, endsAt: true },
   });

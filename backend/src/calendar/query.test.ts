@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
 import type { BookingStatus } from '../db/statuses.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { createPhotographer } from '../test/payment-fixtures.js';
 import { type Calendar, findCalendar } from './query.js';
 
 /**
@@ -15,6 +16,8 @@ import { type Calendar, findCalendar } from './query.js';
  * injected clock, that a range of Kigali dates is bounded by Kigali midnights,
  * that the conflict flag measures the session and not the buffer, and that each
  * entry carries exactly the admin fields -- snapshots, not the live catalogue.
+ * And that it is one photographer's calendar: another's bookings and blocks
+ * are never on it (marketplace-spec.md R1.4).
  *
  * Kigali is UTC+2 with no DST. 2026-10-05 is a Monday.
  */
@@ -52,7 +55,7 @@ beforeEach(async () => {
 
 // --- Fixtures ---------------------------------------------------------------
 
-type Catalogue = { serviceId: string; packageId: string; clientId: string };
+type Catalogue = { photographerId: string; serviceId: string; packageId: string; clientId: string };
 
 /** A Kigali wall-clock time on `date`, as the UTC instant. */
 function at(date: string, wallTime: string): Date {
@@ -63,15 +66,16 @@ function minutesFrom(instant: Date, minutes: number): Date {
   return new Date(instant.getTime() + minutes * MINUTE_MS);
 }
 
-async function insertCatalogue(): Promise<Catalogue> {
-  const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+/** A photographer with one service and package. The client row is shared, as it is across photographers. */
+async function insertCatalogue(handle = 'kigali-lens', clientId?: string): Promise<Catalogue> {
+  const { photographerId } = await createPhotographer(prisma, { email: `${handle}@bookly.example`, handle, displayName: handle });
+  const service = await prisma.service.create({ data: { photographerId, slug: 'portrait', nameEn: 'Portrait' } });
   const pkg = await prisma.package.create({
-    data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
+    data: { photographerId, serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
   });
-  const client = await prisma.client.create({
-    data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
-  });
-  return { serviceId: service.id, packageId: pkg.id, clientId: client.id };
+  const client =
+    clientId ?? (await prisma.client.create({ data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' } })).id;
+  return { photographerId, serviceId: service.id, packageId: pkg.id, clientId: client };
 }
 
 type BookingFixture = {
@@ -86,18 +90,19 @@ type BookingFixture = {
   contactName?: string;
 };
 
-function insertBooking(fixture: BookingFixture): Promise<Booking> {
+function insertBooking(fixture: BookingFixture, owner: Catalogue = catalogue): Promise<Booking> {
   const status = fixture.status ?? 'confirmed';
   const defaultHold = status === 'pending_payment' ? minutesFrom(NOW, 30) : null;
   return prisma.booking.create({
     data: {
       reference: fixture.reference,
-      clientId: catalogue.clientId,
+      photographerId: owner.photographerId,
+      clientId: owner.clientId,
       contactName: fixture.contactName ?? 'Aline Uwase',
       contactEmail: 'aline@example.com',
       contactPhone: '+250788000000',
-      serviceId: catalogue.serviceId,
-      packageId: catalogue.packageId,
+      serviceId: owner.serviceId,
+      packageId: owner.packageId,
       serviceNameSnapshot: 'Portrait',
       packageNameSnapshot: 'Standard',
       packagePriceRwf: 40_000,
@@ -107,6 +112,8 @@ function insertBooking(fixture: BookingFixture): Promise<Booking> {
       consentAt: NOW,
       bookingFeeRate: '0.400',
       bookingFeeRwf: 16_000,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
       status,
       startsAt: fixture.startsAt,
       endsAt: fixture.endsAt,
@@ -116,8 +123,8 @@ function insertBooking(fixture: BookingFixture): Promise<Booking> {
   });
 }
 
-function insertBlock(startsAt: Date, endsAt: Date, extra: { isAllDay?: boolean; reason?: string } = {}) {
-  return prisma.availabilityBlock.create({ data: { startsAt, endsAt, ...extra } });
+function insertBlock(startsAt: Date, endsAt: Date, extra: { isAllDay?: boolean; reason?: string } = {}, owner: Catalogue = catalogue) {
+  return prisma.availabilityBlock.create({ data: { photographerId: owner.photographerId, startsAt, endsAt, ...extra } });
 }
 
 /** Wednesday 09:00–10:00 Kigali, its buffer running to 10:30. */
@@ -125,8 +132,8 @@ function insertNineOClock(reference = 'BKY-2610-00001', extra: Partial<BookingFi
   return insertBooking({ reference, startsAt: at(WEDNESDAY, '09:00'), endsAt: at(WEDNESDAY, '10:00'), ...extra });
 }
 
-function find(from: string, to = from, now = NOW): Promise<Calendar> {
-  return findCalendar(prisma, { from, to, now });
+function find(from: string, to = from, now = NOW, owner: Catalogue = catalogue): Promise<Calendar> {
+  return findCalendar(prisma, { photographerId: owner.photographerId, from, to, now });
 }
 
 function references(calendar: Calendar): string[] {
@@ -409,5 +416,24 @@ describe('what each entry carries', () => {
 
     expect(references(calendar)).toEqual(['FIRST', 'SECOND', 'THIRD']);
     expect(calendar.blocks.map((block) => block.id)).toEqual([early.id, middle.id, late.id]);
+  });
+});
+
+// --- One photographer's calendar ----------------------------------------------
+
+describe('scoped to one photographer (marketplace-spec.md R1.4)', () => {
+  it('never shows another photographer’s bookings or blocks, even at the same time', async () => {
+    const other = await insertCatalogue('hills-and-light', catalogue.clientId);
+    const mine = await insertNineOClock('BKY-2610-00001');
+    await insertBooking({ reference: 'BKY-2610-00002', startsAt: at(WEDNESDAY, '09:00'), endsAt: at(WEDNESDAY, '10:00') }, other);
+    await insertBlock(at(WEDNESDAY, '09:30'), at(WEDNESDAY, '11:00'), { reason: 'Their dentist' }, other);
+
+    const calendar = await find(WEDNESDAY);
+
+    expect(references(calendar)).toEqual([mine.reference]);
+    expect(calendar.blocks).toEqual([]);
+    // Their block is not mine to conflict with.
+    expect(calendar.bookings[0]?.conflictsWithBlock).toBe(false);
+    expect(references(await find(WEDNESDAY, WEDNESDAY, NOW, other))).toEqual(['BKY-2610-00002']);
   });
 });

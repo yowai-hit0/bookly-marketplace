@@ -75,6 +75,8 @@ async function seedBooking(startsAt: Date, endsAt: Date, bufferEndsAt: Date, ref
       consentAt: new Date(),
       bookingFeeRate: '0.400',
       bookingFeeRwf: 16000,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
     },
   });
 }
@@ -124,6 +126,8 @@ describe('the generated client', () => {
         bufferEndsAt: ELEVEN_THIRTY,
         consentAt: new Date(),
         bookingFeeRate: '0.400',
+        clientCancelCutoffHours: 0,
+        bookingFeeRefundableOnClientCancel: false,
       },
     });
 

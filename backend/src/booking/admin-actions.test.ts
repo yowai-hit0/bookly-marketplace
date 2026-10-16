@@ -15,6 +15,8 @@ import {
   insertBooking,
   insertBookingWithToken,
   insertPayment,
+  SECOND_PHOTOGRAPHER_EMAIL,
+  seedSecondPhotographer,
   seedWorld,
 } from '../test/payment-fixtures.js';
 import { findBookingByToken } from './access.js';
@@ -64,7 +66,7 @@ const MINUTE_MS = 60_000;
 const DAY_MS = 1440 * MINUTE_MS;
 
 function deps(now: Date = NOW) {
-  return { prisma, now: () => now };
+  return { prisma, now: () => now, photographerId: world.photographerId };
 }
 
 beforeAll(async () => {
@@ -149,7 +151,7 @@ function ok(result: RescheduleResult): { status: 'ok'; booking: AdminBooking } {
 
 /** The booking as the admin screen loads it, or a clear failure. */
 async function adminBooking(id: string): Promise<AdminBooking> {
-  const booking = await findAdminBooking(prisma, id);
+  const booking = await findAdminBooking(prisma, world.photographerId, id);
   if (booking === null) throw new Error('No such booking');
   return booking;
 }
@@ -164,14 +166,20 @@ async function onlyMessage(): Promise<OutboxRow> {
 /** Mon-Fri 09:00-17:00, so the fixture days generate slots at all. */
 async function openTheDiary(): Promise<void> {
   await prisma.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })),
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: world.photographerId, weekday, opensMinute: 540, closesMinute: 1020 })),
   });
 }
 
 /** Every free start on the Kigali date of `instant`, as a visitor would see it. */
 async function freeStarts(instant: Date, now: Date = NOW): Promise<string[]> {
   const date = new Date(instant.getTime() + 2 * 60 * MINUTE_MS).toISOString().slice(0, 10);
-  const days = await findAvailability(prisma, { from: date, to: date, packageDurationMinutes: DURATION_MINUTES, now });
+  const days = await findAvailability(prisma, {
+    photographerId: world.photographerId,
+    from: date,
+    to: date,
+    packageDurationMinutes: DURATION_MINUTES,
+    now,
+  });
   return days[0]?.starts ?? [];
 }
 
@@ -233,7 +241,7 @@ describe('rescheduling a confirmed booking', () => {
 
   it('uses the buffer setting as it stands now, not the one the booking was created under', async () => {
     const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt: WEDNESDAY_0900 });
-    await prisma.setting.update({ where: { id: 1 }, data: { bufferMinutes: 45 } });
+    await prisma.photographerSetting.update({ where: { photographerId: world.photographerId }, data: { bufferMinutes: 45 } });
 
     await rescheduleBooking(deps(), booking.id, THURSDAY_0900);
 
@@ -540,7 +548,7 @@ describe('the photographer cancelling', () => {
 
     await cancelByAdmin(deps(), booking.id, null);
 
-    const alerts = (await outbox()).filter((row) => row.template === 'admin_alert');
+    const alerts = (await outbox()).filter((row) => row.template === 'photographer_alert');
     expect(alerts).toHaveLength(2);
     expect(alerts.every((row) => row.recipient === ADMIN_EMAIL && row.booking_id === null)).toBe(true);
     expect(alerts.map((row) => row.payload.variant)).toEqual(['refund_due', 'refund_due']);
@@ -556,23 +564,28 @@ describe('the photographer cancelling', () => {
     await cancelByAdmin(deps(), booking.id, null);
 
     const rows = await outbox();
-    expect(rows.map((row) => row.template).sort()).toEqual(['admin_alert', 'cancellation']);
+    expect(rows.map((row) => row.template).sort()).toEqual(['cancellation', 'photographer_alert']);
     expect(rows.every((row) => row.kind === 'email')).toBe(true);
     // Unlike a client cancellation, no `booking_cancelled` alert: the
     // photographer is the one who did it (plan.md Task 19).
     expect(rows.some((row) => row.dedupe_key.includes('booking_cancelled'))).toBe(false);
   });
 
-  it('alerts nobody when there is no photographer on file, but still cancels and still emails the client', async () => {
-    await truncateAll(raw);
-    world = await seedWorld(prisma, { admin: false });
-    const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt: WEDNESDAY_0900 });
+  it('alerts the booking’s own photographer, never another (R1.7)', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const booking = await insertBooking(prisma, second, { status: 'confirmed', startsAt: WEDNESDAY_0900 });
     await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
 
-    ok(await cancelByAdmin(deps(), booking.id, null));
+    ok(await cancelByAdmin({ ...deps(), photographerId: second.photographerId }, booking.id, null));
 
     expect((await bookingRow(booking.id)).status).toBe('cancelled_by_photographer');
-    expect((await outbox()).map((row) => row.template)).toEqual(['cancellation']);
+    const rows = await outbox();
+    expect(rows.map((row) => [row.template, row.recipient]).sort()).toEqual(
+      [
+        ['cancellation', CLIENT.email],
+        ['photographer_alert', SECOND_PHOTOGRAPHER_EMAIL],
+      ].sort(),
+    );
     expect((await payments(booking.id))[0]?.status).toBe('refund_due');
   });
 
@@ -920,5 +933,41 @@ describe('the actions flags and the actions themselves agree', () => {
     const paid = adminBookingView(await adminBooking(booking.id), AFTER_THE_SHOOT);
     expect(paid.actions.canComplete).toBe(true);
     expect(ok(await markCompleted(deps(AFTER_THE_SHOOT), booking.id)).booking.status).toBe('completed');
+  });
+});
+
+// --- One photographer's bookings (marketplace-spec.md R1.4) -----------------------------
+
+describe('another photographer’s booking', () => {
+  it('is not_found to every action, and is left exactly as it was', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const { booking } = await insertBookingWithToken(prisma, second, { startsAt: WEDNESDAY_0900 });
+    await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
+    const before = [await bookingRow(booking.id), await payments(booking.id)];
+
+    const results = [
+      await rescheduleBooking(deps(), booking.id, THURSDAY_0900),
+      await cancelByAdmin(deps(), booking.id, 'Not mine to cancel'),
+      await markCompleted({ ...deps(), now: () => new Date('2027-06-01T06:00:00Z') }, booking.id),
+      await markNoShow({ ...deps(), now: () => new Date('2027-06-01T06:00:00Z') }, booking.id),
+      await resendAccessLink(deps(), booking.id),
+    ];
+
+    expect(results).toEqual(Array(5).fill({ status: 'not_found' }));
+    expect([await bookingRow(booking.id), await payments(booking.id)]).toEqual(before);
+    expect(await outbox()).toEqual([]);
+    await expect(findAdminBooking(prisma, world.photographerId, booking.id)).resolves.toBeNull();
+  });
+
+  it('does not wait on or free anything in that photographer’s calendar when mine is moved', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    // Theirs sits exactly where mine is going.
+    const theirs = await insertBooking(prisma, second, { status: 'confirmed', startsAt: THURSDAY_0900 });
+    const mine = await insertBooking(prisma, world, { status: 'confirmed', startsAt: WEDNESDAY_0900 });
+
+    ok(await rescheduleBooking(deps(), mine.id, THURSDAY_0900));
+
+    expect((await bookingRow(mine.id)).starts_at.toISOString()).toBe(THURSDAY_0900.toISOString());
+    expect((await bookingRow(theirs.id)).status).toBe('confirmed');
   });
 });

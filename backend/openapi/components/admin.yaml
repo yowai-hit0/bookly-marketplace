@@ -160,29 +160,44 @@ schemas:
 
   Settings:
     type: object
-    required: [bookingFeeRate, minLeadTimeMinutes, holdMinutes, bufferMinutes, deliveryExpiryDays]
+    description: |
+      The signed-in photographer's own operating values and client cancellation
+      policy. The checkout hold is the platform's and is not here. A booking
+      keeps the buffer, fee rate and cancellation policy it was made under, so
+      a change applies to new bookings only.
+    required: [bookingFeeRate, minLeadTimeMinutes, bufferMinutes, deliveryExpiryDays, clientCancelCutoffHours, bookingFeeRefundableOnClientCancel]
     additionalProperties: false
     properties:
       bookingFeeRate:
         type: number
         minimum: 0
         maximum: 1
-        description: Share of the total paid up front (0.4 seeded). At most three decimal places.
-      minLeadTimeMinutes: { type: integer, minimum: 0, description: Minimum notice before a bookable start (120 seeded). }
-      holdMinutes: { type: integer, minimum: 1, description: How long an unpaid booking holds its slot (30 seeded). }
-      bufferMinutes: { type: integer, minimum: 0, description: Gap reserved after every shoot (30 seeded). }
-      deliveryExpiryDays: { type: integer, minimum: 1, description: Default photo-link lifetime (90 seeded). }
+        description: Share of the total paid up front (0.4 by default). At most three decimal places.
+      minLeadTimeMinutes: { type: integer, minimum: 0, description: Minimum notice before a bookable start (120 by default). }
+      bufferMinutes: { type: integer, minimum: 0, description: Gap reserved after every shoot (30 by default). }
+      deliveryExpiryDays: { type: integer, minimum: 1, description: Default photo-link lifetime (90 by default). }
+      clientCancelCutoffHours:
+        type: integer
+        minimum: 0
+        description: A client may cancel until this many hours before the shoot. 0 (the default) means any time before it.
+      bookingFeeRefundableOnClientCancel:
+        type: boolean
+        description: Whether a client's own cancellation refunds the booking fee (false by default). A photographer cancelling always refunds it.
 
   SettingsPatch:
     type: object
-    description: Any subset of the five values. An unknown key is a 400, so a misspelt field never silently saves nothing.
+    description: |
+      Any subset of the six values. An unknown key is a 400, so a misspelt field
+      never silently saves nothing; that includes `holdMinutes`, which is the
+      platform's now.
     additionalProperties: false
     properties:
       bookingFeeRate: { type: number, minimum: 0, maximum: 1 }
       minLeadTimeMinutes: { type: integer, minimum: 0, maximum: 2147483647 }
-      holdMinutes: { type: integer, minimum: 1, maximum: 2147483647 }
       bufferMinutes: { type: integer, minimum: 0, maximum: 2147483647 }
       deliveryExpiryDays: { type: integer, minimum: 1, maximum: 2147483647 }
+      clientCancelCutoffHours: { type: integer, minimum: 0, maximum: 2147483647 }
+      bookingFeeRefundableOnClientCancel: { type: boolean }
 
   SettingsEnvelope:
     type: object
@@ -289,7 +304,11 @@ schemas:
 
   AdminBooking:
     type: object
-    required: [id, reference, status, stage, locale, client, contact, service, package, schedule, details, addons, money, payments, lifecycle, access, delivery, messages, notes, actions]
+    description: |
+      One of the signed-in photographer's bookings. The client's details are the
+      booking's own snapshot (`contact`); the platform's shared client record is
+      never shown to a photographer.
+    required: [id, reference, status, stage, locale, contact, service, package, schedule, details, addons, money, payments, lifecycle, access, delivery, messages, notes, actions]
     additionalProperties: false
     properties:
       id: { $ref: 'common.yaml#/schemas/Uuid' }
@@ -297,17 +316,6 @@ schemas:
       status: { $ref: 'common.yaml#/schemas/BookingStatus' }
       stage: { $ref: 'common.yaml#/schemas/BookingStage' }
       locale: { type: string }
-      client:
-        type: object
-        description: The client record (one per email address), as it stands now.
-        required: [id, fullName, email, phone, anonymized]
-        additionalProperties: false
-        properties:
-          id: { $ref: 'common.yaml#/schemas/Uuid' }
-          fullName: { type: string }
-          email: { type: string }
-          phone: { type: [string, 'null'] }
-          anonymized: { type: boolean }
       contact:
         type: object
         description: The contact details this booking was made with (its own snapshot).

@@ -69,7 +69,7 @@ beforeEach(async () => {
 // --- Helpers ----------------------------------------------------------------------------
 
 function deps() {
-  return { prisma, now: () => NOW };
+  return { prisma, now: () => NOW, photographerId: world.photographerId };
 }
 
 type AddonRow = {
@@ -94,7 +94,7 @@ async function addonRows(bookingId: string): Promise<AddonRow[]> {
 }
 
 async function totalsOf(bookingId: string) {
-  const booking = await findAdminBooking(prisma, bookingId);
+  const booking = await findAdminBooking(prisma, world.photographerId, bookingId);
   if (booking === null) throw new Error('No such booking');
   return adminBookingView(booking, NOW).money.totals;
 }
@@ -300,7 +300,7 @@ describe('the editor is open once the shoot has begun, and until the booking is 
     const prints = await catalogueAddon(PRINTS);
 
     expect(await add(booking.id, prints.id)).toStrictEqual({ status: 'not_allowed' });
-    const view = adminBookingView((await findAdminBooking(prisma, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
+    const view = adminBookingView((await findAdminBooking(prisma, world.photographerId, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
     expect(view.actions.canEditAddons).toBe(false);
   });
 
@@ -309,7 +309,7 @@ describe('the editor is open once the shoot has begun, and until the booking is 
     const prints = await catalogueAddon(PRINTS);
 
     expect((await add(booking.id, prints.id)).status).toBe('ok');
-    const open = adminBookingView((await findAdminBooking(prisma, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
+    const open = adminBookingView((await findAdminBooking(prisma, world.photographerId, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
     expect(open.actions.canEditAddons).toBe(true);
     // Delivery is for after: it still needs `completed`.
     expect(open.actions.canEditDelivery).toBe(false);
@@ -317,7 +317,7 @@ describe('the editor is open once the shoot has begun, and until the booking is 
     await prisma.booking.update({ where: { id: booking.id }, data: { status: 'completed', completedAt: NOW } });
 
     expect(await add(booking.id, prints.id)).toStrictEqual({ status: 'not_allowed' });
-    const locked = adminBookingView((await findAdminBooking(prisma, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
+    const locked = adminBookingView((await findAdminBooking(prisma, world.photographerId, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
     expect(locked.actions.canEditAddons).toBe(false);
     expect(locked.actions.canEditDelivery).toBe(true);
   });
@@ -523,7 +523,7 @@ describe('removing a post-shoot add-on', () => {
     await add(booking.id, prints.id);
     await insertPayment(prisma, booking.id, { status: 'succeeded', kind: 'session_fee', amountRwf: 45_000, ageSeconds: 300 });
 
-    const view = adminBookingView((await findAdminBooking(prisma, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
+    const view = adminBookingView((await findAdminBooking(prisma, world.photographerId, booking.id)) ?? (() => { throw new Error('gone'); })(), NOW);
 
     expect(view.addons.map((line) => [line.stage, line.canRemove])).toEqual([
       ['at_booking', false],

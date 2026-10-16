@@ -34,7 +34,7 @@ let world: PaymentWorld;
 const NOW = new Date('2026-10-01T06:00:00Z');
 
 function deps(now: Date = NOW) {
-  return { prisma, now: () => now };
+  return { prisma, now: () => now, photographerId: world.photographerId };
 }
 
 /** A provider whose every method fails the test. Nothing here may reach one. */
@@ -99,7 +99,7 @@ async function bookingWithPayment(status: string, amountRwf = 20_000) {
 }
 
 async function totalsOf(bookingId: string) {
-  const booking = await findAdminBooking(prisma, bookingId);
+  const booking = await findAdminBooking(prisma, world.photographerId, bookingId);
   if (booking === null) throw new Error('No such booking');
   return bookingTotals(booking, booking.addons, booking.payments);
 }

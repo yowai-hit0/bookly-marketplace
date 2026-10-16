@@ -1,5 +1,5 @@
 import { kigaliDateOf } from '../availability/engine.js';
-import type { AccessedBooking, CancellationPolicy } from './access.js';
+import { type AccessedBooking, type CancellationPolicy, cancellationPolicyOf } from './access.js';
 import { maskEmail, pendingMaskedEmailOf } from './email-change.js';
 import { type ClientNotice, clientNotices } from './notices.js';
 import { type ClientStage, bookingStage } from './stage.js';
@@ -58,6 +58,16 @@ export type ClientBookingView = {
   payments: { kind: string; status: string; amountRwf: number; settledAt: string | null }[];
   /** Whether the client may cancel now: a confirmed booking, before its photographer's cut-off (R1.8). */
   canCancel: boolean;
+  /**
+   * The cancellation policy this booking was made under (R1.8), so the page
+   * states the terms the client actually has rather than a blanket rule.
+   * `deadline` is the instant a client cancellation stops being accepted
+   * (`startsAt` minus the cut-off; exactly `startsAt` when there is none), or
+   * null once the booking is past any client cancellation -- cancelled,
+   * expired or its shoot done. `bookingFeeRefundable` says whether cancelling
+   * refunds the booking fee; a session fee already paid is always refunded.
+   */
+  cancellation: { deadline: string | null; bookingFeeRefundable: boolean };
   cancellationReason: string | null;
   cancelledAt: string | null;
   /** Present once there is money to take and a booking to take it for. */
@@ -104,6 +114,10 @@ export function clientBookingView(booking: AccessedBooking, now: Date): ClientBo
         settledAt: payment.settledAt?.toISOString() ?? null,
       })),
     canCancel: canCancel(booking, now),
+    cancellation: {
+      deadline: CANCELLABLE_STATUSES.includes(booking.status) ? cancellationDeadline(booking).toISOString() : null,
+      bookingFeeRefundable: cancellationPolicyOf(booking).bookingFeeRefundableOnClientCancel,
+    },
     cancellationReason: booking.cancellationReason,
     cancelledAt: booking.cancelledAt?.toISOString() ?? null,
     sessionFee:
@@ -125,18 +139,31 @@ export function clientBookingView(booking: AccessedBooking, now: Date): ClientBo
 }
 
 /**
+ * Statuses a client cancellation can still apply to: a confirmed booking, or a
+ * hold that will be one once paid. The policy's deadline is shown for these.
+ */
+const CANCELLABLE_STATUSES = ['pending_payment', 'confirmed'];
+
+type CancelPolicyFields = { startsAt: Date } & Pick<CancellationPolicy, 'clientCancelCutoffHours'>;
+
+/**
+ * The first instant a client may no longer cancel: `clientCancelCutoffHours`
+ * before the shoot, under the policy the booking was made with (R1.8).
+ */
+export function cancellationDeadline(booking: CancelPolicyFields): Date {
+  return new Date(booking.startsAt.getTime() - booking.clientCancelCutoffHours * MS_PER_HOUR);
+}
+
+/**
  * Only while the booking stands, and until the photographer's cut-off: up to
  * `clientCancelCutoffHours` before the shoot (marketplace-spec.md R1.8). A
  * cut-off of 0 is any time before the shoot, the single-photographer rule
  * (spec §6.10). The cut-off instant itself is already too late, as the start
- * itself is with no cut-off.
+ * itself is with no cut-off. The cut-off is the booking's own snapshot, so
+ * editing the photographer's settings never moves it.
  */
-export function canCancel(
-  booking: { status: string; startsAt: Date; cancellationPolicy: Pick<CancellationPolicy, 'clientCancelCutoffHours'> },
-  now: Date,
-): boolean {
-  const deadline = booking.startsAt.getTime() - booking.cancellationPolicy.clientCancelCutoffHours * MS_PER_HOUR;
-  return booking.status === 'confirmed' && now.getTime() < deadline;
+export function canCancel(booking: { status: string } & CancelPolicyFields, now: Date): boolean {
+  return booking.status === 'confirmed' && now < cancellationDeadline(booking);
 }
 
 /**

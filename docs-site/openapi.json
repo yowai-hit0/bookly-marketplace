@@ -4,7 +4,7 @@
     "title": "Bookly API",
     "version": "1.0.0",
     "summary": "Booking, payment and admin API for a photographer's booking site in Kigali.",
-    "description": "The API behind the Bookly booking site. It serves three kinds of caller:\n\n- **The public**: anonymous visitors browsing services, checking availability,\n  booking a slot and paying its booking fee.\n- **A booking's client**: no account; every client request carries a\n  **capability token** in its path, emailed when the booking is confirmed.\n- **The admin** (the photographer): an `Authorization: Bearer` JWT from\n  `POST /api/admin/auth/login`.\n\nRead [the API conventions](/api/conventions) first: error shapes, the\n400-versus-422 rule, time zones and money are the same on every operation.\n\nThis file is written by hand. A backend test (`src/openapi.test.ts`) fails\nwhen a route exists without an operation here, or the other way round, and\nvalidates real responses against these schemas.\n"
+    "description": "The API behind the Bookly booking site. It serves three kinds of caller:\n\n- **The public**: anonymous visitors browsing photographers and their\n  services, checking availability, booking a slot and paying its booking fee.\n- **A booking's client**: no account; every client request carries a\n  **capability token** in its path, emailed when the booking is confirmed.\n- **A photographer** (the studio, under `/api/admin/*` until Phase 2 moves\n  it to `/api/studio/*`): an `Authorization: Bearer` JWT from\n  `POST /api/admin/auth/login`. Every studio route is scoped to the\n  photographer the token names; an id of another photographer's row is a\n  404, exactly like an id that names nothing.\n\nRead [the API conventions](/api/conventions) first: error shapes, the\n400-versus-422 rule, time zones and money are the same on every operation.\n\nThis file is written by hand. A backend test (`src/openapi.test.ts`) fails\nwhen a route exists without an operation here, or the other way round, and\nvalidates real responses against these schemas.\n"
   },
   "servers": [
     {
@@ -51,7 +51,7 @@
     },
     {
       "name": "Admin auth",
-      "description": "Login and password reset for the one admin account."
+      "description": "Login and password reset for a photographer's studio account."
     },
     {
       "name": "Admin availability",
@@ -59,7 +59,7 @@
     },
     {
       "name": "Admin settings",
-      "description": "The five operating values."
+      "description": "The photographer's operating values and client cancellation policy."
     },
     {
       "name": "Admin calendar"
@@ -112,18 +112,98 @@
         }
       }
     },
-    "/api/services": {
+    "/api/photographers": {
       "get": {
-        "operationId": "listServices",
+        "operationId": "listPhotographers",
         "tags": [
           "Catalogue & availability"
         ],
-        "summary": "List active services",
-        "description": "Active services, each with their active packages and the add-ons they offer. Anonymous.",
+        "summary": "List the photographers who can be booked",
+        "description": "Every photographer who can be booked, by display name. No filters yet:\nthe directory's category, district, price and date filters come later.\nAnonymous.\n",
         "security": [],
         "responses": {
           "200": {
-            "description": "The public catalogue.",
+            "description": "The bookable photographers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "photographers"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "photographers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PublicPhotographerSummary"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/photographers/{handle}": {
+      "get": {
+        "operationId": "getPhotographer",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "One photographer's public profile",
+        "description": "The profile behind `/p/{handle}`. Never the photographer's login email,\nstatus or operating settings: `email` is the public contact address they\nchose, or null. An unknown handle and the handle of a photographer who\ncannot be booked are the same 404. Anonymous.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Handle"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The public profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "photographer"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "photographer": {
+                      "$ref": "#/components/schemas/PublicPhotographerProfile"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/photographers/{handle}/services": {
+      "get": {
+        "operationId": "listPhotographerServices",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "List one photographer's active services",
+        "description": "The photographer's active services, each with its active packages and the\nadd-ons it offers: its own, then those the photographer offers on every\nservice. Never another photographer's. A 404 for a handle that is unknown\nor cannot be booked. Anonymous.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Handle"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The photographer's public catalogue.",
             "content": {
               "application/json": {
                 "schema": {
@@ -143,19 +223,26 @@
                 }
               }
             }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
     },
-    "/api/services/{slug}": {
+    "/api/photographers/{handle}/services/{slug}": {
       "get": {
-        "operationId": "getService",
+        "operationId": "getPhotographerService",
         "tags": [
           "Catalogue & availability"
         ],
-        "summary": "One service by slug",
+        "summary": "One of a photographer's services by slug",
+        "description": "Slugs are unique per photographer, so the same slug under another handle is\nanother service. A 404 for an unknown or inactive slug, a slug only another\nphotographer has, and a handle that is unknown or cannot be booked.\nAnonymous.\n",
         "security": [],
         "parameters": [
+          {
+            "$ref": "#/components/parameters/Handle"
+          },
           {
             "name": "slug",
             "in": "path",
@@ -234,7 +321,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "422": {
-            "description": "A package or add-on the public cannot book; names the field.",
+            "description": "A package or add-on the public cannot book; names the field. A package\nwhose photographer cannot be booked is refused as `packageId`, and an\nadd-on of another photographer -- even one they offer on every service\n-- as `addonIds`.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -290,7 +377,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "422": {
-            "description": "An unbookable package, or a month the engine cannot compute.",
+            "description": "An unbookable package -- its photographer's included, answered exactly\nas an unknown package -- or a month the engine cannot compute. The\nmonth is the package's photographer's calendar alone.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -349,7 +436,7 @@
             }
           },
           "422": {
-            "description": "Something named cannot be booked, or the start is not currently offered.",
+            "description": "Something named cannot be booked, or the start is not currently offered\nin the package's photographer's calendar. A package whose photographer\ncannot be booked is `packageId`; another photographer's add-on is\n`addonIds`.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -1586,7 +1673,7 @@
         "tags": [
           "Admin settings"
         ],
-        "summary": "The five operating values",
+        "summary": "The photographer's operating values and cancellation policy",
         "responses": {
           "200": {
             "description": "Settings.",
@@ -1609,7 +1696,7 @@
           "Admin settings"
         ],
         "summary": "Change settings",
-        "description": "Any subset of the five. Each is range-checked here, so a value out of range is a 422 rather than a database error.",
+        "description": "Any subset of the six. Each is range-checked here, so a value out of\nrange is a 422 rather than a database error. Applies to bookings made\nfrom now on; existing bookings keep the terms they were made under.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -1713,7 +1800,7 @@
           "Admin bookings"
         ],
         "summary": "List bookings",
-        "description": "Filtered by stage, status and shoot date, searched by reference, name, email or phone, and paged by number with a total.",
+        "description": "The signed-in photographer's bookings only. Filtered by stage, status and\nshoot date, searched by reference, name, email or phone (the booking's\nown contact details), and paged by number with a total.\n",
         "parameters": [
           {
             "name": "stage",
@@ -3252,6 +3339,106 @@
       }
     },
     "schemas": {
+      "PublicPhotographerSummary": {
+        "type": "object",
+        "description": "One photographer who can be booked, as the photographers list shows them.",
+        "required": [
+          "handle",
+          "displayName",
+          "coverImageUrl"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "handle": {
+            "type": "string",
+            "examples": [
+              "kigali-lens"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        }
+      },
+      "PublicPhotographerProfile": {
+        "type": "object",
+        "description": "A photographer's public profile. An allowlist: no status, no login email,\nno operating settings. `email` is the contact address the photographer\nchose to publish, or null -- never their login.\n",
+        "required": [
+          "handle",
+          "displayName",
+          "bio",
+          "contactPhone",
+          "whatsappPhone",
+          "email",
+          "coverImageUrl"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "handle": {
+            "type": "string",
+            "examples": [
+              "kigali-lens"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contactPhone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "whatsappPhone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email"
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "description": "Every error body. `error` is a stable, machine-readable code.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "examples": [
+              "not_found"
+            ]
+          }
+        }
+      },
       "Uuid": {
         "type": "string",
         "format": "uuid"
@@ -3320,7 +3507,7 @@
       },
       "PublicService": {
         "type": "object",
-        "description": "An active service with its active packages, and the active add-ons it\noffers: its own first, then those offered on every service, each in\ndisplay order.\n",
+        "description": "An active service with its active packages, and the active add-ons it\noffers: its own first, then those its photographer offers on every\nservice, each in display order.\n",
         "required": [
           "id",
           "slug",
@@ -3434,22 +3621,7 @@
             "type": "number",
             "minimum": 0,
             "maximum": 1,
-            "description": "The service's own override if set, else the global rate."
-          }
-        }
-      },
-      "Error": {
-        "type": "object",
-        "description": "Every error body. `error` is a stable, machine-readable code.",
-        "required": [
-          "error"
-        ],
-        "properties": {
-          "error": {
-            "type": "string",
-            "examples": [
-              "not_found"
-            ]
+            "description": "The service's own override if set, else its photographer's rate."
           }
         }
       },
@@ -3493,7 +3665,7 @@
           },
           "bookingFeeRwf": {
             "$ref": "#/components/schemas/Rwf",
-            "description": "Paid now to hold the slot. Not refundable if the client cancels."
+            "description": "Paid now to hold the slot. Whether a client's own cancellation refunds\nit is the photographer's cancellation policy; by default it does not.\n"
           },
           "sessionFeeRwf": {
             "$ref": "#/components/schemas/Rwf",
@@ -3827,6 +3999,29 @@
           "card"
         ]
       },
+      "CancellationTerms": {
+        "type": "object",
+        "description": "The client cancellation policy the booking was made under: its\nphotographer's at that moment, kept on the booking, so a later edit of\nthe photographer's settings never changes it.\n",
+        "required": [
+          "deadline",
+          "bookingFeeRefundable"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The instant a client cancellation stops being accepted: the start\nminus the photographer's cut-off, or the start itself when there is\nnone. Null on the client's booking page once nothing is left to\ncancel (completed, no-show, expired or cancelled).\n"
+          },
+          "bookingFeeRefundable": {
+            "type": "boolean",
+            "description": "Whether cancelling refunds the booking fee. A session fee already paid is always refunded."
+          }
+        }
+      },
       "Checkout": {
         "type": "object",
         "required": [
@@ -3845,7 +4040,8 @@
               "holdExpiresAt",
               "bookingFeeRwf",
               "state",
-              "waitingPayment"
+              "waitingPayment",
+              "cancellation"
             ],
             "additionalProperties": false,
             "properties": {
@@ -3903,6 +4099,9 @@
                     }
                   }
                 ]
+              },
+              "cancellation": {
+                "$ref": "#/components/schemas/CancellationTerms"
               }
             }
           }
@@ -4038,7 +4237,8 @@
           "no_show",
           "expired",
           "cancelled_by_client",
-          "cancelled_by_admin"
+          "cancelled_by_photographer",
+          "cancelled_by_platform"
         ]
       },
       "PaymentStatusView": {
@@ -4125,7 +4325,8 @@
           "no_show",
           "expired",
           "cancelled_by_client",
-          "cancelled_by_admin"
+          "cancelled_by_photographer",
+          "cancelled_by_platform"
         ]
       },
       "Totals": {
@@ -4229,6 +4430,7 @@
           "bookingFeeRwf",
           "payments",
           "canCancel",
+          "cancellation",
           "cancellationReason",
           "cancelledAt",
           "sessionFee",
@@ -4371,7 +4573,10 @@
           },
           "canCancel": {
             "type": "boolean",
-            "description": "True only for a `confirmed` booking whose shoot is still ahead."
+            "description": "True only for a `confirmed` booking before its cancellation deadline (`cancellation.deadline`)."
+          },
+          "cancellation": {
+            "$ref": "#/components/schemas/CancellationTerms"
           },
           "cancellationReason": {
             "type": [
@@ -4898,12 +5103,14 @@
       },
       "Settings": {
         "type": "object",
+        "description": "The signed-in photographer's own operating values and client cancellation\npolicy. The checkout hold is the platform's and is not here. A booking\nkeeps the buffer, fee rate and cancellation policy it was made under, so\na change applies to new bookings only.\n",
         "required": [
           "bookingFeeRate",
           "minLeadTimeMinutes",
-          "holdMinutes",
           "bufferMinutes",
-          "deliveryExpiryDays"
+          "deliveryExpiryDays",
+          "clientCancelCutoffHours",
+          "bookingFeeRefundableOnClientCancel"
         ],
         "additionalProperties": false,
         "properties": {
@@ -4911,27 +5118,31 @@
             "type": "number",
             "minimum": 0,
             "maximum": 1,
-            "description": "Share of the total paid up front (0.4 seeded). At most three decimal places."
+            "description": "Share of the total paid up front (0.4 by default). At most three decimal places."
           },
           "minLeadTimeMinutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "Minimum notice before a bookable start (120 seeded)."
-          },
-          "holdMinutes": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "How long an unpaid booking holds its slot (30 seeded)."
+            "description": "Minimum notice before a bookable start (120 by default)."
           },
           "bufferMinutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "Gap reserved after every shoot (30 seeded)."
+            "description": "Gap reserved after every shoot (30 by default)."
           },
           "deliveryExpiryDays": {
             "type": "integer",
             "minimum": 1,
-            "description": "Default photo-link lifetime (90 seeded)."
+            "description": "Default photo-link lifetime (90 by default)."
+          },
+          "clientCancelCutoffHours": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "A client may cancel until this many hours before the shoot. 0 (the default) means any time before it."
+          },
+          "bookingFeeRefundableOnClientCancel": {
+            "type": "boolean",
+            "description": "Whether a client's own cancellation refunds the booking fee (false by default). A photographer cancelling always refunds it."
           }
         }
       },
@@ -4949,7 +5160,7 @@
       },
       "SettingsPatch": {
         "type": "object",
-        "description": "Any subset of the five values. An unknown key is a 400, so a misspelt field never silently saves nothing.",
+        "description": "Any subset of the six values. An unknown key is a 400, so a misspelt field\nnever silently saves nothing; that includes `holdMinutes`, which is the\nplatform's now.\n",
         "additionalProperties": false,
         "properties": {
           "bookingFeeRate": {
@@ -4962,11 +5173,6 @@
             "minimum": 0,
             "maximum": 2147483647
           },
-          "holdMinutes": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 2147483647
-          },
           "bufferMinutes": {
             "type": "integer",
             "minimum": 0,
@@ -4976,6 +5182,14 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 2147483647
+          },
+          "clientCancelCutoffHours": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "bookingFeeRefundableOnClientCancel": {
+            "type": "boolean"
           }
         }
       },
@@ -5288,13 +5502,13 @@
       },
       "AdminBooking": {
         "type": "object",
+        "description": "One of the signed-in photographer's bookings. The client's details are the\nbooking's own snapshot (`contact`); the platform's shared client record is\nnever shown to a photographer.\n",
         "required": [
           "id",
           "reference",
           "status",
           "stage",
           "locale",
-          "client",
           "contact",
           "service",
           "package",
@@ -5326,38 +5540,6 @@
           },
           "locale": {
             "type": "string"
-          },
-          "client": {
-            "type": "object",
-            "description": "The client record (one per email address), as it stands now.",
-            "required": [
-              "id",
-              "fullName",
-              "email",
-              "phone",
-              "anonymized"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "$ref": "#/components/schemas/Uuid"
-              },
-              "fullName": {
-                "type": "string"
-              },
-              "email": {
-                "type": "string"
-              },
-              "phone": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "anonymized": {
-                "type": "boolean"
-              }
-            }
           },
           "contact": {
             "type": "object",
@@ -6305,9 +6487,68 @@
         }
       }
     },
+    "parameters": {
+      "Handle": {
+        "name": "handle",
+        "in": "path",
+        "required": true,
+        "description": "A photographer's handle, as in `/p/{handle}`: lowercase letters, digits\nand hyphens, 3 to 30 characters. Anything else is a 404, as an unknown\nhandle is.\n",
+        "schema": {
+          "type": "string",
+          "examples": [
+            "kigali-lens"
+          ]
+        }
+      },
+      "AccessToken": {
+        "name": "token",
+        "in": "path",
+        "required": true,
+        "description": "The booking's **access token**, from its confirmation email or a resend:\n256 random bits, base64url. It is the client's whole identity, so treat\nthe URL as a secret. Unknown, expired (365 days) and superseded tokens\nare all a 404.\n",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,256}$"
+        }
+      },
+      "Reference": {
+        "name": "reference",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/BookingReference"
+        }
+      },
+      "CheckoutToken": {
+        "name": "token",
+        "in": "path",
+        "required": true,
+        "description": "The checkout token returned when the booking was created: an HMAC of the\nreference, 43 base64url characters. Good only for paying the booking fee\nwhile the hold lasts.\n",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        }
+      },
+      "OurRef": {
+        "name": "ourRef",
+        "in": "path",
+        "required": true,
+        "description": "Our id for one payment attempt, returned when it was started.",
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        }
+      },
+      "RowId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        }
+      }
+    },
     "responses": {
       "NotFound": {
-        "description": "Nothing there. For a capability token this is also the answer for an\nexpired, superseded or malformed token: never 403, which would confirm\nthat a booking exists.\n",
+        "description": "Nothing there. For a capability token this is also the answer for an\nexpired, superseded or malformed token: never 403, which would confirm\nthat a booking exists. On an admin route it is also the answer for an id\nthat belongs to another photographer.\n",
         "content": {
           "application/json": {
             "schema": {
@@ -6511,53 +6752,6 @@
               "error": "internal_error"
             }
           }
-        }
-      }
-    },
-    "parameters": {
-      "AccessToken": {
-        "name": "token",
-        "in": "path",
-        "required": true,
-        "description": "The booking's **access token**, from its confirmation email or a resend:\n256 random bits, base64url. It is the client's whole identity, so treat\nthe URL as a secret. Unknown, expired (365 days) and superseded tokens\nare all a 404.\n",
-        "schema": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{16,256}$"
-        }
-      },
-      "Reference": {
-        "name": "reference",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/BookingReference"
-        }
-      },
-      "CheckoutToken": {
-        "name": "token",
-        "in": "path",
-        "required": true,
-        "description": "The checkout token returned when the booking was created: an HMAC of the\nreference, 43 base64url characters. Good only for paying the booking fee\nwhile the hold lasts.\n",
-        "schema": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{43}$"
-        }
-      },
-      "OurRef": {
-        "name": "ourRef",
-        "in": "path",
-        "required": true,
-        "description": "Our id for one payment attempt, returned when it was started.",
-        "schema": {
-          "$ref": "#/components/schemas/Uuid"
-        }
-      },
-      "RowId": {
-        "name": "id",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "$ref": "#/components/schemas/Uuid"
         }
       }
     }

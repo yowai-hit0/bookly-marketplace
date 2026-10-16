@@ -198,7 +198,7 @@ describe('confirming the new address', () => {
     await ask(token);
     await confirm(await lastConfirmToken());
 
-    await resendAccessLink({ prisma, now: () => clock }, booking.id);
+    await resendAccessLink({ prisma, now: () => clock, photographerId: world.photographerId }, booking.id);
 
     expect((await emails('access_link_resend')).map((row) => row.recipient)).toEqual([NEW_EMAIL]);
   });

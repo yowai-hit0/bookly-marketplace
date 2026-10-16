@@ -79,7 +79,7 @@ beforeEach(async () => {
 // --- Helpers ----------------------------------------------------------------------------
 
 function deps(now: Date = NOW, providerId: 'mtn_momo_direct' | 'flutterwave' = PROVIDER) {
-  return { prisma, providerId, now: () => now };
+  return { prisma, providerId, now: () => now, photographerId: world.photographerId };
 }
 
 type PaymentRow = {
@@ -136,7 +136,7 @@ async function tokenRow(bookingId: string): Promise<TokenRow> {
 }
 
 async function totalsOf(bookingId: string) {
-  const booking = await findAdminBooking(prisma, bookingId);
+  const booking = await findAdminBooking(prisma, world.photographerId, bookingId);
   if (booking === null) throw new Error('No such booking');
   return adminBookingView(booking, NOW).money.totals;
 }
@@ -159,7 +159,7 @@ async function addAddon(bookingId: string, priceRwf: number): Promise<void> {
   const before = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, select: { status: true, startsAt: true } });
   await prisma.booking.update({ where: { id: bookingId }, data: { status: 'confirmed' } });
   const now = () => new Date(before.startsAt.getTime() + 60_000);
-  const result = await addPostShootAddon({ prisma, now }, bookingId, { addonId: addon.id, quantity: 1 });
+  const result = await addPostShootAddon({ prisma, now, photographerId: world.photographerId }, bookingId, { addonId: addon.id, quantity: 1 });
   await prisma.booking.update({ where: { id: bookingId }, data: { status: before.status } });
   if (result.status !== 'ok') throw new Error(`The add-on would not go on: ${result.status}`);
 }
@@ -726,7 +726,7 @@ describe('removing an add-on after the request was sent', () => {
 
     // The photographer changes his mind and takes the add-on off again.
     const line = await prisma.bookingAddon.findFirstOrThrow({ where: { bookingId: booking.id, stage: 'post_shoot' } });
-    const removed = await removePostShootAddon({ prisma, now: () => new Date(booking.startsAt.getTime() + 60_000) }, booking.id, line.id);
+    const removed = await removePostShootAddon({ prisma, now: () => new Date(booking.startsAt.getTime() + 60_000), photographerId: world.photographerId }, booking.id, line.id);
 
     expect(removed.status).toBe('ok');
     // Nothing reconsiders the request: it still asks for 45,000 against 30,000 owed.
@@ -741,7 +741,7 @@ describe('removing an add-on after the request was sent', () => {
     await addAddon(booking.id, 15_000);
     await requestSessionFee(deps(), booking.id);
     const line = await prisma.bookingAddon.findFirstOrThrow({ where: { bookingId: booking.id, stage: 'post_shoot' } });
-    await removePostShootAddon({ prisma, now: () => new Date(booking.startsAt.getTime() + 60_000) }, booking.id, line.id);
+    await removePostShootAddon({ prisma, now: () => new Date(booking.startsAt.getTime() + 60_000), photographerId: world.photographerId }, booking.id, line.id);
     // Past the in-flight window, so the request reads as a request (initiate.ts).
     await prisma.$executeRaw`UPDATE payment SET initiated_at = initiated_at - interval '5 minutes' WHERE kind = 'session_fee'`;
     const provider = stubProvider();

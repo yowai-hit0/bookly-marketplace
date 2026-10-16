@@ -182,6 +182,10 @@ export type BookingSeed = {
   bookingFeeRwf?: number;
   /** At-booking add-ons: `own` 10,000 and `shared` 5,000. Defaults to `own` only. */
   addons?: ('own' | 'shared')[];
+  /** The cancellation policy snapshotted on the booking (R1.8). Defaults to 0: any time before the shoot. */
+  clientCancelCutoffHours?: number;
+  /** Defaults to false: a client's cancellation forfeits the booking fee. */
+  bookingFeeRefundableOnClientCancel?: boolean;
 };
 
 export const DURATION_MINUTES = 90;
@@ -229,6 +233,11 @@ export async function insertBooking(prisma: PrismaClient, world: PaymentWorld, s
       consentAt: new Date('2026-10-01T06:00:00Z'),
       bookingFeeRate: '0.400',
       bookingFeeRwf: seed.bookingFeeRwf ?? 20_000,
+      // The policy snapshot booking creation takes (R1.8): the schema
+      // defaults' "any time before the shoot, fee not refundable" unless a test
+      // names its own terms.
+      clientCancelCutoffHours: seed.clientCancelCutoffHours ?? 0,
+      bookingFeeRefundableOnClientCancel: seed.bookingFeeRefundableOnClientCancel ?? false,
       ...(status === 'confirmed' ? { confirmedAt: new Date('2026-10-01T06:05:00Z') } : {}),
     },
   });

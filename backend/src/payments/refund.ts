@@ -12,6 +12,10 @@ import type { Payment, PrismaClient } from '@prisma/client';
  * Only a payment already flagged `refund_due` can be refunded: a `succeeded`
  * one is money correctly held, and marking it refunded would quietly rewrite
  * what the booking is worth.
+ *
+ * Only a payment on one of the signed-in photographer's own bookings
+ * (marketplace-spec.md R1.4): another photographer's payment is `not_found`
+ * and is left exactly as it was.
  */
 
 export type RecordRefundResult =
@@ -20,7 +24,12 @@ export type RecordRefundResult =
   /** Not flagged for refund: nothing here is owed back. */
   | { status: 'not_refundable' };
 
-export type RecordRefundDeps = { prisma: PrismaClient; now: () => Date };
+export type RecordRefundDeps = {
+  prisma: PrismaClient;
+  now: () => Date;
+  /** The photographer whose booking's payment this must be: from the token, never the request. */
+  photographerId: string;
+};
 
 export async function recordRefund(
   deps: RecordRefundDeps,
@@ -28,7 +37,7 @@ export async function recordRefund(
   refund: { reference: string; refundedAt?: Date },
 ): Promise<RecordRefundResult> {
   const { count } = await deps.prisma.payment.updateMany({
-    where: { id: paymentId, status: 'refund_due' },
+    where: { id: paymentId, status: 'refund_due', booking: { photographerId: deps.photographerId } },
     data: {
       status: 'refunded',
       refundedAt: refund.refundedAt ?? deps.now(),
@@ -36,7 +45,7 @@ export async function recordRefund(
     },
   });
 
-  const payment = await deps.prisma.payment.findUnique({ where: { id: paymentId } });
+  const payment = await deps.prisma.payment.findFirst({ where: { id: paymentId, booking: { photographerId: deps.photographerId } } });
   if (payment === null) return { status: 'not_found' };
   return count === 1 ? { status: 'recorded', payment } : { status: 'not_refundable' };
 }

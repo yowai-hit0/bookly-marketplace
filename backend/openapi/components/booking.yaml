@@ -117,7 +117,7 @@ schemas:
     properties:
       checkout:
         type: object
-        required: [reference, serviceName, packageName, startsAt, endsAt, holdExpiresAt, bookingFeeRwf, state, waitingPayment]
+        required: [reference, serviceName, packageName, startsAt, endsAt, holdExpiresAt, bookingFeeRwf, state, waitingPayment, cancellation]
         additionalProperties: false
         properties:
           reference: { $ref: 'common.yaml#/schemas/BookingReference' }
@@ -143,6 +143,28 @@ schemas:
                 additionalProperties: false
                 properties:
                   ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+          cancellation: { $ref: '#/schemas/CancellationTerms' }
+
+  CancellationTerms:
+    type: object
+    description: |
+      The client cancellation policy the booking was made under: its
+      photographer's at that moment, kept on the booking, so a later edit of
+      the photographer's settings never changes it.
+    required: [deadline, bookingFeeRefundable]
+    additionalProperties: false
+    properties:
+      deadline:
+        type: [string, 'null']
+        format: date-time
+        description: |
+          The instant a client cancellation stops being accepted: the start
+          minus the photographer's cut-off, or the start itself when there is
+          none. Null on the client's booking page once nothing is left to
+          cancel (completed, no-show, expired or cancelled).
+      bookingFeeRefundable:
+        type: boolean
+        description: Whether cancelling refunds the booking fee. A session fee already paid is always refunded.
 
   PaymentStatusView:
     type: object
@@ -210,7 +232,7 @@ schemas:
       A booking as its own client sees it. Neither the booking's id nor the
       token that reached it appears anywhere in it, and the contact email is
       masked (`a•••••@example.com`).
-    required: [reference, status, stage, clientName, maskedEmail, pendingMaskedEmail, startsAt, endsAt, serviceName, packageName, packagePriceRwf, packagePhotoCount, packageDurationMinutes, locationText, partySize, specialRequests, addons, totals, bookingFeeRwf, payments, canCancel, cancellationReason, cancelledAt, sessionFee, delivery, notices]
+    required: [reference, status, stage, clientName, maskedEmail, pendingMaskedEmail, startsAt, endsAt, serviceName, packageName, packagePriceRwf, packagePhotoCount, packageDurationMinutes, locationText, partySize, specialRequests, addons, totals, bookingFeeRwf, payments, canCancel, cancellation, cancellationReason, cancelledAt, sessionFee, delivery, notices]
     additionalProperties: false
     properties:
       reference: { $ref: 'common.yaml#/schemas/BookingReference' }
@@ -259,7 +281,8 @@ schemas:
             settledAt: { type: [string, 'null'], format: date-time }
       canCancel:
         type: boolean
-        description: True only for a `confirmed` booking whose shoot is still ahead.
+        description: True only for a `confirmed` booking before its cancellation deadline (`cancellation.deadline`).
+      cancellation: { $ref: '#/schemas/CancellationTerms' }
       cancellationReason: { type: [string, 'null'] }
       cancelledAt: { type: [string, 'null'], format: date-time }
       sessionFee:

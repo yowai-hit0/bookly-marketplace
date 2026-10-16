@@ -29,10 +29,16 @@ import type { PaymentProviderId } from './provider.js';
  * link the client has to go hunting for is a request that does not get paid --
  * so this issues a link the way a resend does (spec §6.21), and the newest
  * email is the one that works.
+ *
+ * Only on the signed-in photographer's own booking (marketplace-spec.md R1.4):
+ * the row lock is by id and photographer, so another photographer's booking
+ * is `not_found`.
  */
 
 export type SessionFeeDeps = {
   prisma: PrismaClient;
+  /** The photographer whose booking this must be: from the token, never the request. */
+  photographerId: string;
   /** Whose row this is if the client pays it (spec §6.18). */
   providerId: PaymentProviderId;
   now: () => Date;
@@ -91,6 +97,7 @@ export async function requestSessionFee(deps: SessionFeeDeps, bookingId: string)
              service_name_snapshot, package_name_snapshot, starts_at, ends_at
         FROM booking
        WHERE id = ${bookingId}::uuid
+         AND photographer_id = ${deps.photographerId}::uuid
          FOR UPDATE`;
     const booking = bookings[0];
     if (booking === undefined) return 'not_found';
@@ -155,7 +162,7 @@ export async function requestSessionFee(deps: SessionFeeDeps, bookingId: string)
   });
 
   if (outcome !== 'ok') return { status: outcome };
-  const booking = await findAdminBooking(prisma, bookingId);
+  const booking = await findAdminBooking(prisma, deps.photographerId, bookingId);
   return booking === null ? { status: 'not_found' } : { status: 'ok', booking };
 }
 

@@ -8,6 +8,13 @@ import { type BookingTotals, bookingTotals } from './totals.js';
  * their contact details, every payment attempt, and every message the system
  * sent about the booking.
  *
+ * Only the booking's own photographer sees it: every lookup here is by id AND
+ * photographer, so another photographer's booking is simply not found
+ * (marketplace-spec.md R1.4). The contact details are the booking's snapshots
+ * (`contact_*`), never the shared `client` row (R1.6): that row is the
+ * platform's, spans every photographer the client ever booked, and is not
+ * loaded here at all.
+ *
  * Money is `bookingTotals()` (data-model_v2.md §6.1) and nothing else, so the
  * admin screen and the client's own page can never disagree about what is
  * owed. The access token is not here in any form: its hash would still be a
@@ -15,7 +22,6 @@ import { type BookingTotals, bookingTotals } from './totals.js';
  */
 
 export const ADMIN_BOOKING_INCLUDE = {
-  client: { select: { id: true, fullName: true, email: true, phone: true, anonymizedAt: true } },
   addons: { orderBy: [{ stage: 'asc' }, { createdAt: 'asc' }] },
   payments: { orderBy: { initiatedAt: 'asc' } },
   outbox: { orderBy: { createdAt: 'asc' } },
@@ -31,7 +37,6 @@ export type AdminBookingView = {
   /** The admin's display stage (`stage.ts`). */
   stage: BookingStage;
   locale: string;
-  client: { id: string; fullName: string; email: string; phone: string | null; anonymized: boolean };
   contact: { name: string; email: string; phone: string };
   service: { id: string; name: string };
   package: { id: string; name: string; priceRwf: number; durationMinutes: number; photoCount: number };
@@ -92,8 +97,13 @@ export type AdminPaymentView = {
   canRecordRefund: boolean;
 };
 
-export async function findAdminBooking(prisma: PrismaClient, id: string): Promise<AdminBooking | null> {
-  return prisma.booking.findUnique({ where: { id }, include: ADMIN_BOOKING_INCLUDE });
+/**
+ * One booking of one photographer. `photographerId` is the verified token's
+ * (R1.4): a booking of anyone else's is `null`, exactly like an id that names
+ * nothing, so the answer never confirms that the id exists.
+ */
+export async function findAdminBooking(prisma: PrismaClient, photographerId: string, id: string): Promise<AdminBooking | null> {
+  return prisma.booking.findFirst({ where: { id, photographerId }, include: ADMIN_BOOKING_INCLUDE });
 }
 
 export function adminBookingView(booking: AdminBooking, now: Date): AdminBookingView {
@@ -111,13 +121,6 @@ export function adminBookingView(booking: AdminBooking, now: Date): AdminBooking
     status: booking.status,
     stage: bookingStage(booking, now, 'admin'),
     locale: booking.locale,
-    client: {
-      id: booking.client.id,
-      fullName: booking.client.fullName,
-      email: booking.client.email,
-      phone: booking.client.phone,
-      anonymized: booking.client.anonymizedAt !== null,
-    },
     contact: { name: booking.contactName, email: booking.contactEmail, phone: booking.contactPhone },
     service: { id: booking.serviceId, name: booking.serviceNameSnapshot },
     package: {

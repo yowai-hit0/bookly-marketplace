@@ -20,6 +20,13 @@ import { bookingTotals } from './totals.js';
  * Amounts come from `bookingTotals()` (data-model_v2.md §6.1), computed from
  * each row's own add-ons and payments, which the query loads with it: one
  * round trip, whatever the page holds.
+ *
+ * One photographer's bookings only (marketplace-spec.md R1.4). The scope is a
+ * required argument and the first condition of the filter, so the loose search
+ * below -- a `contains` over names, emails and phone numbers -- can only ever
+ * match inside it: it is never a way to probe for a client of another
+ * photographer. Everything it matches is the booking's own snapshot, never the
+ * shared client row (R1.6).
  */
 
 export const BOOKINGS_PAGE_SIZE = 25;
@@ -75,10 +82,10 @@ export type BookingsPage = {
   pageCount: number;
 };
 
-export async function findBookings(prisma: PrismaClient, query: BookingsQuery = {}): Promise<BookingsPage> {
+export async function findBookings(prisma: PrismaClient, photographerId: string, query: BookingsQuery = {}): Promise<BookingsPage> {
   const pageSize = Math.min(Math.max(Math.trunc(query.pageSize ?? BOOKINGS_PAGE_SIZE), 1), BOOKINGS_MAX_PAGE_SIZE);
   const now = query.now ?? new Date();
-  const where = bookingsWhere(query, now);
+  const where = bookingsWhere(photographerId, query, now);
 
   return prisma.$transaction(async (tx) => {
     const total = await tx.booking.count({ where });
@@ -102,7 +109,7 @@ export async function findBookings(prisma: PrismaClient, query: BookingsQuery = 
   });
 }
 
-function bookingsWhere(query: BookingsQuery, now: Date): Prisma.BookingWhereInput {
+function bookingsWhere(photographerId: string, query: BookingsQuery, now: Date): Prisma.BookingWhereInput {
   const startsAt: Prisma.DateTimeFilter = {};
   if (query.from !== undefined) startsAt.gte = kigaliMinuteToUtc(query.from, 0);
   if (query.to !== undefined) startsAt.lt = kigaliMinuteToUtc(query.to, MINUTES_PER_DAY);
@@ -110,6 +117,7 @@ function bookingsWhere(query: BookingsQuery, now: Date): Prisma.BookingWhereInpu
   const search = query.search?.trim() ?? '';
 
   return {
+    photographerId,
     ...(query.statuses !== undefined && query.statuses.length > 0 ? { status: { in: [...query.statuses] } } : {}),
     ...(Object.keys(startsAt).length > 0 ? { startsAt } : {}),
     AND: [

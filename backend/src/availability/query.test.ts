@@ -154,6 +154,8 @@ async function insertBooking(reservation: Reservation, owner = photographerId): 
       consentAt: NOW,
       bookingFeeRate: '0.400',
       bookingFeeRwf: 16_000,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
       status: reservation.status ?? 'confirmed',
       startsAt: reservation.startsAt,
       endsAt: reservation.endsAt,

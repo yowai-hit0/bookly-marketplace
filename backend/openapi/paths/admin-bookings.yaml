@@ -1,13 +1,18 @@
 # The bookings list, one booking, and every lifecycle action. All require the
-# admin bearer token. Every action answers the booking as it now stands (200),
-# or a 409 carrying that same booking when it refuses.
+# admin bearer token, and all act on the signed-in photographer's own bookings:
+# a booking, payment, add-on line or note id of another photographer's is a 404.
+# Every action answers the booking as it now stands (200), or a 409 carrying
+# that same booking when it refuses.
 
 list:
   get:
     operationId: listBookings
     tags: [Admin bookings]
     summary: List bookings
-    description: Filtered by stage, status and shoot date, searched by reference, name, email or phone, and paged by number with a total.
+    description: |
+      The signed-in photographer's bookings only. Filtered by stage, status and
+      shoot date, searched by reference, name, email or phone (the booking's
+      own contact details), and paged by number with a total.
     parameters:
       - name: stage
         in: query

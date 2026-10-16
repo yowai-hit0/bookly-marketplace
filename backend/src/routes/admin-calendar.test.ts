@@ -1,6 +1,6 @@
 import type { Server } from 'node:http';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { type AdminUser, type Prisma, PrismaClient } from '@prisma/client';
+import { type Prisma, PrismaClient } from '@prisma/client';
 import type { Express } from 'express';
 import type pg from 'pg';
 import request, { type Response } from 'supertest';
@@ -10,16 +10,18 @@ import { issueAdminToken } from '../auth/token.js';
 import { findCalendar } from '../calendar/query.js';
 import type { BookingStatus } from '../db/statuses.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * `GET /api/admin/calendar` over HTTP, against real PostgreSQL (plan.md Task 9;
  * spec §3.3 step 1, §7).
  *
  * The loading rules are proven in calendar/query.test.ts. What is proven here:
- * the route sits behind `requireAdmin`, validates its query with the one admin
- * rule (400 malformed, 422 out of range), reads the injected clock, and stays
- * bounded -- the same two queries whether the range holds 3 bookings or 500,
- * and under 500 ms at p95 for a month grid holding all 500.
+ * the route sits behind `requirePhotographer`, validates its query with the one
+ * admin rule (400 malformed, 422 out of range), reads the injected clock, shows
+ * the signed-in photographer's calendar only (marketplace-spec.md R1.4), and
+ * stays bounded -- the same two queries whether the range holds 3 bookings or
+ * 500, and under 500 ms at p95 for a month grid holding all 500.
  *
  * Kigali is UTC+2 with no DST. October 2026's month grid runs Monday
  * 2026-09-28 to Sunday 2026-11-01.
@@ -29,7 +31,6 @@ let prisma: PrismaClient;
 let raw: pg.Client;
 /** Every SQL statement the Prisma client has issued since the last reset. */
 let queries: string[] = [];
-let admin: AdminUser;
 let token: string;
 let clock: Date;
 let app: Express;
@@ -62,15 +63,21 @@ beforeEach(async () => {
   clock = START;
   // No login happens in this file, so no Argon2 is spent: the token only needs
   // the stored hash to fingerprint it.
-  admin = await prisma.adminUser.create({
-    data: { email: 'photographer@bookly.example', passwordHash: '$argon2id$placeholder-never-verified' },
+  const { photographerId, photographerUserId } = await createPhotographer(prisma, {
+    email: 'photographer@bookly.example',
+    handle: 'kigali-lens',
+    displayName: 'Kigali Lens',
   });
-  token = (await issueAdminToken(SECRET, admin, START)).token;
+  const user = await prisma.appUser.update({
+    where: { id: photographerUserId },
+    data: { passwordHash: '$argon2id$placeholder-never-verified' },
+  });
+  token = (await issueAdminToken(SECRET, user, START)).token;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
     admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
   });
-  catalogue = await insertCatalogue();
+  catalogue = await insertCatalogue(photographerId);
   queries = [];
 });
 
@@ -91,17 +98,17 @@ function createCountingPrismaClient(): PrismaClient {
   return client;
 }
 
-type Catalogue = { serviceId: string; packageId: string; clientId: string };
+type Catalogue = { photographerId: string; serviceId: string; packageId: string; clientId: string };
 
-async function insertCatalogue(): Promise<Catalogue> {
-  const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+async function insertCatalogue(photographerId: string): Promise<Catalogue> {
+  const service = await prisma.service.create({ data: { photographerId, slug: 'portrait', nameEn: 'Portrait' } });
   const pkg = await prisma.package.create({
-    data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
+    data: { photographerId, serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
   });
   const client = await prisma.client.create({
-    data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
+    data: { fullName: 'Aline Uwase', email: `aline.${service.id.slice(0, 8)}@example.com`, phone: '+250788000000' },
   });
-  return { serviceId: service.id, packageId: pkg.id, clientId: client.id };
+  return { photographerId, serviceId: service.id, packageId: pkg.id, clientId: client.id };
 }
 
 /** A Kigali wall-clock time on `date`, as the UTC instant. */
@@ -118,16 +125,20 @@ type BookingRow = {
 };
 
 /** A 60-minute booking with a 30-minute buffer, every snapshot column filled. */
-function bookingData({ reference, startsAt, status = 'confirmed', holdExpiresAt = null, contactName = 'Aline Uwase' }: BookingRow) {
+function bookingData(
+  { reference, startsAt, status = 'confirmed', holdExpiresAt = null, contactName = 'Aline Uwase' }: BookingRow,
+  owner: Catalogue = catalogue,
+) {
   const endsAt = new Date(startsAt.getTime() + 60 * MINUTE_MS);
   return {
     reference,
-    clientId: catalogue.clientId,
+    photographerId: owner.photographerId,
+    clientId: owner.clientId,
     contactName,
     contactEmail: 'aline@example.com',
     contactPhone: '+250788000000',
-    serviceId: catalogue.serviceId,
-    packageId: catalogue.packageId,
+    serviceId: owner.serviceId,
+    packageId: owner.packageId,
     serviceNameSnapshot: 'Portrait',
     packageNameSnapshot: 'Standard',
     packagePriceRwf: 40_000,
@@ -137,6 +148,8 @@ function bookingData({ reference, startsAt, status = 'confirmed', holdExpiresAt 
     consentAt: START,
     bookingFeeRate: '0.400',
     bookingFeeRwf: 16_000,
+    clientCancelCutoffHours: 0,
+    bookingFeeRefundableOnClientCancel: false,
     status,
     startsAt,
     endsAt,
@@ -193,7 +206,7 @@ describe('GET /api/admin/calendar without a valid token', () => {
 describe('GET /api/admin/calendar', () => {
   it('answers 200 with the range’s bookings, live holds and blocks, and nothing else', async () => {
     const block = await prisma.availabilityBlock.create({
-      data: { startsAt: at(WEDNESDAY, '09:30'), endsAt: at(WEDNESDAY, '11:00'), reason: 'Clinic' },
+      data: { photographerId: catalogue.photographerId, startsAt: at(WEDNESDAY, '09:30'), endsAt: at(WEDNESDAY, '11:00'), reason: 'Clinic' },
     });
     const confirmed = await prisma.booking.create({
       data: bookingData({ reference: 'BKY-2610-00001', startsAt: at(WEDNESDAY, '09:00'), contactName: 'Grace Mukamana' }),
@@ -369,6 +382,7 @@ describe('one month against a 500-booking dataset (plan.md Task 9, spec §7)', (
   async function seedBlocks(): Promise<void> {
     await prisma.availabilityBlock.createMany({
       data: ['2026-10-02', '2026-10-09', '2026-10-16', '2026-10-23', '2026-10-30'].map((date) => ({
+        photographerId: catalogue.photographerId,
         startsAt: at(date, '06:00'),
         endsAt: at(date, '10:00'),
         reason: 'Weekly studio clean',
@@ -397,7 +411,7 @@ describe('one month against a 500-booking dataset (plan.md Task 9, spec §7)', (
     await seedBlocks();
     await seedGrid(0, 3);
 
-    const smallDirect = await queriesDuring(() => findCalendar(prisma, { ...OCTOBER_GRID, now: clock }));
+    const smallDirect = await queriesDuring(() => findCalendar(prisma, { ...OCTOBER_GRID, photographerId: catalogue.photographerId, now: clock }));
     let smallBody: CalendarJson | undefined;
     const smallHttp = await queriesDuring(async () => {
       smallBody = (await getCalendar(range(OCTOBER_GRID.from, OCTOBER_GRID.to)).expect(200)).body as CalendarJson;
@@ -406,7 +420,7 @@ describe('one month against a 500-booking dataset (plan.md Task 9, spec §7)', (
     await seedGrid(3, 500);
     await expect(prisma.booking.count()).resolves.toBe(500);
 
-    const largeDirect = await queriesDuring(() => findCalendar(prisma, { ...OCTOBER_GRID, now: clock }));
+    const largeDirect = await queriesDuring(() => findCalendar(prisma, { ...OCTOBER_GRID, photographerId: catalogue.photographerId, now: clock }));
     let largeBody: CalendarJson | undefined;
     const largeHttp = await queriesDuring(async () => {
       largeBody = (await getCalendar(range(OCTOBER_GRID.from, OCTOBER_GRID.to)).expect(200)).body as CalendarJson;
@@ -451,5 +465,30 @@ describe('one month against a 500-booking dataset (plan.md Task 9, spec §7)', (
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+// --- One photographer's calendar ----------------------------------------------
+
+describe('another photographer’s calendar (marketplace-spec.md R1.4)', () => {
+  it('is never part of the answer, however the query is written', async () => {
+    const other = await createPhotographer(prisma, { email: 'second.photographer@bookly.example', handle: 'hills-and-light', displayName: 'Hills & Light' });
+    const theirs = await insertCatalogue(other.photographerId);
+    await prisma.booking.create({ data: bookingData({ reference: 'BKY-2610-THEIR', startsAt: at(WEDNESDAY, '09:00') }, theirs) });
+    await prisma.availabilityBlock.create({
+      data: { photographerId: other.photographerId, startsAt: at(WEDNESDAY, '12:00'), endsAt: at(WEDNESDAY, '13:00'), reason: 'THEIR-REASON' },
+    });
+    const mine = await prisma.booking.create({ data: bookingData({ reference: 'BKY-2610-00001', startsAt: at(WEDNESDAY, '09:00') }) });
+
+    const res = await getCalendar(range(WEDNESDAY, WEDNESDAY));
+
+    expect(res.status).toBe(200);
+    const body = res.body as CalendarJson;
+    expect(body.bookings.map((booking) => booking.reference)).toEqual([mine.reference]);
+    expect(body.blocks).toEqual([]);
+    expect(res.text).not.toContain('BKY-2610-THEIR');
+    expect(res.text).not.toContain('THEIR-REASON');
+    // A photographer id in the query is not a filter the route reads: it is refused.
+    expect((await getCalendar(`${range(WEDNESDAY, WEDNESDAY)}&photographerId=${other.photographerId}`)).status).toBe(400);
   });
 });

@@ -1,4 +1,4 @@
-import type { AdminUser, PrismaClient } from '@prisma/client';
+import type { AppUser, PrismaClient } from '@prisma/client';
 import type { Express } from 'express';
 import type pg from 'pg';
 import request from 'supertest';
@@ -44,7 +44,7 @@ import {
 let prisma: PrismaClient;
 let raw: pg.Client;
 let world: PaymentWorld;
-let admin: AdminUser;
+let admin: AppUser;
 let token: string;
 let clock: Date;
 let app: Express;
@@ -85,7 +85,7 @@ beforeEach(async () => {
   await truncateAll(raw);
   clock = START;
   world = await seedWorld(prisma);
-  admin = await prisma.adminUser.findFirstOrThrow();
+  admin = await prisma.appUser.findUniqueOrThrow({ where: { id: world.photographerUserId } });
   token = (await issueAdminToken(SECRET, admin, START)).token;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
@@ -136,7 +136,7 @@ async function travelTo(at: Date): Promise<void> {
 }
 
 async function adminBooking(id: string): Promise<AdminBooking> {
-  const booking = await findAdminBooking(prisma, id);
+  const booking = await findAdminBooking(prisma, world.photographerId, id);
   if (booking === null) throw new Error('No such booking');
   return booking;
 }
@@ -920,8 +920,10 @@ describe('POST /bookings/:id/addons', () => {
 
   it('answers 409 not_allowed for an add-on of another service', async () => {
     const booking = await shootBegunBooking();
-    const other = await prisma.service.create({ data: { slug: 'weddings', nameEn: 'Weddings' } });
-    const theirs = await prisma.addon.create({ data: { serviceId: other.id, nameEn: 'Second shooter', priceRwf: 20_000 } });
+    const other = await prisma.service.create({ data: { photographerId: world.photographerId, slug: 'weddings', nameEn: 'Weddings' } });
+    const theirs = await prisma.addon.create({
+      data: { photographerId: world.photographerId, serviceId: other.id, nameEn: 'Second shooter', priceRwf: 20_000 },
+    });
 
     const res = await post(`${BOOKINGS}/${booking.id}/addons`, { addonId: theirs.id });
 
@@ -1228,7 +1230,7 @@ describe('POST /bookings/:id/addons with a product larger than an integer', () =
     // (2026-09-27: add-ons are for a confirmed booking whose shoot has begun)
     await travelTo(AFTER_THE_SHOOT);
     const expensive = await prisma.addon.create({
-      data: { serviceId: world.serviceId, nameEn: 'A price the catalogue allows', priceRwf: INT4_MAX },
+      data: { photographerId: world.photographerId, serviceId: world.serviceId, nameEn: 'A price the catalogue allows', priceRwf: INT4_MAX },
     });
 
     const res = await post(`${BOOKINGS}/${booking.id}/addons`, { addonId: expensive.id, quantity: 2 });

@@ -2,11 +2,11 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { isSlotTaken, isTransactionConflict } from '../db/errors.js';
 import { enqueue } from '../outbox/enqueue.js';
 import { bookingPhotographerRecipient } from '../outbox/recipients.js';
-import { getSettings } from '../settings/index.js';
+import { getPhotographerSettings } from '../settings/index.js';
 import { issueAccessToken } from './access-link.js';
 import { hashAccessToken } from './access-token.js';
 import { type AdminBooking, findAdminBooking } from './admin-view.js';
-import { expireOverlappingStaleHolds } from './claim.js';
+import { expireOverlappingStaleHolds, lockPhotographerCalendar } from './claim.js';
 import { bookingTotals } from './totals.js';
 
 /**
@@ -22,9 +22,19 @@ import { bookingTotals } from './totals.js';
  * The photographer moves no money here either (spec §6.16). Cancelling marks
  * what is owed back `refund_due` and alerts him; `refunded` is his own record
  * of having sent it, taken by `payments/refund.ts`.
+ *
+ * Every action is scoped to `deps.photographerId`, the signed-in photographer
+ * from the verified token (marketplace-spec.md R1.4): another photographer's
+ * booking is `not_found`, exactly like an id that names nothing, and nothing of
+ * it is read, changed or answered.
  */
 
-export type AdminActionDeps = { prisma: PrismaClient; now: () => Date };
+export type AdminActionDeps = {
+  prisma: PrismaClient;
+  now: () => Date;
+  /** The photographer whose booking this must be: from the token, never the request. */
+  photographerId: string;
+};
 
 export type AdminActionResult =
   | { status: 'ok'; booking: AdminBooking }
@@ -48,8 +58,9 @@ const MS_PER_MINUTE = 60_000;
  * The booking keeps its id, reference, access token and every payment: it is
  * the same booking at a different time. `ends_at` follows the package's own
  * duration snapshot and `buffer_ends_at` is recomputed from it with the buffer
- * in force now -- a stale buffer would either hold time the booking no longer
- * occupies or break its own CHECK (data-model_v2.md §5.9). `original_starts_at`
+ * in force now -- the photographer's own, as it stands now -- since a stale
+ * buffer would either hold time the booking no longer occupies or break its
+ * own CHECK (data-model_v2.md §5.9). `original_starts_at`
  * records the first move only, so the time originally agreed survives repeated
  * moves.
  *
@@ -58,13 +69,13 @@ const MS_PER_MINUTE = 60_000;
  * surfaces here as `slot_taken`, never as a 500.
  */
 export async function rescheduleBooking(deps: AdminActionDeps, bookingId: string, startsAt: Date): Promise<RescheduleResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   if (booking === null) return { status: 'not_found' };
   if (booking.status !== 'confirmed') return { status: 'not_allowed' };
   if (booking.startsAt.getTime() === startsAt.getTime()) return { status: 'unchanged' };
 
   const now = deps.now();
-  const { bufferMinutes } = await getSettings(deps.prisma);
+  const { bufferMinutes } = await getPhotographerSettings(booking.photographerId, deps.prisma);
   const endsAt = new Date(startsAt.getTime() + booking.packageDurationMinutes * MS_PER_MINUTE);
   const bufferEndsAt = new Date(endsAt.getTime() + bufferMinutes * MS_PER_MINUTE);
 
@@ -72,10 +83,11 @@ export async function rescheduleBooking(deps: AdminActionDeps, bookingId: string
     try {
       const moved = await deps.prisma.$transaction(
         async (tx) => {
-          // The lock every writer into a slot takes, so a move and a claim
-          // queue rather than deadlock on each other's uncommitted rows.
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('bookly.claim_slot'))`;
-          await expireOverlappingStaleHolds(tx, startsAt, bufferEndsAt);
+          // The lock every writer into this photographer's calendar takes
+          // (R1.3), so a move and a claim queue rather than deadlock on each
+          // other's uncommitted rows. Another photographer's claims never wait.
+          await lockPhotographerCalendar(tx, booking.photographerId);
+          await expireOverlappingStaleHolds(tx, booking.photographerId, startsAt, bufferEndsAt);
 
           const { count } = await tx.booking.updateMany({
             // Guarded on what was read: a cancellation or another move in the
@@ -138,7 +150,7 @@ export async function rescheduleBooking(deps: AdminActionDeps, bookingId: string
  * for a shoot that will not happen.
  */
 export async function cancelByAdmin(deps: AdminActionDeps, bookingId: string, reason: string | null): Promise<AdminActionResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   if (booking === null) return { status: 'not_found' };
   if (booking.status !== 'confirmed') return { status: 'not_allowed' };
   const now = deps.now();
@@ -225,7 +237,7 @@ async function close(
   status: 'completed' | 'no_show',
   extra: Prisma.BookingUpdateManyMutationInput,
 ): Promise<AdminActionResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   if (booking === null) return { status: 'not_found' };
   // Only a confirmed booking whose shoot has begun can be closed either way.
   if (booking.status !== 'confirmed' || booking.startsAt > deps.now()) return { status: 'not_allowed' };
@@ -259,7 +271,7 @@ async function close(
  * commits -- one live link per booking, structurally.
  */
 export async function resendAccessLink(deps: AdminActionDeps, bookingId: string): Promise<AdminActionResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   if (booking === null) return { status: 'not_found' };
   // Nothing to resend for a booking that was never confirmed: it has no link.
   if (booking.confirmedAt === null) return { status: 'not_allowed' };
@@ -306,6 +318,6 @@ async function flagRefunds(tx: Prisma.TransactionClient, booking: AdminBooking):
 
 /** The booking as it now stands, which is what every action answers with. */
 async function reload(deps: AdminActionDeps, bookingId: string): Promise<AdminActionResult> {
-  const booking = await findAdminBooking(deps.prisma, bookingId);
+  const booking = await findAdminBooking(deps.prisma, deps.photographerId, bookingId);
   return booking === null ? { status: 'not_found' } : { status: 'ok', booking };
 }

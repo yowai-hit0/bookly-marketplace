@@ -172,7 +172,8 @@ responses:
     description: |
       Nothing there. For a capability token this is also the answer for an
       expired, superseded or malformed token: never 403, which would confirm
-      that a booking exists.
+      that a booking exists. On an admin route it is also the answer for an id
+      that belongs to another photographer.
     content:
       application/json:
         schema:
