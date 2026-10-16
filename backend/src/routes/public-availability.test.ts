@@ -8,8 +8,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { findAvailability } from '../availability/query.js';
 import type { BookingStatus } from '../db/statuses.js';
-import { updateSettings } from '../settings/index.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * `GET /api/availability` over HTTP, against real PostgreSQL (plan.md Task 12;
@@ -26,6 +27,11 @@ import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
  * cache sits between the database and the answer; and a month answers in under
  * 500 ms at p95 against a few hundred bookings.
  *
+ * The calendar is the package's photographer's (marketplace-spec.md T1.4):
+ * another photographer's hours, blocks and bookings change nothing in it, and a
+ * photographer who cannot be booked has packages that answer exactly like an
+ * unknown one (brief decisions 2 and 4).
+ *
  * Kigali is UTC+2 with no DST. October 2026 starts on a Thursday. The clock is
  * Tuesday 6 October, 12:10 Kigali, so lead time bites on the 6th itself.
  */
@@ -37,6 +43,8 @@ let queries: string[] = [];
 let clock: Date;
 let app: Express;
 let catalogue: Catalogue;
+/** The approved photographer who owns `catalogue`. */
+let photographerId: string;
 
 /** 12:10 Kigali on Tuesday 6 October 2026. Earliest bookable start: 14:10, so 14:30 on the grid. */
 const NOW = new Date('2026-10-06T10:10:00Z');
@@ -64,13 +72,10 @@ afterAll(async () => {
 beforeEach(async () => {
   await truncateAll(raw);
   clock = NOW;
-  // Defaults 0.400 / 120 / 30 / 30 / 90; findAvailability throws without the row.
-  await prisma.setting.create({ data: { id: 1 } });
-  // The seeded weekly rule: Mon–Fri 09:00–17:00.
-  await prisma.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })),
-  });
-  catalogue = await insertCatalogue();
+  // Born with its settings row at the defaults: lead 120, buffer 30.
+  ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
+  await weekdayHours(photographerId);
+  catalogue = await insertCatalogue(photographerId);
   app = createApp({ publicApi: { prisma, now: () => clock } });
   queries = [];
 });
@@ -93,6 +98,7 @@ function createCountingPrismaClient(): PrismaClient {
 }
 
 type Catalogue = {
+  photographerId: string;
   serviceId: string;
   clientId: string;
   /** 60 minutes. */
@@ -103,18 +109,27 @@ type Catalogue = {
   long: string;
 };
 
-async function insertCatalogue(): Promise<Catalogue> {
-  const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+/** The weekly rule sign-up gives a photographer: Mon–Fri 09:00–17:00. */
+async function weekdayHours(owner: string): Promise<void> {
+  await prisma.workingHours.createMany({
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: owner, weekday, opensMinute: 540, closesMinute: 1020 })),
+  });
+}
+
+async function insertCatalogue(owner: string): Promise<Catalogue> {
+  const service = await prisma.service.create({ data: { photographerId: owner, slug: 'portrait', nameEn: 'Portrait' } });
   const insertPackage = async (nameEn: string, durationMinutes: number) =>
     (
       await prisma.package.create({
-        data: { serviceId: service.id, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes },
+        data: { photographerId: owner, serviceId: service.id, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes },
       })
     ).id;
-  const client = await prisma.client.create({
-    data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
-  });
+  // One client across photographers: `client` is platform-wide.
+  const client =
+    (await prisma.client.findFirst({ where: { email: 'aline@example.com' } })) ??
+    (await prisma.client.create({ data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' } }));
   return {
+    photographerId: owner,
     serviceId: service.id,
     clientId: client.id,
     short: await insertPackage('Short', 60),
@@ -143,6 +158,8 @@ type Reservation = {
   contactPhone?: string;
   locationText?: string;
   specialRequests?: string | null;
+  /** Whose booking. Default: the world photographer's `catalogue`. */
+  owner?: Catalogue;
 };
 
 /** A booking with a 30-minute buffer, every snapshot column filled. */
@@ -157,16 +174,18 @@ function bookingData({
   contactPhone = '+250788000000',
   locationText = 'Kigali Heights',
   specialRequests = null,
+  owner = catalogue,
 }: Reservation) {
   const endsAt = new Date(startsAt.getTime() + minutes * MINUTE_MS);
   return {
     reference,
-    clientId: catalogue.clientId,
+    photographerId: owner.photographerId,
+    clientId: owner.clientId,
     contactName,
     contactEmail,
     contactPhone,
-    serviceId: catalogue.serviceId,
-    packageId: catalogue.short,
+    serviceId: owner.serviceId,
+    packageId: owner.short,
     serviceNameSnapshot: 'Portrait',
     packageNameSnapshot: 'Short',
     packagePriceRwf: 40_000,
@@ -260,15 +279,15 @@ function datesOf(month: string, length: number): string[] {
 async function seedOctober() {
   await prisma.workingHours.createMany({
     data: [
-      { effectiveDate: new Date('2026-10-14T00:00:00Z'), isOpen: false, note: 'SECRET-HOURS-NOTE' },
-      { effectiveDate: new Date('2026-10-17T00:00:00Z'), opensMinute: 600, closesMinute: 840, note: 'SECRET-HOURS-NOTE' },
+      { photographerId, effectiveDate: new Date('2026-10-14T00:00:00Z'), isOpen: false, note: 'SECRET-HOURS-NOTE' },
+      { photographerId, effectiveDate: new Date('2026-10-17T00:00:00Z'), opensMinute: 600, closesMinute: 840, note: 'SECRET-HOURS-NOTE' },
     ],
   });
   const fullDayBlock = await prisma.availabilityBlock.create({
-    data: { startsAt: at('2026-10-16', '00:00'), endsAt: at('2026-10-17', '00:00'), isAllDay: true, reason: 'SECRET-BLOCK-REASON' },
+    data: { photographerId, startsAt: at('2026-10-16', '00:00'), endsAt: at('2026-10-17', '00:00'), isAllDay: true, reason: 'SECRET-BLOCK-REASON' },
   });
   const partialBlock = await prisma.availabilityBlock.create({
-    data: { startsAt: at('2026-10-20', '14:00'), endsAt: at('2026-10-20', '16:00'), reason: 'SECRET-DENTIST-REASON' },
+    data: { photographerId, startsAt: at('2026-10-20', '14:00'), endsAt: at('2026-10-20', '16:00'), reason: 'SECRET-DENTIST-REASON' },
   });
   const secrets = {
     contactName: 'Grace SECRET-NAME Mukamana',
@@ -440,6 +459,7 @@ describe('GET /api/availability for a fixture month', () => {
       [catalogue.long, 180],
     ] as const) {
       const direct = await findAvailability(prisma, {
+        photographerId,
         from: '2026-10-01',
         to: '2026-10-31',
         packageDurationMinutes,
@@ -482,7 +502,7 @@ describe('GET /api/availability for packages of different lengths', () => {
 
   it('offers nothing all month for a package longer than any open window (spec §6.8)', async () => {
     const tooLong = await prisma.package.create({
-      data: { serviceId: catalogue.serviceId, nameEn: 'Marathon', priceRwf: 1, photoCount: 1, durationMinutes: 600 },
+      data: { photographerId, serviceId: catalogue.serviceId, nameEn: 'Marathon', priceRwf: 1, photoCount: 1, durationMinutes: 600 },
     });
 
     const days = await daysOf(tooLong.id);
@@ -789,7 +809,7 @@ describe('GET /api/availability with the database changing between two identical
   it('drops the starts a block added in between covers', async () => {
     await startTimes(WEDNESDAY);
 
-    await prisma.availabilityBlock.create({ data: { startsAt: at(WEDNESDAY, '09:00'), endsAt: at(WEDNESDAY, '13:00') } });
+    await prisma.availabilityBlock.create({ data: { photographerId, startsAt: at(WEDNESDAY, '09:00'), endsAt: at(WEDNESDAY, '13:00') } });
 
     expect(await startTimes(WEDNESDAY)).toEqual(grid('13:00', '16:00'));
   });
@@ -798,7 +818,7 @@ describe('GET /api/availability with the database changing between two identical
     clock = at(WEDNESDAY, '10:00');
     expect((await startTimes(WEDNESDAY))[0]).toBe('12:00');
 
-    await updateSettings({ minLeadTimeMinutes: 0 }, prisma);
+    await updatePhotographerSettings(photographerId, { minLeadTimeMinutes: 0 }, prisma);
 
     expect((await startTimes(WEDNESDAY))[0]).toBe('10:00');
   });
@@ -814,7 +834,7 @@ describe('GET /api/availability with the database changing between two identical
   it('applies working hours changed in between', async () => {
     expect(await startTimes('2026-10-10')).toEqual([]);
 
-    await prisma.workingHours.create({ data: { weekday: 6, opensMinute: 540, closesMinute: 720 } });
+    await prisma.workingHours.create({ data: { photographerId, weekday: 6, opensMinute: 540, closesMinute: 720 } });
 
     expect(await startTimes('2026-10-10')).toEqual(grid('09:00', '11:00'));
   });
@@ -859,10 +879,11 @@ describe('one month against a few hundred bookings (spec §7)', () => {
   async function seedWorstCase(): Promise<void> {
     await prisma.workingHours.deleteMany();
     await prisma.workingHours.createMany({
-      data: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, opensMinute: 0, closesMinute: 1440 })),
+      data: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ photographerId, weekday, opensMinute: 0, closesMinute: 1440 })),
     });
     await prisma.availabilityBlock.createMany({
       data: ['2026-10-02', '2026-10-09', '2026-10-16', '2026-10-23', '2026-10-30'].map((date) => ({
+        photographerId,
         startsAt: at(date, '06:00'),
         endsAt: at(date, '10:00'),
         reason: 'Weekly studio clean',
@@ -930,5 +951,74 @@ describe('one month against a few hundred bookings (spec §7)', () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+// --- Per photographer (marketplace-spec.md T1.4; brief decisions 2 and 4) -------------------------
+
+describe('GET /api/availability with two photographers', () => {
+  let other: Catalogue;
+
+  beforeEach(async () => {
+    const created = await createPhotographer(prisma, { email: 'other@bookly.example', handle: 'hills-and-light', displayName: 'Hills & Light' });
+    other = await insertCatalogue(created.photographerId);
+  });
+
+  it('answers this photographer’s month unchanged by the other’s hours, blocks, bookings and settings', async () => {
+    const before = bodyOf(await getAvailability(monthOf(catalogue.short)));
+
+    await prisma.workingHours.createMany({
+      data: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ photographerId: other.photographerId, weekday, opensMinute: 0, closesMinute: 1440 })),
+    });
+    await prisma.workingHours.create({ data: { photographerId: other.photographerId, effectiveDate: new Date('2026-10-07T00:00:00Z'), isOpen: false } });
+    await prisma.availabilityBlock.create({
+      data: { photographerId: other.photographerId, startsAt: at('2026-10-08', '00:00'), endsAt: at('2026-10-09', '00:00') },
+    });
+    for (const date of ['2026-10-12', '2026-10-13', '2026-10-15']) {
+      await prisma.booking.create({ data: bookingData({ reference: `BKY-2610-B${date.slice(-2)}00`, startsAt: at(date, '10:00'), owner: other }) });
+    }
+    await prisma.booking.create({
+      data: bookingData({
+        reference: 'BKY-2610-BHOLD',
+        startsAt: at('2026-10-19', '09:00'),
+        status: 'pending_payment',
+        holdExpiresAt: new Date(NOW.getTime() + 30 * MINUTE_MS),
+        owner: other,
+      }),
+    });
+    await updatePhotographerSettings(other.photographerId, { minLeadTimeMinutes: 0, bufferMinutes: 180 }, prisma);
+
+    expect(bodyOf(await getAvailability(monthOf(catalogue.short)))).toStrictEqual(before);
+  });
+
+  it('answers the other photographer’s package from their own calendar', async () => {
+    await weekdayHours(other.photographerId);
+    await prisma.booking.create({ data: bookingData({ reference: 'BKY-2610-BOTH1', startsAt: at('2026-10-08', '09:00'), owner: other }) });
+
+    expect(await startTimes('2026-10-08', other.short)).toEqual(grid('10:30', '16:00'));
+    expect(await startTimes('2026-10-08', catalogue.short)).toEqual(grid('09:00', '16:00'));
+  });
+
+  it('offers nothing for a photographer with no working hours, though another is open', async () => {
+    const days = await daysOf(other.short);
+
+    expect(days).toHaveLength(31);
+    expect(days.every((day) => day.starts.length === 0)).toBe(true);
+  });
+
+  it.each(['pending', 'suspended'] as const)('answers a %s photographer’s package as it answers an unknown one', async (status) => {
+    await weekdayHours(other.photographerId);
+    await prisma.photographer.update({
+      where: { id: other.photographerId },
+      data: { status, approvedAt: null, suspendedAt: status === 'suspended' ? NOW : null },
+    });
+
+    const refused = await getAvailability(monthOf(other.short));
+    const unknown = await getAvailability(monthOf(NONEXISTENT_ID));
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toStrictEqual({ error: 'validation_failed', fields: ['packageId'] });
+    expect(refused.body).toStrictEqual(unknown.body);
+    expect(refused.text).not.toContain(status);
   });
 });

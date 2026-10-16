@@ -70,6 +70,8 @@ const refundDue = z.object({
     'duplicate_payment',
     'overpayment',
     'session_fee_after_client_cancel',
+    // The photographer's own policy refunds the booking fee on a client's cancellation (R1.8).
+    'booking_fee_after_client_cancel',
   ]),
   paymentReference: text(100),
   provider: paymentProvider,
@@ -84,6 +86,8 @@ const bookingCancelled = z.object({
   startsAt: instant,
   endsAt: instant,
   bookingFeeRwf: amountRwf,
+  /** Their cancellation policy refunds the fee (R1.8); a refund_due alert of its own follows. */
+  bookingFeeRefunded: z.boolean().default(false),
 });
 
 export const photographerAlert = defineTemplate({
@@ -213,7 +217,12 @@ function composeBookingCancelled(p: z.infer<typeof bookingCancelled>, ctx: Email
           when: when(ctx, p.startsAt, p.endsAt),
         }),
       },
-      { type: 'paragraph', text: tr(ctx, 'email:adminAlert.bookingCancelled.feeKept', { amount: money(p.bookingFeeRwf) }) },
+      {
+        type: 'paragraph',
+        text: tr(ctx, p.bookingFeeRefunded ? 'email:adminAlert.bookingCancelled.feeRefunded' : 'email:adminAlert.bookingCancelled.feeKept', {
+          amount: money(p.bookingFeeRwf),
+        }),
+      },
       { type: 'details', rows: [{ label: tr(ctx, 'email:common.labels.reference'), value: p.reference }] },
     ],
   };

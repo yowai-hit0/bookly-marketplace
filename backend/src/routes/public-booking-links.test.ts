@@ -6,8 +6,19 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { findBookingByToken } from '../booking/access.js';
 import { createPrismaClient } from '../db/client.js';
+import { renderEmail } from '../email/render.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { CLIENT, type PaymentWorld, grantAccessToken, insertBooking, insertPayment, logSink, seedWorld } from '../test/payment-fixtures.js';
+import {
+  CLIENT,
+  PHOTOGRAPHER_NAME,
+  type PaymentWorld,
+  grantAccessToken,
+  insertBooking,
+  insertPayment,
+  logSink,
+  seedSecondPhotographer,
+  seedWorld,
+} from '../test/payment-fixtures.js';
 import { RequestLimiter } from './public-booking-links.js';
 
 /**
@@ -73,7 +84,11 @@ async function ask(target: App, email: unknown = CLIENT.email) {
   return res;
 }
 
-type Sent = { recipient: string; payload: { clientName: string; bookings: { reference: string; accessToken: string }[] }; booking_id: string | null };
+type Sent = {
+  recipient: string;
+  payload: { clientName: string; bookings: { reference: string; accessToken: string; photographerName?: string }[] };
+  booking_id: string | null;
+};
 
 async function linkEmails(): Promise<Sent[]> {
   return (await raw.query<Sent>("SELECT recipient, payload, booking_id FROM outbox WHERE template = 'booking_links' ORDER BY created_at")).rows;
@@ -118,6 +133,25 @@ describe('POST /api/booking-links', () => {
     const [newFirst, newSecond] = email?.payload.bookings ?? [];
     expect((await findBookingByToken(prisma, newFirst?.accessToken ?? ''))?.id).toBe(first.id);
     expect((await findBookingByToken(prisma, newSecond?.accessToken ?? ''))?.id).toBe(second.id);
+  });
+
+  it('lists bookings with several photographers in one email, each naming its photographer', async () => {
+    const target = appWith();
+    const second = await seedSecondPhotographer(prisma, world, { displayName: 'Hills & Light' });
+    const mine = await insertBooking(prisma, world, { status: 'confirmed', holdMinutes: null });
+    const theirs = await insertBooking(prisma, second, { status: 'confirmed', holdMinutes: null });
+
+    await ask(target);
+
+    const [email, ...more] = await linkEmails();
+    expect(more).toEqual([]);
+    expect(email?.payload.bookings.map((b) => [b.reference, b.photographerName])).toEqual([
+      [mine.reference, PHOTOGRAPHER_NAME],
+      [theirs.reference, 'Hills & Light'],
+    ]);
+    const rendered = renderEmail('booking_links', email?.payload, { webOrigin: 'https://bookly.example' });
+    expect(rendered.text).toContain(`Photographer: ${PHOTOGRAPHER_NAME}`);
+    expect(rendered.text).toContain('Photographer: Hills & Light');
   });
 
   it('lists only bookings the client can still act on', async () => {

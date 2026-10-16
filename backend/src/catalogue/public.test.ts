@@ -2,9 +2,16 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
-import { updateSettings } from '../settings/index.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { effectiveBookingFeeRate, findPublicService, listPublicCatalogue } from './public.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
+import {
+  effectiveBookingFeeRate,
+  findPublicPhotographer,
+  findPublicService,
+  listPublicCatalogue,
+  listPublicPhotographers,
+} from './public.js';
 
 /**
  * `listPublicCatalogue()` against real PostgreSQL (plan.md Task 10; spec §3.4,
@@ -15,13 +22,21 @@ import { effectiveBookingFeeRate, findPublicService, listPublicCatalogue } from 
  *
  * `findPublicService()` is one entry of that list by slug, plus the booking-fee
  * rate that applies to it (plan.md Task 11; data-model_v2.md §9.5): the
- * service's override if set, else the global setting. The top-level afterAll
- * truncates, so a settings row edited here never reaches settings.test.ts,
- * which seeds without truncating and asserts the defaults.
+ * service's override if set, else the photographer's setting. The top-level
+ * afterAll truncates, so a settings row edited here never reaches
+ * settings.test.ts, which seeds without truncating and asserts the defaults.
+ *
+ * Every catalogue is one photographer's (brief decision 4): another
+ * photographer's services, packages and add-ons -- the ones they offer on every
+ * service included -- never appear in it. The photographers list and profile
+ * show bookable photographers only, through an allowlist that leaves out their
+ * status, their login and their settings.
  */
 
 let prisma: PrismaClient;
 let raw: pg.Client;
+/** The approved photographer every fixture below belongs to unless it names another. */
+let photographerId: string;
 
 beforeAll(async () => {
   prisma = createPrismaClient(testDatabaseUrl());
@@ -37,22 +52,24 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
+  // Born with its settings row at the defaults: a 40% booking fee.
+  ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
 });
 
 // --- Fixtures ---------------------------------------------------------------
 
 function insertService(slug: string, data: Partial<Prisma.ServiceUncheckedCreateInput> = {}) {
-  return prisma.service.create({ data: { slug, nameEn: slug, ...data } });
+  return prisma.service.create({ data: { photographerId, slug, nameEn: slug, ...data } });
 }
 
 function insertPackage(serviceId: string, nameEn: string, data: Partial<Prisma.PackageUncheckedCreateInput> = {}) {
   return prisma.package.create({
-    data: { serviceId, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
+    data: { photographerId, serviceId, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
   });
 }
 
 function insertAddon(serviceId: string | null, nameEn: string, data: Partial<Prisma.AddonUncheckedCreateInput> = {}) {
-  return prisma.addon.create({ data: { serviceId, nameEn, priceRwf: 10_000, ...data } });
+  return prisma.addon.create({ data: { photographerId, serviceId, nameEn, priceRwf: 10_000, ...data } });
 }
 
 type Listed = Awaited<ReturnType<typeof listPublicCatalogue>>;
@@ -70,7 +87,7 @@ function names(list: Listed) {
 
 describe('listPublicCatalogue', () => {
   it('lists nothing for an empty catalogue', async () => {
-    await expect(listPublicCatalogue(prisma)).resolves.toEqual([]);
+    await expect(listPublicCatalogue(prisma, photographerId)).resolves.toEqual([]);
   });
 
   it('lists only active services, each with only its active packages and active add-ons', async () => {
@@ -92,7 +109,7 @@ describe('listPublicCatalogue', () => {
     const rush = await insertAddon(null, 'Rush edit', { priceRwf: 5_000 });
     await insertAddon(null, 'Discontinued prints', { isActive: false });
 
-    await expect(listPublicCatalogue(prisma)).resolves.toEqual([
+    await expect(listPublicCatalogue(prisma, photographerId)).resolves.toEqual([
       {
         id: portraits.id,
         slug: 'portraits',
@@ -126,7 +143,7 @@ describe('listPublicCatalogue', () => {
     await insertAddon(null, 'Rush edit', { sortOrder: 5 });
     await insertAddon(null, 'Prints', { sortOrder: 0 });
 
-    expect(names(await listPublicCatalogue(prisma))).toEqual([
+    expect(names(await listPublicCatalogue(prisma, photographerId))).toEqual([
       { slug: 'products', packages: [], addons: ['Prints', 'Rush edit'] },
       { slug: 'weddings', packages: [], addons: ['Album', 'Second shooter', 'Prints', 'Rush edit'] },
     ]);
@@ -151,7 +168,7 @@ describe('listPublicCatalogue', () => {
     await insertAddon(null, 'Retouch', { sortOrder: 1 });
     await insertAddon(null, 'Drone', { sortOrder: 1 });
 
-    const list = await listPublicCatalogue(prisma);
+    const list = await listPublicCatalogue(prisma, photographerId);
 
     expect(list.map((service) => service.slug)).toEqual(['mike-older', 'mike-newer', 'zulu', 'alpha']);
     const zuluListed = list.find((service) => service.id === zulu.id);
@@ -178,7 +195,7 @@ describe('listPublicCatalogue', () => {
     await insertAddon(service.id, 'Extra hour', { nameFr: 'Heure en plus', sortOrder: 3 });
     await insertAddon(null, 'Rush edit', { nameFr: 'Retouche express' });
 
-    const [listed] = await listPublicCatalogue(prisma);
+    const [listed] = await listPublicCatalogue(prisma, photographerId);
 
     expect(Object.keys(listed ?? {}).sort()).toEqual(['addons', 'coverImageUrl', 'descriptionEn', 'id', 'nameEn', 'packages', 'slug']);
     expect(listed?.packages.map((pkg) => Object.keys(pkg).sort())).toEqual([
@@ -198,13 +215,7 @@ describe('listPublicCatalogue', () => {
 // --- One service's detail (plan.md Task 11) ------------------------------------------
 
 describe('findPublicService', () => {
-  beforeEach(async () => {
-    // getSettings() throws on a missing row (data-model_v2.md §5.2); seed the
-    // schema defaults the way Task 4 seeds production.
-    await prisma.setting.create({ data: { id: 1, bookingFeeRate: '0.400' } });
-  });
-
-  it('returns an active service with its active packages and add-ons, and the global rate when it has no override', async () => {
+  it('returns an active service with its active packages and add-ons, and the photographer’s rate when it has no override', async () => {
     const portraits = await insertService('portraits', {
       nameEn: 'Portraits',
       descriptionEn: 'Studio portraits.',
@@ -217,7 +228,7 @@ describe('findPublicService', () => {
     const rush = await insertAddon(null, 'Rush edit', { priceRwf: 5_000 });
     await insertAddon(null, 'Discontinued prints', { isActive: false });
 
-    await expect(findPublicService(prisma, 'portraits')).resolves.toStrictEqual({
+    await expect(findPublicService(prisma, photographerId, 'portraits')).resolves.toStrictEqual({
       id: portraits.id,
       slug: 'portraits',
       nameEn: 'Portraits',
@@ -250,43 +261,43 @@ describe('findPublicService', () => {
     await insertAddon(products.id, 'White background');
     await insertAddon(null, 'Rush edit');
 
-    const list = await listPublicCatalogue(prisma);
+    const list = await listPublicCatalogue(prisma, photographerId);
     for (const [slug, bookingFeeRate] of [['weddings', 0.4], ['products', 0.25]] as const) {
-      expect(await findPublicService(prisma, slug)).toStrictEqual({
+      expect(await findPublicService(prisma, photographerId, slug)).toStrictEqual({
         ...list.find((service) => service.slug === slug),
         bookingFeeRate,
       });
     }
   });
 
-  it('charges a service’s own override: 0.300 is a rate of 0.3, whatever the global rate', async () => {
+  it('charges a service’s own override: 0.300 is a rate of 0.3, whatever the photographer’s rate', async () => {
     await insertService('portraits', { bookingFeeRateOverride: '0.300' });
 
-    const detail = await findPublicService(prisma, 'portraits');
+    const detail = await findPublicService(prisma, photographerId, 'portraits');
 
     expect(detail?.bookingFeeRate).toBe(0.3);
     expect(typeof detail?.bookingFeeRate).toBe('number');
   });
 
-  it('charges an override of 0.000 as 0 rather than falling back to the global rate', async () => {
+  it('charges an override of 0.000 as 0 rather than falling back to the photographer’s rate', async () => {
     await insertService('free-deposit', { bookingFeeRateOverride: '0.000' });
     await insertService('pay-in-full', { bookingFeeRateOverride: '1.000' });
     await insertService('odd-rate', { bookingFeeRateOverride: '0.375' });
 
-    expect((await findPublicService(prisma, 'free-deposit'))?.bookingFeeRate).toBe(0);
-    expect((await findPublicService(prisma, 'pay-in-full'))?.bookingFeeRate).toBe(1);
-    expect((await findPublicService(prisma, 'odd-rate'))?.bookingFeeRate).toBe(0.375);
+    expect((await findPublicService(prisma, photographerId, 'free-deposit'))?.bookingFeeRate).toBe(0);
+    expect((await findPublicService(prisma, photographerId, 'pay-in-full'))?.bookingFeeRate).toBe(1);
+    expect((await findPublicService(prisma, photographerId, 'odd-rate'))?.bookingFeeRate).toBe(0.375);
   });
 
-  it('follows the global setting when it changes, and ignores it where an override is set', async () => {
+  it('follows the photographer’s setting when it changes, and ignores it where an override is set', async () => {
     await insertService('portraits');
     await insertService('weddings', { bookingFeeRateOverride: '0.300' });
-    expect((await findPublicService(prisma, 'portraits'))?.bookingFeeRate).toBe(0.4);
+    expect((await findPublicService(prisma, photographerId, 'portraits'))?.bookingFeeRate).toBe(0.4);
 
-    await updateSettings({ bookingFeeRate: 0.35 }, prisma);
+    await updatePhotographerSettings(photographerId, { bookingFeeRate: 0.35 }, prisma);
 
-    expect((await findPublicService(prisma, 'portraits'))?.bookingFeeRate).toBe(0.35);
-    expect((await findPublicService(prisma, 'weddings'))?.bookingFeeRate).toBe(0.3);
+    expect((await findPublicService(prisma, photographerId, 'portraits'))?.bookingFeeRate).toBe(0.35);
+    expect((await findPublicService(prisma, photographerId, 'weddings'))?.bookingFeeRate).toBe(0.3);
   });
 
   it('is null for an unknown slug, and for a deactivated service even with active packages (spec §6.14)', async () => {
@@ -294,28 +305,28 @@ describe('findPublicService', () => {
     await insertPackage(events.id, 'Half day');
     await insertAddon(events.id, 'Drone');
 
-    await expect(findPublicService(prisma, 'events')).resolves.toBeNull();
-    await expect(findPublicService(prisma, 'nothing-here')).resolves.toBeNull();
-    await expect(findPublicService(prisma, '')).resolves.toBeNull();
+    await expect(findPublicService(prisma, photographerId, 'events')).resolves.toBeNull();
+    await expect(findPublicService(prisma, photographerId, 'nothing-here')).resolves.toBeNull();
+    await expect(findPublicService(prisma, photographerId, '')).resolves.toBeNull();
   });
 
   it('matches the slug exactly, never as a pattern or a prefix', async () => {
     await insertService('portraits');
 
     for (const slug of ['portrait', 'portraits-2', 'Portraits', 'portrait%', 'portrait_']) {
-      await expect(findPublicService(prisma, slug)).resolves.toBeNull();
+      await expect(findPublicService(prisma, photographerId, slug)).resolves.toBeNull();
     }
   });
 
   it('becomes null when the service is deactivated, and returns when it is reactivated', async () => {
     const service = await insertService('portraits');
-    expect(await findPublicService(prisma, 'portraits')).not.toBeNull();
+    expect(await findPublicService(prisma, photographerId, 'portraits')).not.toBeNull();
 
     await prisma.service.update({ where: { id: service.id }, data: { isActive: false } });
-    await expect(findPublicService(prisma, 'portraits')).resolves.toBeNull();
+    await expect(findPublicService(prisma, photographerId, 'portraits')).resolves.toBeNull();
 
     await prisma.service.update({ where: { id: service.id }, data: { isActive: true } });
-    expect((await findPublicService(prisma, 'portraits'))?.id).toBe(service.id);
+    expect((await findPublicService(prisma, photographerId, 'portraits'))?.id).toBe(service.id);
   });
 
   it('offers its own add-ons, then the shared ones, and never another service’s', async () => {
@@ -328,8 +339,8 @@ describe('findPublicService', () => {
     await insertAddon(null, 'Rush edit', { sortOrder: 1 });
     await insertAddon(null, 'Prints', { sortOrder: 0 });
 
-    const weddingsDetail = await findPublicService(prisma, 'weddings');
-    const productsDetail = await findPublicService(prisma, 'products');
+    const weddingsDetail = await findPublicService(prisma, photographerId, 'weddings');
+    const productsDetail = await findPublicService(prisma, photographerId, 'products');
 
     expect(weddingsDetail?.addons.map((addon) => addon.nameEn)).toEqual(['Album', 'Second shooter', 'Prints', 'Rush edit']);
     expect(productsDetail?.addons.map((addon) => addon.nameEn)).toEqual(['White background', 'Prints', 'Rush edit']);
@@ -341,7 +352,7 @@ describe('findPublicService', () => {
     await insertPackage(service.id, 'Zulu', { sortOrder: 0 });
     await insertPackage(service.id, 'Alpha', { sortOrder: 1 });
 
-    const detail = await findPublicService(prisma, 'portraits');
+    const detail = await findPublicService(prisma, photographerId, 'portraits');
 
     expect(detail?.packages.map((pkg) => pkg.nameEn)).toEqual(['Zulu', 'Alpha', 'Beta']);
   });
@@ -350,7 +361,7 @@ describe('findPublicService', () => {
     const service = await insertService('portraits');
     await insertPackage(service.id, 'Retired', { isActive: false });
 
-    const detail = await findPublicService(prisma, 'portraits');
+    const detail = await findPublicService(prisma, photographerId, 'portraits');
 
     expect(detail?.packages).toEqual([]);
     expect(detail?.addons).toEqual([]);
@@ -370,7 +381,7 @@ describe('findPublicService', () => {
     await insertAddon(service.id, 'Extra hour', { nameFr: 'Heure en plus', sortOrder: 3 });
     await insertAddon(null, 'Rush edit', { nameFr: 'Retouche express' });
 
-    const detail = await findPublicService(prisma, 'portraits');
+    const detail = await findPublicService(prisma, photographerId, 'portraits');
 
     expect(Object.keys(detail ?? {}).sort()).toEqual([
       'addons',
@@ -397,7 +408,7 @@ describe('findPublicService', () => {
 });
 
 describe('effectiveBookingFeeRate', () => {
-  it('is the override as a number when one is set, else the global rate', async () => {
+  it('is the override as a number when one is set, else the photographer’s rate', async () => {
     const withOverride = await insertService('portraits', { bookingFeeRateOverride: '0.300' });
     const withoutOverride = await insertService('weddings');
     const zeroOverride = await insertService('free', { bookingFeeRateOverride: '0.000' });
@@ -423,6 +434,7 @@ describe('a deactivated service with bookings (spec §6.14)', () => {
     const booking = await prisma.booking.create({
       data: {
         reference: 'BKY-2610-00001',
+        photographerId,
         clientId: client.id,
         contactName: 'Aline Uwase',
         contactEmail: 'aline@example.com',
@@ -454,7 +466,7 @@ describe('a deactivated service with bookings (spec §6.14)', () => {
         },
       },
     });
-    expect(names(await listPublicCatalogue(prisma))).toEqual([
+    expect(names(await listPublicCatalogue(prisma, photographerId))).toEqual([
       { slug: 'portraits', packages: ['Standard'], addons: ['Extra hour'] },
     ]);
 
@@ -462,7 +474,7 @@ describe('a deactivated service with bookings (spec §6.14)', () => {
     await prisma.package.update({ where: { id: pkg.id }, data: { isActive: false, priceRwf: 99_000 } });
     await prisma.addon.update({ where: { id: addon.id }, data: { isActive: false, priceRwf: 99_000 } });
 
-    await expect(listPublicCatalogue(prisma)).resolves.toEqual([]);
+    await expect(listPublicCatalogue(prisma, photographerId)).resolves.toEqual([]);
     const readable = await prisma.booking.findUniqueOrThrow({
       where: { id: booking.id },
       include: { service: true, package: true, addons: true },
@@ -481,5 +493,141 @@ describe('a deactivated service with bookings (spec §6.14)', () => {
       addons: [{ addonId: addon.id, nameSnapshot: 'Extra hour', unitPriceRwf: 15_000, amountRwf: 15_000 }],
     });
     expect(readable.bookingFeeRate.toFixed(3)).toBe('0.400');
+  });
+});
+
+// --- Per photographer (brief decisions 2 and 4) -----------------------------------------
+
+/** Another photographer, approved unless told otherwise, with a catalogue of the same slugs. */
+async function otherPhotographer(
+  { handle = 'hills-and-light', displayName = 'Hills & Light', status = 'approved' }: {
+    handle?: string;
+    displayName?: string;
+    status?: 'pending' | 'approved' | 'suspended';
+  } = {},
+): Promise<string> {
+  const other = await createPhotographer(prisma, { email: `${handle}@bookly.example`, handle, displayName, status });
+  const service = await insertService('portraits', { photographerId: other.photographerId, nameEn: 'Their portraits' });
+  await insertPackage(service.id, 'Their standard', { photographerId: other.photographerId });
+  await insertAddon(service.id, 'Their extra hour', { photographerId: other.photographerId });
+  await insertAddon(null, 'Their rush edit', { photographerId: other.photographerId });
+  return other.photographerId;
+}
+
+describe('one photographer’s catalogue', () => {
+  it('lists only that photographer’s services, packages and add-ons, shared ones included', async () => {
+    const service = await insertService('portraits', { nameEn: 'Portraits' });
+    await insertPackage(service.id, 'Standard');
+    await insertAddon(service.id, 'Extra hour');
+    await insertAddon(null, 'Rush edit');
+    const otherId = await otherPhotographer();
+
+    expect(names(await listPublicCatalogue(prisma, photographerId))).toEqual([
+      { slug: 'portraits', packages: ['Standard'], addons: ['Extra hour', 'Rush edit'] },
+    ]);
+    expect(names(await listPublicCatalogue(prisma, otherId))).toEqual([
+      { slug: 'portraits', packages: ['Their standard'], addons: ['Their extra hour', 'Their rush edit'] },
+    ]);
+  });
+
+  it('finds a slug under its own photographer only, with that photographer’s rate', async () => {
+    const mine = await insertService('portraits');
+    const otherId = await otherPhotographer();
+    await updatePhotographerSettings(otherId, { bookingFeeRate: 0.2 }, prisma);
+
+    const detail = await findPublicService(prisma, photographerId, 'portraits');
+    const theirs = await findPublicService(prisma, otherId, 'portraits');
+
+    expect(detail?.id).toBe(mine.id);
+    expect(detail?.bookingFeeRate).toBe(0.4);
+    expect(theirs?.id).not.toBe(mine.id);
+    expect(theirs?.addons.map((addon) => addon.nameEn)).toEqual(['Their extra hour', 'Their rush edit']);
+    expect(theirs?.bookingFeeRate).toBe(0.2);
+  });
+
+  it('does not find a slug that only another photographer has', async () => {
+    await otherPhotographer();
+    await prisma.service.updateMany({ where: { slug: 'portraits', photographerId: { not: photographerId } }, data: { slug: 'theirs-only' } });
+
+    await expect(findPublicService(prisma, photographerId, 'theirs-only')).resolves.toBeNull();
+  });
+});
+
+describe('listPublicPhotographers', () => {
+  it('lists the bookable photographers by name, as handle, display name and cover only', async () => {
+    await prisma.photographer.update({ where: { id: photographerId }, data: { coverImageUrl: 'https://images.example.com/kigali.jpg' } });
+    await otherPhotographer({ handle: 'amahoro-studio', displayName: 'Amahoro Studio' });
+    await otherPhotographer({ handle: 'pending-one', displayName: 'A Pending One', status: 'pending' });
+    await otherPhotographer({ handle: 'suspended-one', displayName: 'A Suspended One', status: 'suspended' });
+
+    await expect(listPublicPhotographers(prisma)).resolves.toStrictEqual([
+      { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null },
+      { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg' },
+    ]);
+  });
+
+  it('lists nobody when nobody is approved', async () => {
+    await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'pending', approvedAt: null } });
+
+    await expect(listPublicPhotographers(prisma)).resolves.toEqual([]);
+  });
+});
+
+describe('findPublicPhotographer', () => {
+  it('returns the public profile and the id, with the contact email and never the login', async () => {
+    await prisma.photographer.update({
+      where: { id: photographerId },
+      data: {
+        bio: 'Portraits in natural light.',
+        contactPhone: '+250788000001',
+        whatsappPhone: '+250788000002',
+        contactEmail: 'hello@kigalilens.example',
+        coverImageUrl: 'https://images.example.com/kigali.jpg',
+        suspensionReason: null,
+      },
+    });
+
+    const found = await findPublicPhotographer(prisma, PHOTOGRAPHER_HANDLE);
+
+    expect(found).toStrictEqual({
+      id: photographerId,
+      profile: {
+        handle: PHOTOGRAPHER_HANDLE,
+        displayName: 'Kigali Lens',
+        bio: 'Portraits in natural light.',
+        contactPhone: '+250788000001',
+        whatsappPhone: '+250788000002',
+        email: 'hello@kigalilens.example',
+        coverImageUrl: 'https://images.example.com/kigali.jpg',
+      },
+    });
+    const json = JSON.stringify(found?.profile);
+    for (const hidden of [PHOTOGRAPHER_EMAIL, 'approved', 'status', 'userId', 'bookingFeeRate', 'createdAt']) {
+      expect(json).not.toContain(hidden);
+    }
+  });
+
+  it('shows no email at all when the photographer has no contact email, rather than their login', async () => {
+    const found = await findPublicPhotographer(prisma, PHOTOGRAPHER_HANDLE);
+
+    expect(found?.profile.email).toBeNull();
+    expect(JSON.stringify(found)).not.toContain(PHOTOGRAPHER_EMAIL);
+  });
+
+  it('is null for an unknown handle, a pending or suspended photographer, and a malformed handle', async () => {
+    await otherPhotographer({ handle: 'pending-one', status: 'pending' });
+    await otherPhotographer({ handle: 'suspended-one', status: 'suspended' });
+
+    for (const handle of ['nobody-here', 'pending-one', 'suspended-one', 'Kigali-Lens', 'kigali%', '', 'x'.repeat(31)]) {
+      await expect(findPublicPhotographer(prisma, handle)).resolves.toBeNull();
+    }
+  });
+
+  it('becomes null when the photographer is suspended, and returns when they are approved again', async () => {
+    await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'suspended', suspendedAt: new Date('2026-10-01T06:00:00Z') } });
+    await expect(findPublicPhotographer(prisma, PHOTOGRAPHER_HANDLE)).resolves.toBeNull();
+
+    await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'approved', suspendedAt: null } });
+    expect((await findPublicPhotographer(prisma, PHOTOGRAPHER_HANDLE))?.id).toBe(photographerId);
   });
 });

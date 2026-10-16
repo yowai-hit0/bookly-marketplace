@@ -164,7 +164,7 @@ describe('what the answer does', () => {
       },
     ]);
     const outbox = await raw.query<{ template: string }>('SELECT template FROM outbox ORDER BY template');
-    expect(outbox.rows.map((row) => row.template)).toEqual(['admin_new_booking', 'booking_confirmation']);
+    expect(outbox.rows.map((row) => row.template)).toEqual(['booking_confirmation', 'photographer_new_booking']);
   });
 
   it('fails the payment on a settled failure, leaving the booking waiting', async () => {

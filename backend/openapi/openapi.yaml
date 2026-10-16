@@ -6,8 +6,8 @@ info:
   description: |
     The API behind the Bookly booking site. It serves three kinds of caller:
 
-    - **The public**: anonymous visitors browsing services, checking availability,
-      booking a slot and paying its booking fee.
+    - **The public**: anonymous visitors browsing photographers and their
+      services, checking availability, booking a slot and paying its booking fee.
     - **A booking's client**: no account; every client request carries a
       **capability token** in its path, emailed when the booking is confirmed.
     - **The admin** (the photographer): an `Authorization: Bearer` JWT from
@@ -60,9 +60,13 @@ paths:
   # --- Public ---------------------------------------------------------------
   /api/health:
     $ref: paths/public.yaml#/health
-  /api/services:
+  /api/photographers:
+    $ref: paths/public.yaml#/photographers
+  /api/photographers/{handle}:
+    $ref: paths/public.yaml#/photographer
+  /api/photographers/{handle}/services:
     $ref: paths/public.yaml#/services
-  /api/services/{slug}:
+  /api/photographers/{handle}/services/{slug}:
     $ref: paths/public.yaml#/service
   /api/quote:
     $ref: paths/public.yaml#/quote

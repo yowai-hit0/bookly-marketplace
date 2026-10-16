@@ -2,8 +2,9 @@ import type { PrismaClient } from '@prisma/client';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
-import { updateSettings } from '../settings/index.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
 import { type FindAvailabilityOptions, findAvailability } from './query.js';
 
 /**
@@ -14,14 +15,19 @@ import { type FindAvailabilityOptions, findAvailability } from './query.js';
  * proven here is the loading: that the right working hours, blocks and bookings
  * reach the engine for a range of Kigali dates -- including rows that start or
  * end outside that range -- and that the operating values are read through
- * `getSettings()` on every call, so an edit on the settings screen applies to
- * the very next request.
+ * `getPhotographerSettings()` on every call, so an edit on the settings screen
+ * applies to the very next request.
+ *
+ * Every row is one photographer's (marketplace-spec.md T1.4): another
+ * photographer's hours, blocks, bookings and settings never reach the engine.
  *
  * Kigali is UTC+2 with no DST. 2026-10-07 is a Wednesday. The clock is injected.
  */
 
 let prisma: PrismaClient;
 let raw: pg.Client;
+/** The photographer whose calendar is asked about, unless a test names another. */
+let photographerId: string;
 
 /** A week before every fixture date, so lead time only bites when a test says so. */
 const NOW = new Date('2026-09-30T08:00:00Z');
@@ -58,15 +64,19 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
-  // Defaults 0.400 / 120 / 30 / 30 / 90; findAvailability throws without the row.
-  await prisma.setting.create({ data: { id: 1 } });
-  // The seeded weekly rule: Mon–Fri 09:00–17:00.
-  await prisma.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })),
-  });
+  // Born with its settings row at the defaults: lead 120, buffer 30.
+  ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
+  await weekdayHours(photographerId);
 });
 
 // --- Fixtures ---------------------------------------------------------------
+
+/** The weekly rule sign-up gives a photographer: Mon–Fri 09:00–17:00. */
+async function weekdayHours(owner: string): Promise<void> {
+  await prisma.workingHours.createMany({
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: owner, weekday, opensMinute: 540, closesMinute: 1020 })),
+  });
+}
 
 /** A Kigali wall-clock time on `date`, as the UTC instant. */
 function kigali(date: string, wallTime: string): Date {
@@ -78,7 +88,7 @@ function kigaliTime(iso: string): string {
 }
 
 function find(from: string, to = from, options: Partial<FindAvailabilityOptions> = {}) {
-  return findAvailability(prisma, { from, to, packageDurationMinutes: 60, now: NOW, ...options });
+  return findAvailability(prisma, { photographerId, from, to, packageDurationMinutes: 60, now: NOW, ...options });
 }
 
 /** Offered Kigali start times per date. */
@@ -97,9 +107,9 @@ async function startTimes(date: string, options: Partial<FindAvailabilityOptions
 }
 
 /** Open a date round the clock, so rows crossing midnight become visible. */
-async function openAllDay(date: string): Promise<void> {
+async function openAllDay(date: string, owner = photographerId): Promise<void> {
   await prisma.workingHours.create({
-    data: { effectiveDate: new Date(`${date}T00:00:00Z`), opensMinute: 0, closesMinute: 1440 },
+    data: { photographerId: owner, effectiveDate: new Date(`${date}T00:00:00Z`), opensMinute: 0, closesMinute: 1440 },
   });
 }
 
@@ -113,14 +123,14 @@ type Reservation = {
   holdExpiresAt?: Date | null;
 };
 
-/** One booking row, with a fresh catalogue so tests can add several. */
-async function insertBooking(reservation: Reservation): Promise<void> {
+/** One booking row of `owner`'s, with a fresh catalogue so tests can add several. */
+async function insertBooking(reservation: Reservation, owner = photographerId): Promise<void> {
   bookingCount += 1;
   const service = await prisma.service.create({
-    data: { slug: `portrait-${bookingCount}`, nameEn: 'Portrait' },
+    data: { photographerId: owner, slug: `portrait-${bookingCount}`, nameEn: 'Portrait' },
   });
   const pkg = await prisma.package.create({
-    data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
+    data: { photographerId: owner, serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
   });
   const client = await prisma.client.create({
     data: { fullName: 'Aline Uwase', email: `aline-${bookingCount}@example.com`, phone: '+250788000000' },
@@ -128,6 +138,7 @@ async function insertBooking(reservation: Reservation): Promise<void> {
   await prisma.booking.create({
     data: {
       reference: `BKY-2610-${String(bookingCount).padStart(5, '0')}`,
+      photographerId: owner,
       clientId: client.id,
       contactName: 'Aline Uwase',
       contactEmail: 'aline@example.com',
@@ -217,7 +228,7 @@ describe('an invalid range', () => {
 describe('working hours loaded for the range', () => {
   it('honours dated overrides on the first and last date of the range', async () => {
     for (const date of [MONDAY, FRIDAY]) {
-      await prisma.workingHours.create({ data: { effectiveDate: new Date(`${date}T00:00:00Z`), isOpen: false } });
+      await prisma.workingHours.create({ data: { photographerId, effectiveDate: new Date(`${date}T00:00:00Z`), isOpen: false } });
     }
 
     expect(await offered(MONDAY, FRIDAY)).toEqual({
@@ -233,7 +244,7 @@ describe('working hours loaded for the range', () => {
 describe('blocks loaded for the range', () => {
   it('subtracts a block that began the evening before the range', async () => {
     await prisma.availabilityBlock.create({
-      data: { startsAt: kigali(TUESDAY, '20:00'), endsAt: kigali(WEDNESDAY, '10:00') },
+      data: { photographerId, startsAt: kigali(TUESDAY, '20:00'), endsAt: kigali(WEDNESDAY, '10:00') },
     });
 
     expect(await startTimes(WEDNESDAY)).toEqual(FULL_DAY.slice(FULL_DAY.indexOf('10:00')));
@@ -241,7 +252,7 @@ describe('blocks loaded for the range', () => {
 
   it('subtracts a block that runs on past the end of the range', async () => {
     await prisma.availabilityBlock.create({
-      data: { startsAt: kigali(WEDNESDAY, '16:00'), endsAt: kigali(THURSDAY, '12:00') },
+      data: { photographerId, startsAt: kigali(WEDNESDAY, '16:00'), endsAt: kigali(THURSDAY, '12:00') },
     });
 
     expect((await startTimes(WEDNESDAY)).at(-1)).toBe('15:00');
@@ -250,7 +261,7 @@ describe('blocks loaded for the range', () => {
   it('ignores a block ending exactly at Kigali midnight as the range begins', async () => {
     await openAllDay(WEDNESDAY);
     await prisma.availabilityBlock.create({
-      data: { startsAt: kigali(TUESDAY, '09:00'), endsAt: kigali(WEDNESDAY, '00:00') },
+      data: { photographerId, startsAt: kigali(TUESDAY, '09:00'), endsAt: kigali(WEDNESDAY, '00:00') },
     });
 
     expect((await startTimes(WEDNESDAY))[0]).toBe('00:00');
@@ -341,7 +352,7 @@ describe('operating values', () => {
     const now = kigali(WEDNESDAY, '10:00');
     expect((await startTimes(WEDNESDAY, { now }))[0]).toBe('12:00');
 
-    await updateSettings({ minLeadTimeMinutes: 0 }, prisma);
+    await updatePhotographerSettings(photographerId, { minLeadTimeMinutes: 0 }, prisma);
 
     expect((await startTimes(WEDNESDAY, { now }))[0]).toBe('10:00');
   });
@@ -353,10 +364,75 @@ describe('operating values', () => {
     // Buffer 30: a 10:30 start reserves to 12:00, touching the booking.
     expect(await startTimes(WEDNESDAY)).toEqual(['09:00', '09:30', '10:00', '10:30', ...afternoon]);
 
-    await updateSettings({ bufferMinutes: 60 }, prisma);
+    await updatePhotographerSettings(photographerId, { bufferMinutes: 60 }, prisma);
 
     // Buffer 60: 10:30 would now reserve to 12:30. The booking still frees
     // 13:30, because its own buffer end did not move.
     expect(await startTimes(WEDNESDAY)).toEqual(['09:00', '09:30', '10:00', ...afternoon]);
+  });
+});
+
+// --- Per photographer (marketplace-spec.md T1.4) ------------------------------------------
+
+describe('another photographer’s calendar', () => {
+  let otherId: string;
+
+  beforeEach(async () => {
+    ({ photographerId: otherId } = await createPhotographer(prisma, {
+      email: 'other@bookly.example',
+      handle: 'hills-and-light',
+      displayName: 'Hills & Light',
+    }));
+  });
+
+  it('leaves this photographer’s calendar exactly as it was, whatever the other has', async () => {
+    const before = await offered(MONDAY, SUNDAY);
+
+    // The other photographer works every day round the clock, is closed on
+    // Wednesday, has blocked Thursday, holds a booking or a live hold on every
+    // weekday morning, and works with no lead time and a two-hour buffer.
+    for (const date of [MONDAY, TUESDAY, FRIDAY, SATURDAY, SUNDAY]) await openAllDay(date, otherId);
+    await prisma.workingHours.create({ data: { photographerId: otherId, effectiveDate: new Date(`${WEDNESDAY}T00:00:00Z`), isOpen: false } });
+    await prisma.availabilityBlock.create({ data: { photographerId: otherId, startsAt: kigali(THURSDAY, '00:00'), endsAt: kigali(FRIDAY, '00:00') } });
+    for (const date of [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]) {
+      await insertBooking(on(date, '09:00', '10:00', '12:00'), otherId);
+    }
+    await insertBooking(
+      { ...on(MONDAY, '14:00', '15:00', '15:30'), status: 'pending_payment', holdExpiresAt: new Date(NOW.getTime() + MINUTE_MS) },
+      otherId,
+    );
+    await updatePhotographerSettings(otherId, { minLeadTimeMinutes: 0, bufferMinutes: 120 }, prisma);
+
+    expect(await offered(MONDAY, SUNDAY)).toEqual(before);
+    expect(before[WEDNESDAY]).toEqual(FULL_DAY);
+    expect(before[SATURDAY]).toEqual([]);
+  });
+
+  it('is computed from the other photographer’s own rows when asked for', async () => {
+    await weekdayHours(otherId);
+    await insertBooking(on(WEDNESDAY, '09:00', '10:00', '10:30'), otherId);
+    await prisma.availabilityBlock.create({ data: { photographerId: otherId, startsAt: kigali(WEDNESDAY, '15:00'), endsAt: kigali(WEDNESDAY, '17:00') } });
+
+    expect(await startTimes(WEDNESDAY, { photographerId: otherId })).toEqual(FULL_DAY.slice(FULL_DAY.indexOf('10:30'), FULL_DAY.indexOf('14:30')));
+    expect(await startTimes(WEDNESDAY)).toEqual(FULL_DAY);
+  });
+
+  it('offers nothing for a photographer with no working hours, whoever else is open', async () => {
+    expect(await offered(MONDAY, FRIDAY, { photographerId: otherId })).toEqual({
+      [MONDAY]: [],
+      [TUESDAY]: [],
+      [WEDNESDAY]: [],
+      [THURSDAY]: [],
+      [FRIDAY]: [],
+    });
+  });
+
+  it('reads each photographer’s lead time and buffer, not the other’s', async () => {
+    await weekdayHours(otherId);
+    await updatePhotographerSettings(otherId, { minLeadTimeMinutes: 0 }, prisma);
+    const now = kigali(WEDNESDAY, '10:00');
+
+    expect((await startTimes(WEDNESDAY, { now }))[0]).toBe('12:00');
+    expect((await startTimes(WEDNESDAY, { now, photographerId: otherId }))[0]).toBe('10:00');
   });
 });

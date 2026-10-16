@@ -1,5 +1,5 @@
 import { kigaliDateOf } from '../availability/engine.js';
-import type { AccessedBooking } from './access.js';
+import type { AccessedBooking, CancellationPolicy } from './access.js';
 import { maskEmail, pendingMaskedEmailOf } from './email-change.js';
 import { type ClientNotice, clientNotices } from './notices.js';
 import { type ClientStage, bookingStage } from './stage.js';
@@ -19,6 +19,8 @@ import { bookingTotals } from './totals.js';
 
 /** Statuses whose shoot has not happened and whose money can still move. */
 const PAYABLE_STATUSES = ['confirmed', 'completed'];
+
+const MS_PER_HOUR = 3_600_000;
 
 export type ClientBookingView = {
   reference: string;
@@ -54,7 +56,7 @@ export type ClientBookingView = {
   };
   bookingFeeRwf: number;
   payments: { kind: string; status: string; amountRwf: number; settledAt: string | null }[];
-  /** Cancellable right up to the shoot, and only by the client of a confirmed booking (spec §6.10). */
+  /** Whether the client may cancel now: a confirmed booking, before its photographer's cut-off (R1.8). */
   canCancel: boolean;
   cancellationReason: string | null;
   cancelledAt: string | null;
@@ -122,9 +124,19 @@ export function clientBookingView(booking: AccessedBooking, now: Date): ClientBo
   };
 }
 
-/** Any time before the shoot, and only while the booking stands (spec §6.10). */
-export function canCancel(booking: { status: string; startsAt: Date }, now: Date): boolean {
-  return booking.status === 'confirmed' && booking.startsAt > now;
+/**
+ * Only while the booking stands, and until the photographer's cut-off: up to
+ * `clientCancelCutoffHours` before the shoot (marketplace-spec.md R1.8). A
+ * cut-off of 0 is any time before the shoot, the single-photographer rule
+ * (spec §6.10). The cut-off instant itself is already too late, as the start
+ * itself is with no cut-off.
+ */
+export function canCancel(
+  booking: { status: string; startsAt: Date; cancellationPolicy: Pick<CancellationPolicy, 'clientCancelCutoffHours'> },
+  now: Date,
+): boolean {
+  const deadline = booking.startsAt.getTime() - booking.cancellationPolicy.clientCancelCutoffHours * MS_PER_HOUR;
+  return booking.status === 'confirmed' && now.getTime() < deadline;
 }
 
 /**

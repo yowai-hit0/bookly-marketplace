@@ -11,17 +11,24 @@ import { canCancel } from './client-view.js';
  * exclusion constraint's predicate -- that, and nothing else, is what returns
  * the slot and its buffer to the public calendar (data-model_v2.md §9.1).
  *
- * **The booking fee is not refunded.** It stays `succeeded`, forfeited, as the
- * summary said before payment and the cancellation email says again. A session
- * fee already paid is different money: it is marked `refund_due` and the
- * photographer is alerted, because the system never moves money itself
+ * The photographer's cancellation policy decides the rest (marketplace-spec.md
+ * R1.8, brief decision 5): the client may cancel until `clientCancelCutoffHours`
+ * before the shoot (`canCancel`), and the booking fee is refunded only when
+ * `bookingFeeRefundableOnClientCancel` says so. By default it is not: it stays
+ * `succeeded`, forfeited, as the summary said before payment and the
+ * cancellation email says again. A session fee already paid is different money:
+ * it is always marked `refund_due`. Money owed back is flagged and the
+ * photographer alerted, because the system never moves money itself
  * (spec §6.16). Everything -- status, refunds, both emails -- commits together
  * or not at all.
+ *
+ * A photographer cancelling is not this path (`admin-actions.ts`): that always
+ * refunds everything, whatever their policy for clients says.
  */
 
 export type CancelResult =
   | { status: 'cancelled'; booking: AccessedBooking }
-  /** Already cancelled, past its shoot, or never confirmed: nothing was changed. */
+  /** Already cancelled, past its photographer's cut-off, or never confirmed: nothing was changed. */
   | { status: 'not_cancellable' };
 
 export type CancelDeps = { prisma: PrismaClient; now: () => Date };
@@ -47,7 +54,8 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
     });
     if (count === 0) return null;
 
-    const refunded = await refundPaidSessionFees(tx, booking);
+    const refunded = await flagRefunds(tx, booking);
+    const bookingFeeRefunded = refunded.some((payment) => payment.kind === 'booking_fee');
 
     await enqueue(tx, {
       kind: 'email',
@@ -66,9 +74,10 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
         cancelledBy: 'client',
         reason: null,
         bookingFeeRwf: booking.bookingFeeRwf,
-        // What the client is owed back: never the booking fee, only a session
-        // fee they had already paid.
+        // What the client is owed back: a session fee they had already paid,
+        // and the booking fee only where the photographer's policy refunds it.
         refundRwf: refunded.reduce((total, payment) => total + payment.amountRwf, 0),
+        bookingFeeRefunded,
       },
     });
 
@@ -87,6 +96,7 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
         startsAt: booking.startsAt.toISOString(),
         endsAt: booking.endsAt.toISOString(),
         bookingFeeRwf: booking.bookingFeeRwf,
+        bookingFeeRefunded,
       },
     });
     for (const payment of refunded) {
@@ -100,7 +110,7 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
           reference: booking.reference,
           clientName: booking.contactName,
           amountRwf: payment.amountRwf,
-          reason: 'session_fee_after_client_cancel',
+          reason: payment.kind === 'booking_fee' ? 'booking_fee_after_client_cancel' : 'session_fee_after_client_cancel',
           paymentReference: payment.providerRef ?? payment.ourRef,
           provider: payment.provider,
           startsAt: booking.startsAt.toISOString(),
@@ -120,12 +130,15 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
   return { status: 'cancelled', booking: after };
 }
 
-/** Session fees already collected are owed back; the booking fee is not (spec §6.10). */
-async function refundPaidSessionFees(
-  tx: Prisma.TransactionClient,
-  booking: AccessedBooking,
-): Promise<AccessedBooking['payments']> {
-  const paid = booking.payments.filter((payment) => payment.kind === 'session_fee' && payment.status === 'succeeded');
+/**
+ * Session fees already collected are owed back; the booking fee only when the
+ * photographer's policy refunds it on a client's cancellation (spec §6.10, R1.8).
+ */
+async function flagRefunds(tx: Prisma.TransactionClient, booking: AccessedBooking): Promise<AccessedBooking['payments']> {
+  const refundsBookingFee = booking.cancellationPolicy.bookingFeeRefundableOnClientCancel;
+  const paid = booking.payments.filter(
+    (payment) => payment.status === 'succeeded' && (payment.kind === 'session_fee' || (refundsBookingFee && payment.kind === 'booking_fee')),
+  );
   const refunded: AccessedBooking['payments'] = [];
   for (const payment of paid) {
     const { count } = await tx.payment.updateMany({

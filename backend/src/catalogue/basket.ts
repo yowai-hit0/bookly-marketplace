@@ -1,5 +1,5 @@
 import type { Addon, Package, PrismaClient, Service } from '@prisma/client';
-import { type Settings, getSettings } from '../settings/index.js';
+import { type PhotographerSettings, getPhotographerSettings } from '../settings/index.js';
 import { BOOKABLE_PACKAGE, CATALOGUE_ORDER, type PublicAddon, effectiveBookingFeeRate, toPublicAddon } from './public.js';
 import { type Quote, quoteBasket } from './quote.js';
 
@@ -10,8 +10,11 @@ import { type Quote, quoteBasket } from './quote.js';
  * the client sent alongside.
  *
  * Only what the public can see can be priced: an active package on an active
- * service, and active add-ons that service offers (its own, or those offered on
- * every service). Anything else is refused by field, not priced.
+ * service of a bookable photographer, and active add-ons that service offers --
+ * its own, or those its photographer offers on every service. Anything else is
+ * refused by field, not priced. The photographer is the package's: nothing in a
+ * basket names one, so nothing a visitor sends can choose whose settings or
+ * whose add-ons apply (marketplace-spec.md R1.5).
  */
 
 export type BasketSelection = {
@@ -34,7 +37,8 @@ export type BasketResult =
   | { ok: false; fields: ('packageId' | 'addonIds')[] };
 
 /**
- * The rows a basket was priced from, with the settings read alongside them.
+ * The rows a basket was priced from, with the package's photographer's settings
+ * read alongside them.
  * Booking creation snapshots exactly these (plan.md Task 13), so what a booking
  * records is what its quote was computed from -- one read, not two that a
  * price edit could fall between.
@@ -44,7 +48,7 @@ export type ResolvedBasket = {
   package: Package & { service: Service };
   /** In the order `PricedBasket.addons` documents. */
   addons: Addon[];
-  settings: Settings;
+  settings: PhotographerSettings;
   bookingFeeRate: number;
   quote: Quote;
 };
@@ -53,28 +57,31 @@ export async function resolveBasket(
   prisma: PrismaClient,
   selection: BasketSelection,
 ): Promise<ResolvedBasket | { ok: false; fields: ('packageId' | 'addonIds')[] }> {
-  const [pkg, settings] = await Promise.all([
-    prisma.package.findFirst({
-      where: { id: selection.packageId, ...BOOKABLE_PACKAGE },
-      include: { service: true },
-    }),
-    getSettings(prisma),
-  ]);
+  const pkg = await prisma.package.findFirst({
+    where: { id: selection.packageId, ...BOOKABLE_PACKAGE },
+    include: { service: true },
+  });
   if (pkg === null) return { ok: false, fields: ['packageId'] };
 
-  const addons =
+  const [settings, addons] = await Promise.all([
+    getPhotographerSettings(pkg.photographerId, prisma),
     selection.addonIds.length === 0
-      ? []
-      : await prisma.addon.findMany({
+      ? Promise.resolve<Addon[]>([])
+      : prisma.addon.findMany({
           where: {
             id: { in: [...selection.addonIds] },
+            // The package's photographer's add-ons and nobody else's: a shared
+            // add-on (`service_id` null) is shared across one photographer's
+            // services, not across the marketplace (R1.5).
+            photographerId: pkg.photographerId,
             isActive: true,
             OR: [{ serviceId: null }, { serviceId: pkg.serviceId }],
           },
           orderBy: [...CATALOGUE_ORDER],
-        });
-  // Ids are distinct, so a shortfall is an add-on that is unknown, inactive or
-  // offered on another service only.
+        }),
+  ]);
+  // Ids are distinct, so a shortfall is an add-on that is unknown, inactive,
+  // offered on another service only, or another photographer's.
   if (addons.length !== selection.addonIds.length) return { ok: false, fields: ['addonIds'] };
   // The order the service page lists them in: the service's own add-ons, then
   // those offered on every service. The sort is stable, so each group keeps

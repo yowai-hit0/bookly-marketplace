@@ -4,9 +4,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { BOOKING_STATUSES } from '../db/statuses.js';
 import { createPrismaClient } from '../db/client.js';
 import { renderEmail } from '../email/render.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, firstRow, sqlstateOf, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { CLIENT, type PaymentWorld, insertBooking, insertPayment, seedWorld } from '../test/payment-fixtures.js';
-import { FULL_BOOKING } from './access.js';
+import { FULL_BOOKING, cancellationPolicyOf } from './access.js';
 import { adminBookingView, findAdminBooking } from './admin-view.js';
 import { clientBookingView } from './client-view.js';
 import { saveDelivery, sendDelivery } from './delivery.js';
@@ -198,7 +199,7 @@ describe('saving the link (spec §3.5 step 5)', () => {
   });
 
   it('reads the lifetime from the setting rather than hard-coding ninety', async () => {
-    await prisma.setting.update({ where: { id: 1 }, data: { deliveryExpiryDays: 30 } });
+    await updatePhotographerSettings(world.photographerId, { deliveryExpiryDays: 30 }, prisma);
     const booking = await completedBooking();
 
     await saveDelivery(deps(), booking.id, { url: LINK });
@@ -751,7 +752,7 @@ describe('nothing counts downloads', () => {
     await sendDelivery(deps(), booking.id);
     const accessed = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id }, include: FULL_BOOKING });
 
-    const view = clientBookingView(accessed, NOW);
+    const view = clientBookingView({ ...accessed, cancellationPolicy: await cancellationPolicyOf(prisma, accessed.photographerId) }, NOW);
 
     expect(Object.keys(view.delivery ?? {}).sort()).toEqual(['expired', 'expiresOn', 'note', 'url']);
     expect(JSON.stringify(view)).not.toMatch(/download/i);

@@ -2,6 +2,33 @@
 # admin edits (`routes/admin-catalogue.ts`).
 
 schemas:
+  PublicPhotographerSummary:
+    type: object
+    description: One photographer who can be booked, as the photographers list shows them.
+    required: [handle, displayName, coverImageUrl]
+    additionalProperties: false
+    properties:
+      handle: { type: string, examples: [kigali-lens] }
+      displayName: { type: string }
+      coverImageUrl: { type: [string, 'null'], format: uri }
+
+  PublicPhotographerProfile:
+    type: object
+    description: |
+      A photographer's public profile. An allowlist: no status, no login email,
+      no operating settings. `email` is the contact address the photographer
+      chose to publish, or null -- never their login.
+    required: [handle, displayName, bio, contactPhone, whatsappPhone, email, coverImageUrl]
+    additionalProperties: false
+    properties:
+      handle: { type: string, examples: [kigali-lens] }
+      displayName: { type: string }
+      bio: { type: [string, 'null'] }
+      contactPhone: { type: [string, 'null'] }
+      whatsappPhone: { type: [string, 'null'] }
+      email: { type: [string, 'null'], format: email }
+      coverImageUrl: { type: [string, 'null'], format: uri }
+
   PublicPackage:
     type: object
     required: [id, nameEn, descriptionEn, priceRwf, photoCount, durationMinutes]
@@ -27,8 +54,8 @@ schemas:
     type: object
     description: |
       An active service with its active packages, and the active add-ons it
-      offers: its own first, then those offered on every service, each in
-      display order.
+      offers: its own first, then those its photographer offers on every
+      service, each in display order.
     required: [id, slug, nameEn, descriptionEn, coverImageUrl, packages, addons]
     additionalProperties: false
     properties:
@@ -56,7 +83,7 @@ schemas:
         type: number
         minimum: 0
         maximum: 1
-        description: The service's own override if set, else the global rate.
+        description: The service's own override if set, else its photographer's rate.
 
   # PublicService without `additionalProperties: false`, so the detail can extend it.
   PublicServiceFields:
@@ -101,7 +128,9 @@ schemas:
       totalRwf: { $ref: 'common.yaml#/schemas/Rwf' }
       bookingFeeRwf:
         $ref: 'common.yaml#/schemas/Rwf'
-        description: Paid now to hold the slot. Not refundable if the client cancels.
+        description: |
+          Paid now to hold the slot. Whether a client's own cancellation refunds
+          it is the photographer's cancellation policy; by default it does not.
       sessionFeeRwf:
         $ref: 'common.yaml#/schemas/Rwf'
         description: Due after the shoot.

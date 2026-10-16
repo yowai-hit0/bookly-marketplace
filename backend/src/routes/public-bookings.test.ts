@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * `POST /api/bookings` over HTTP, against real PostgreSQL (plan.md Task 13;
@@ -22,6 +23,11 @@ import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/databas
  * stored; a race lost inside the claim is a 409 that leaves nothing behind; and
  * the route is anonymous, and absent unless the public API is mounted.
  *
+ * The booking is the package's photographer's (brief decision 4): another
+ * photographer's add-on is a 422 on `addonIds`, a pending or suspended
+ * photographer's package a 422 on `packageId` -- before the claim or inside it
+ * -- and another photographer's booking at the same hour takes nothing.
+ *
  * Kigali is UTC+2 with no DST. The clock is Thursday 1 October 2026, 08:00
  * Kigali, so today's earliest bookable start is 10:00.
  */
@@ -30,6 +36,8 @@ let prisma: PrismaClient;
 let raw: pg.Client;
 let app: Express;
 let catalogue: Catalogue;
+/** The approved photographer who owns `catalogue`. */
+let photographerId: string;
 
 const NOW = new Date('2026-10-01T06:00:00Z');
 const MINUTE_MS = 60_000;
@@ -52,12 +60,11 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
-  // Defaults 0.400 / 120 / 30 / 30 / 90.
-  await prisma.setting.create({ data: { id: 1 } });
-  await prisma.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })),
-  });
-  catalogue = await seedCatalogue();
+  // The platform's 30-minute hold, and a photographer at the defaults: 0.400 / 120 / 30 / 90.
+  await prisma.platformSetting.create({ data: { id: 1 } });
+  ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
+  await weekdayHours(photographerId);
+  catalogue = await seedCatalogue(photographerId);
   app = createApp({ publicApi: { prisma, now: () => NOW } });
 });
 
@@ -78,23 +85,31 @@ type Catalogue = {
   rushEdit: Addon;
 };
 
-async function seedCatalogue(): Promise<Catalogue> {
-  const portraits = await prisma.service.create({ data: { slug: 'portraits', nameEn: 'Portraits' } });
+/** The weekly rule sign-up gives a photographer: Mon–Fri 09:00–17:00. */
+async function weekdayHours(owner: string): Promise<void> {
+  await prisma.workingHours.createMany({
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: owner, weekday, opensMinute: 540, closesMinute: 1020 })),
+  });
+}
+
+async function seedCatalogue(owner: string): Promise<Catalogue> {
+  const photographerId = owner;
+  const portraits = await prisma.service.create({ data: { photographerId, slug: 'portraits', nameEn: 'Portraits' } });
   const weddings = await prisma.service.create({
-    data: { slug: 'weddings', nameEn: 'Weddings', bookingFeeRateOverride: '0.300', sortOrder: 1 },
+    data: { photographerId, slug: 'weddings', nameEn: 'Weddings', bookingFeeRateOverride: '0.300', sortOrder: 1 },
   });
   return {
     portraits,
     weddings,
     standard: await prisma.package.create({
-      data: { serviceId: portraits.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 25, durationMinutes: 90 },
+      data: { photographerId, serviceId: portraits.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 25, durationMinutes: 90 },
     }),
     fullDay: await prisma.package.create({
-      data: { serviceId: weddings.id, nameEn: 'Full day', priceRwf: 40_000, photoCount: 150, durationMinutes: 60 },
+      data: { photographerId, serviceId: weddings.id, nameEn: 'Full day', priceRwf: 40_000, photoCount: 150, durationMinutes: 60 },
     }),
-    extraHour: await prisma.addon.create({ data: { serviceId: portraits.id, nameEn: 'Extra hour', priceRwf: 10_000 } }),
-    secondShooter: await prisma.addon.create({ data: { serviceId: weddings.id, nameEn: 'Second shooter', priceRwf: 10_000 } }),
-    rushEdit: await prisma.addon.create({ data: { serviceId: null, nameEn: 'Rush edit', priceRwf: 5_000, sortOrder: 3 } }),
+    extraHour: await prisma.addon.create({ data: { photographerId, serviceId: portraits.id, nameEn: 'Extra hour', priceRwf: 10_000 } }),
+    secondShooter: await prisma.addon.create({ data: { photographerId, serviceId: weddings.id, nameEn: 'Second shooter', priceRwf: 10_000 } }),
+    rushEdit: await prisma.addon.create({ data: { photographerId, serviceId: null, nameEn: 'Rush edit', priceRwf: 5_000, sortOrder: 3 } }),
   };
 }
 
@@ -202,7 +217,10 @@ async function insertExistingBooking(options: {
   startsAt: string;
   status?: string;
   holdExpiresAt?: Date | null;
+  /** Another photographer's booking, in their catalogue. Default: the world photographer's. */
+  owner?: { photographerId: string; catalogue: Catalogue };
 }) {
+  const owner = options.owner ?? { photographerId, catalogue };
   const startsAt = new Date(options.startsAt);
   const endsAt = new Date(startsAt.getTime() + 90 * MINUTE_MS);
   const email = `rival-${options.reference.toLowerCase()}@example.com`;
@@ -210,12 +228,13 @@ async function insertExistingBooking(options: {
   return prisma.booking.create({
     data: {
       reference: options.reference,
+      photographerId: owner.photographerId,
       clientId: client.id,
       contactName: 'Rival Visitor',
       contactEmail: email,
       contactPhone: '+250788999999',
-      serviceId: catalogue.portraits.id,
-      packageId: catalogue.standard.id,
+      serviceId: owner.catalogue.portraits.id,
+      packageId: owner.catalogue.standard.id,
       serviceNameSnapshot: 'Portraits',
       packageNameSnapshot: 'Standard',
       packagePriceRwf: 40_000,
@@ -473,7 +492,7 @@ describe('POST /api/bookings with a start the calendar does not offer', () => {
       'inside a block',
       async () => {
         await prisma.availabilityBlock.create({
-          data: { startsAt: new Date(kigali(WEDNESDAY, '09:00')), endsAt: new Date(kigali(WEDNESDAY, '12:00')), reason: 'Dentist' },
+          data: { photographerId, startsAt: new Date(kigali(WEDNESDAY, '09:00')), endsAt: new Date(kigali(WEDNESDAY, '12:00')), reason: 'Dentist' },
         });
         return kigali(WEDNESDAY, '10:00');
       },
@@ -504,7 +523,7 @@ describe('POST /api/bookings with a start the calendar does not offer', () => {
 
   it('never echoes a block’s private reason', async () => {
     await prisma.availabilityBlock.create({
-      data: { startsAt: new Date(kigali(WEDNESDAY, '09:00')), endsAt: new Date(kigali(WEDNESDAY, '12:00')), reason: 'Dentist' },
+      data: { photographerId, startsAt: new Date(kigali(WEDNESDAY, '09:00')), endsAt: new Date(kigali(WEDNESDAY, '12:00')), reason: 'Dentist' },
     });
 
     const res = await post(validBody({ startsAt: kigali(WEDNESDAY, '10:00') }));
@@ -924,5 +943,61 @@ describe('request limits', () => {
     expect((await request(limited).post(BOOKINGS).send(validBody())).status).toBe(201);
     expect((await request(limited).post(BOOKINGS).send(validBody({ startsAt: kigali(WEDNESDAY, '11:00'), email: 'ALINE@example.com' }))).status).toBe(429);
     expect((await request(limited).post(BOOKINGS).send(validBody({ startsAt: kigali(WEDNESDAY, '11:00'), email: 'other@example.com' }))).status).toBe(201);
+  });
+});
+
+// --- Per photographer (brief decisions 2 and 4; marketplace-spec.md R1.3, R1.5) ------------------
+
+describe('POST /api/bookings with two photographers', () => {
+  let other: { photographerId: string; catalogue: Catalogue };
+
+  beforeEach(async () => {
+    const created = await createPhotographer(prisma, { email: 'other@bookly.example', handle: 'hills-and-light', displayName: 'Hills & Light' });
+    await weekdayHours(created.photographerId);
+    other = { photographerId: created.photographerId, catalogue: await seedCatalogue(created.photographerId) };
+  });
+
+  it('books a time another photographer has booked, for the package’s photographer, and never says whose', async () => {
+    await insertExistingBooking({ reference: 'BKY-2610-OTHER', startsAt: kigali(WEDNESDAY, '09:00'), owner: other });
+
+    const res = await post(validBody());
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const stored = await prisma.booking.findFirstOrThrow({ where: { reference: (res.body as { booking: { reference: string } }).booking.reference } });
+    expect(stored.photographerId).toBe(photographerId);
+    expect(res.text).not.toContain(photographerId);
+    expect(res.text).not.toContain('photographer');
+  });
+
+  it.each<[string, () => string[]]>([
+    ['their add-on for that service', () => [other.catalogue.extraHour.id]],
+    ['their add-on offered on all their services (service_id null)', () => [other.catalogue.rushEdit.id]],
+    ['a good add-on alongside theirs', () => [catalogue.extraHour.id, other.catalogue.rushEdit.id]],
+  ])('answers 422 on addonIds for another photographer’s add-on -- %s -- and writes nothing', async (_label, addonIds) => {
+    expectRefused(await post(validBody({ addonIds: addonIds() })), ['addonIds']);
+    await expect(counts()).resolves.toEqual(NOTHING);
+  });
+
+  it.each(['pending', 'suspended'] as const)('answers 422 on packageId for a %s photographer’s package, as for an unknown one', async (status) => {
+    await prisma.photographer.update({
+      where: { id: other.photographerId },
+      data: { status, approvedAt: null, suspendedAt: status === 'suspended' ? NOW : null },
+    });
+
+    const res = await post(validBody({ packageId: other.catalogue.standard.id, addonIds: [other.catalogue.rushEdit.id] }));
+
+    expectRefused(res, ['packageId']);
+    expect(res.text).not.toContain(status);
+    await expect(counts()).resolves.toEqual(NOTHING);
+  });
+
+  it('answers 422 on packageId when the photographer is suspended between the check and the claim', async () => {
+    const racing = withRivalBeforeClaim(() =>
+      prisma.photographer.update({ where: { id: photographerId }, data: { status: 'suspended', suspendedAt: NOW } }),
+    );
+    const racingApp = createApp({ publicApi: { prisma: racing, now: () => NOW } });
+
+    expectRefused(await post(validBody({ email: 'brand-new@example.com' }), racingApp), ['packageId']);
+    await expect(counts()).resolves.toEqual(NOTHING);
   });
 });

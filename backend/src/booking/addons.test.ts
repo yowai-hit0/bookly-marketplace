@@ -3,7 +3,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { type PaymentWorld, insertBooking, insertPayment, seedWorld } from '../test/payment-fixtures.js';
+import { type PaymentWorld, insertBooking, insertPayment, seedSecondPhotographer, seedWorld } from '../test/payment-fixtures.js';
 import { ADDON_MAX_QUANTITY, addPostShootAddon, removePostShootAddon } from './addons.js';
 import { adminBookingView, findAdminBooking } from './admin-view.js';
 
@@ -20,7 +20,9 @@ import { adminBookingView, findAdminBooking } from './admin-view.js';
  * every service -- and, since 2026-09-27, only while the booking is
  * `confirmed` and its shoot has begun: add-ons come before completion, which
  * needs everything paid, so they are locked once the booking is `completed`
- * and refused before the shoot. `canEditAddons` says the same.
+ * and refused before the shoot. `canEditAddons` says the same. Never another
+ * photographer's add-on, even one they offer on every service of theirs
+ * (marketplace-spec.md R1.5): that is `not_found`, as an id naming nothing is.
  *
  * The money is the point: a 15,000 add-on raises `grandTotalRwf` and
  * `outstandingRwf` by exactly 15,000 and leaves `quotedTotalRwf` alone (the v1
@@ -108,9 +110,13 @@ async function startedBooking(seed: Parameters<typeof insertBooking>[2] = {}): P
 }
 
 /** A catalogue add-on of this service, at whatever price the test needs. */
-async function catalogueAddon(priceRwf: number, options: { name?: string; serviceId?: string | null; isActive?: boolean } = {}) {
+async function catalogueAddon(
+  priceRwf: number,
+  options: { name?: string; serviceId?: string | null; isActive?: boolean; photographerId?: string } = {},
+) {
   return prisma.addon.create({
     data: {
+      photographerId: options.photographerId ?? world.photographerId,
       serviceId: options.serviceId === undefined ? world.serviceId : options.serviceId,
       nameEn: options.name ?? 'Extra prints',
       priceRwf,
@@ -221,7 +227,7 @@ describe('which catalogue add-on may be added', () => {
 
   it('refuses an add-on that belongs to a different service', async () => {
     const booking = await startedBooking();
-    const other = await prisma.service.create({ data: { slug: 'weddings', nameEn: 'Weddings' } });
+    const other = await prisma.service.create({ data: { photographerId: world.photographerId, slug: 'weddings', nameEn: 'Weddings' } });
     const theirs = await catalogueAddon(20_000, { name: 'Second shooter', serviceId: other.id });
 
     const result = await add(booking.id, theirs.id);
@@ -237,6 +243,20 @@ describe('which catalogue add-on may be added', () => {
     const result = await add(booking.id, retired.id);
 
     expect(result).toStrictEqual({ status: 'not_allowed' });
+    expect(await totalsOf(booking.id)).toMatchObject({ grandTotalRwf: 50_000 });
+  });
+
+  it.each<[string, (other: PaymentWorld) => string]>([
+    ['one for their own service', (other) => other.ownAddonId],
+    ['one they offer on every service (service_id null)', (other) => other.sharedAddonId],
+  ])('answers not_found for another photographer’s add-on -- %s -- and adds nothing', async (_label, addonOf) => {
+    const booking = await startedBooking();
+    const other = await seedSecondPhotographer(prisma, world);
+
+    const result = await add(booking.id, addonOf(other));
+
+    expect(result).toStrictEqual({ status: 'not_found' });
+    expect((await addonRows(booking.id)).filter((row) => row.stage === 'post_shoot')).toEqual([]);
     expect(await totalsOf(booking.id)).toMatchObject({ grandTotalRwf: 50_000 });
   });
 

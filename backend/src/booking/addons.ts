@@ -52,7 +52,7 @@ export type AddonEditResult =
 
 type Outcome = Exclude<AddonEditResult, { status: 'ok' }>['status'] | 'ok';
 
-type LockedBooking = { id: string; status: string; serviceId: string; packagePriceRwf: number; startsAt: Date };
+type LockedBooking = { id: string; photographerId: string; status: string; serviceId: string; packagePriceRwf: number; startsAt: Date };
 
 /**
  * Adds one catalogue add-on to a booking whose shoot has begun, at the price
@@ -70,7 +70,11 @@ export async function addPostShootAddon(
     if (booking === null) return 'not_found';
     if (!editable(booking, deps.now())) return 'not_allowed';
 
-    const addon = await tx.addon.findUnique({ where: { id: request.addonId } });
+    // Only the booking's own photographer's add-ons (marketplace-spec.md R1.5).
+    // Another photographer's -- one offered on all their services included -- is
+    // answered exactly like an id that names nothing, so the answer does not
+    // confirm that someone else sells it.
+    const addon = await tx.addon.findFirst({ where: { id: request.addonId, photographerId: booking.photographerId } });
     if (addon === null) return 'not_found';
     // Only something he sells today, and only where this service can sell it.
     if (!addon.isActive) return 'not_allowed';
@@ -137,14 +141,23 @@ function editable(booking: LockedBooking, now: Date): boolean {
 
 /** The booking row, held for the length of the edit so its totals cannot move. */
 async function lockBooking(tx: Prisma.TransactionClient, bookingId: string): Promise<LockedBooking | null> {
-  const rows = await tx.$queryRaw<{ id: string; status: string; service_id: string; package_price_rwf: number; starts_at: Date }[]>`
-    SELECT id::text AS id, status, service_id::text AS service_id, package_price_rwf, starts_at
+  const rows = await tx.$queryRaw<
+    { id: string; photographer_id: string; status: string; service_id: string; package_price_rwf: number; starts_at: Date }[]
+  >`
+    SELECT id::text AS id, photographer_id::text AS photographer_id, status, service_id::text AS service_id, package_price_rwf, starts_at
       FROM booking
      WHERE id = ${bookingId}::uuid
        FOR UPDATE`;
   const row = rows[0];
   if (row === undefined) return null;
-  return { id: row.id, status: row.status, serviceId: row.service_id, packagePriceRwf: row.package_price_rwf, startsAt: row.starts_at };
+  return {
+    id: row.id,
+    photographerId: row.photographer_id,
+    status: row.status,
+    serviceId: row.service_id,
+    packagePriceRwf: row.package_price_rwf,
+    startsAt: row.starts_at,
+  };
 }
 
 /** Every edit answers with the booking as it now stands, refusals included. */

@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { kigaliDateOf } from '../availability/engine.js';
 import { enqueue } from '../outbox/enqueue.js';
-import { getSettings } from '../settings/index.js';
+import { getPhotographerSettings } from '../settings/index.js';
 import { type AdminBooking, findAdminBooking } from './admin-view.js';
 
 /**
@@ -61,7 +61,7 @@ export async function saveDelivery(deps: DeliveryDeps, bookingId: string, edit: 
   const url = new URL(edit.url).toString();
   if (!url.startsWith('https://')) return { status: 'not_allowed' };
 
-  const expiresOn = edit.expiresOn ?? (await defaultExpiry(deps));
+  const expiresOn = edit.expiresOn ?? (await defaultExpiry(deps, booking.photographerId));
   // Guarded on the status read above: a booking cancelled in the meantime keeps
   // no delivery it could no longer honour.
   const { count } = await deps.prisma.booking.updateMany({
@@ -94,7 +94,7 @@ export async function sendDelivery(
   if (booking.deliveryUrl === null) return { status: 'no_link' };
 
   const sentAt = deps.now();
-  const expiresOn = booking.deliveryExpiresOn ?? new Date(`${await defaultExpiry(deps)}T00:00:00.000Z`);
+  const expiresOn = booking.deliveryExpiresOn ?? new Date(`${await defaultExpiry(deps, booking.photographerId)}T00:00:00.000Z`);
 
   const stamped = await deps.prisma.$transaction(async (tx) => {
     const { count } = await tx.booking.updateMany({
@@ -133,9 +133,9 @@ export async function sendDelivery(
   return reload(deps, booking.id);
 }
 
-/** Today plus the configured lifetime, in Kigali (spec A-8: 90 days). */
-async function defaultExpiry(deps: DeliveryDeps): Promise<string> {
-  const { deliveryExpiryDays } = await getSettings(deps.prisma);
+/** Today plus the booking's photographer's configured lifetime, in Kigali (spec A-8: 90 days by default). */
+async function defaultExpiry(deps: DeliveryDeps, photographerId: string): Promise<string> {
+  const { deliveryExpiryDays } = await getPhotographerSettings(photographerId, deps.prisma);
   const today = kigaliDateOf(deps.now());
   return kigaliDateOf(new Date(Date.parse(`${today}T00:00:00.000Z`) + deliveryExpiryDays * MS_PER_DAY));
 }

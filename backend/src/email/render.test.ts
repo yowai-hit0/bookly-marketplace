@@ -732,6 +732,7 @@ describe('content rules', () => {
     ['late_payment_slot_taken', 'booked by someone else'],
     ['duplicate_payment', 'The client paid the booking fee twice. The booking stands on the first payment; this one is owed back.'],
     ['session_fee_after_client_cancel', 'cancelled after paying the session fee'],
+    ['booking_fee_after_client_cancel', 'your cancellation policy refunds the booking fee'],
   ])('refund_due explains the reason %s in words (plan.md Tasks 17, 19)', (reason, words) => {
     const email = renderWith('photographer_alert refund_due', { reason });
 

@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
   CLIENT,
@@ -9,9 +10,10 @@ import {
   insertBooking,
   insertBookingWithToken,
   insertPayment,
+  seedSecondPhotographer,
   seedWorld,
 } from '../test/payment-fixtures.js';
-import { type AccessedBooking, FULL_BOOKING } from './access.js';
+import { type AccessedBooking, FULL_BOOKING, cancellationPolicyOf } from './access.js';
 import { canCancel, clientBookingView } from './client-view.js';
 import { saveDelivery, sendDelivery } from './delivery.js';
 
@@ -28,7 +30,8 @@ import { saveDelivery, sendDelivery } from './delivery.js';
  * have been sent, and its link dies at the end of its last day in Kigali, read
  * from the injected clock. The payment list is money that moved -- succeeded,
  * owed back, refunded -- and never an abandoned attempt. `canCancel` is true
- * only for a confirmed booking whose shoot is still ahead. And the serialised
+ * only for a confirmed booking before its photographer's cut-off -- the shoot
+ * itself with a cut-off of 0 (marketplace-spec.md R1.8). And the serialised
  * view carries no token, no booking id, no client id and no email address.
  */
 
@@ -58,9 +61,15 @@ beforeEach(async () => {
 
 // --- Helpers ----------------------------------------------------------------------------
 
-/** The booking as `findBookingByToken` hands it over, with its own include. */
+/** The booking as `findBookingByToken` hands it over, with its own include and its photographer's policy. */
 async function accessed(bookingId: string): Promise<AccessedBooking> {
-  return prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: FULL_BOOKING });
+  const booking = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: FULL_BOOKING });
+  return { ...booking, cancellationPolicy: await cancellationPolicyOf(prisma, booking.photographerId) };
+}
+
+/** A booking row as `canCancel` reads it: with its photographer's cut-off. */
+function withCutoff<T extends object>(booking: T, clientCancelCutoffHours = 0): T & { cancellationPolicy: { clientCancelCutoffHours: number } } {
+  return { ...booking, cancellationPolicy: { clientCancelCutoffHours } };
 }
 
 async function viewOf(bookingId: string, now: Date = NOW) {
@@ -331,7 +340,7 @@ describe('canCancel', () => {
   it('is true for a confirmed booking whose shoot is still ahead', async () => {
     const booking = await insertBooking(prisma, world, { status: 'confirmed' });
 
-    expect(canCancel(booking, NOW)).toBe(true);
+    expect(canCancel(withCutoff(booking), NOW)).toBe(true);
     expect((await viewOf(booking.id)).canCancel).toBe(true);
   });
 
@@ -339,9 +348,9 @@ describe('canCancel', () => {
     const startsAt = new Date('2027-03-01T07:00:00Z');
     const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt });
 
-    expect(canCancel(booking, new Date(startsAt.getTime() - 1))).toBe(true);
-    expect(canCancel(booking, startsAt)).toBe(false);
-    expect(canCancel(booking, new Date(startsAt.getTime() + 1))).toBe(false);
+    expect(canCancel(withCutoff(booking), new Date(startsAt.getTime() - 1))).toBe(true);
+    expect(canCancel(withCutoff(booking), startsAt)).toBe(false);
+    expect(canCancel(withCutoff(booking), new Date(startsAt.getTime() + 1))).toBe(false);
     expect((await viewOf(booking.id, new Date(startsAt.getTime() + 1))).canCancel).toBe(false);
   });
 
@@ -350,10 +359,34 @@ describe('canCancel', () => {
     async (status) => {
       const booking = await insertBooking(prisma, world, { status });
 
-      expect(canCancel(booking, NOW)).toBe(false);
+      expect(canCancel(withCutoff(booking), NOW)).toBe(false);
       expect((await viewOf(booking.id)).canCancel).toBe(false);
     },
   );
+
+  it('closes at the photographer’s cut-off: a millisecond before is open, the cut-off itself is not (R1.8)', async () => {
+    const startsAt = new Date('2027-03-01T07:00:00Z');
+    const cutoff = new Date(startsAt.getTime() - 24 * 3_600_000);
+    const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt });
+
+    expect(canCancel(withCutoff(booking, 24), new Date(cutoff.getTime() - 1))).toBe(true);
+    expect(canCancel(withCutoff(booking, 24), cutoff)).toBe(false);
+    expect(canCancel(withCutoff(booking, 24), new Date(startsAt.getTime() - 1))).toBe(false);
+
+    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 24 }, prisma);
+    expect((await viewOf(booking.id, new Date(cutoff.getTime() - 1))).canCancel).toBe(true);
+    expect((await viewOf(booking.id, cutoff)).canCancel).toBe(false);
+  });
+
+  it('reads the cut-off of the booking’s own photographer, never another’s', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    await updatePhotographerSettings(second.photographerId, { clientCancelCutoffHours: 8760 }, prisma);
+    const mine = await insertBooking(prisma, world, { status: 'confirmed' });
+    const theirs = await insertBooking(prisma, second, { status: 'confirmed' });
+
+    expect((await viewOf(mine.id)).canCancel).toBe(true);
+    expect((await viewOf(theirs.id)).canCancel).toBe(false);
+  });
 });
 
 // --- Delivery ------------------------------------------------------------------------------

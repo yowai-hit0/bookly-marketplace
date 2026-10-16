@@ -6,8 +6,11 @@ import { amountRwf, bookingBasics, dateOf, defineTemplate, money, text, tr } fro
  * photographer (§6.11).
  *
  * A client's own cancellation repeats that the booking fee is non-refundable,
- * as the spec requires. `refundRwf` is what is owed back: a paid session fee
- * after a client cancellation, everything after the photographer's. The email
+ * as the spec requires -- unless the photographer's cancellation policy refunds
+ * it (marketplace-spec.md R1.8), when `bookingFeeRefunded` drops that line and
+ * the fee is part of `refundRwf`. `refundRwf` is what is owed back: a paid
+ * session fee (and a refundable booking fee) after a client cancellation,
+ * everything after the photographer's. The email
  * promises contact about it, never a refund already made -- the system does not
  * move money (§6.16).
  */
@@ -19,6 +22,8 @@ export const cancellation = defineTemplate({
     reason: text(1000).nullable().default(null),
     bookingFeeRwf: amountRwf,
     refundRwf: amountRwf,
+    /** The photographer's policy refunds the booking fee on a client's cancellation (R1.8). */
+    bookingFeeRefunded: z.boolean().default(false),
   }),
   compose(p, ctx) {
     const date = dateOf(p.startsAt);
@@ -49,7 +54,7 @@ export const cancellation = defineTemplate({
             },
           ],
         },
-        ...(byClient
+        ...(byClient && !p.bookingFeeRefunded
           ? [{ type: 'note' as const, text: tr(ctx, 'email:cancellation.feeKept', { amount: money(p.bookingFeeRwf) }) }]
           : []),
         ...(p.refundRwf > 0

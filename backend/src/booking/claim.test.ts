@@ -3,6 +3,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { createPhotographer } from '../test/payment-fixtures.js';
 import { type ClaimResult, type ClaimSlotInput, MAX_CLAIM_ATTEMPTS, claimSlot } from './claim.js';
 
 /**
@@ -11,6 +12,11 @@ import { type ClaimResult, type ClaimSlotInput, MAX_CLAIM_ATTEMPTS, claimSlot } 
  * Nothing here is mocked, because nothing here is application logic: the
  * guarantee under test is `booking_no_overlap` plus the in-transaction expiry of
  * stale holds (data-model_v2.md §9.2), and neither exists outside the database.
+ *
+ * Both are per photographer (marketplace-spec.md R1.3, T1.3): two photographers
+ * claiming the same hour both win, one photographer's lapsed hold is never
+ * expired by another's claim, and a photographer who cannot be booked is
+ * refused inside the claim, behind its lock.
  */
 
 let prisma: PrismaClient;
@@ -34,7 +40,7 @@ beforeEach(async () => {
 // --- Fixtures ---------------------------------------------------------------
 
 type Slot = { startsAt: Date; endsAt: Date; bufferEndsAt: Date };
-type Catalogue = { serviceId: string; packageId: string; clientId: string };
+type Catalogue = { photographerId: string; serviceId: string; packageId: string; clientId: string };
 
 function slot(startsAt: string, endsAt: string, bufferEndsAt: string): Slot {
   return {
@@ -57,10 +63,15 @@ const TEN = slot('2026-10-07T08:00:00Z', '2026-10-07T09:00:00Z', '2026-10-07T09:
 /** Nowhere near any of the above. */
 const AFTERNOON = slot('2026-10-07T12:00:00Z', '2026-10-07T13:00:00Z', '2026-10-07T13:30:00Z');
 
-async function insertCatalogue(): Promise<Catalogue> {
-  const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+/** A photographer (approved unless told otherwise) with one service and package, and the shared client. */
+async function insertCatalogue(
+  { handle = 'kigali-lens', status = 'approved' }: { handle?: string; status?: 'pending' | 'approved' | 'suspended' } = {},
+): Promise<Catalogue> {
+  const { photographerId } = await createPhotographer(prisma, { email: `${handle}@bookly.example`, handle, displayName: handle, status });
+  const service = await prisma.service.create({ data: { photographerId, slug: 'portrait', nameEn: 'Portrait' } });
   const pkg = await prisma.package.create({
     data: {
+      photographerId,
       serviceId: service.id,
       nameEn: 'Standard',
       priceRwf: 40_000,
@@ -68,10 +79,11 @@ async function insertCatalogue(): Promise<Catalogue> {
       durationMinutes: 60,
     },
   });
-  const client = await prisma.client.create({
-    data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
-  });
-  return { serviceId: service.id, packageId: pkg.id, clientId: client.id };
+  // One client across photographers: `client` is platform-wide.
+  const client =
+    (await prisma.client.findFirst({ where: { email: 'aline@example.com' } })) ??
+    (await prisma.client.create({ data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' } }));
+  return { photographerId, serviceId: service.id, packageId: pkg.id, clientId: client.id };
 }
 
 /** `reference` is UNIQUE; a repeat raises 23505 and looks nothing like a lost race. */
@@ -111,7 +123,7 @@ async function insertBooking(
   holdExpiresAt: Date | null = null,
 ): Promise<Booking> {
   return prisma.booking.create({
-    data: { ...claimInput(ids, ref, when), status, holdExpiresAt },
+    data: { ...claimInput(ids, ref, when), photographerId: ids.photographerId, status, holdExpiresAt },
   });
 }
 
@@ -196,7 +208,7 @@ describe('claimSlot under concurrency', () => {
 
     const results = await Promise.all(
       Array.from({ length: 20 }, (_unused, i) =>
-        claimSlot(prisma, claimInput(ids, reference(i), NINE), HOLD_MINUTES),
+        claimSlot(prisma, ids.photographerId, claimInput(ids, reference(i), NINE), HOLD_MINUTES),
       ),
     );
 
@@ -214,9 +226,9 @@ describe('claimSlot under concurrency', () => {
 
   it('returns a typed result rather than throwing when it loses the race', async () => {
     const ids = await insertCatalogue();
-    await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
+    await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
 
-    const loser = claimSlot(prisma, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
+    const loser = claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
 
     await expect(loser).resolves.toEqual({ status: 'slot_taken' });
   });
@@ -230,7 +242,7 @@ describe('claimSlot and stale holds', () => {
     const lapsed = new Date(Date.now() - MINUTE_MS);
     await insertBooking(ids, reference(1), NINE, 'pending_payment', lapsed);
 
-    const result = await claimSlot(prisma, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
+    const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
 
     expect(result.status).toBe('claimed');
     await expect(statusOf(reference(1))).resolves.toBe('expired');
@@ -242,7 +254,7 @@ describe('claimSlot and stale holds', () => {
     const live = new Date(Date.now() + 10 * MINUTE_MS);
     await insertBooking(ids, reference(1), NINE, 'pending_payment', live);
 
-    const result = await claimSlot(prisma, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
+    const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
 
     expect(result).toEqual({ status: 'slot_taken' });
     await expect(statusOf(reference(1))).resolves.toBe('pending_payment');
@@ -256,7 +268,7 @@ describe('claimSlot and stale holds', () => {
     const lapsed = new Date(Date.now() - MINUTE_MS);
     await insertBooking(ids, reference(1), AFTERNOON, 'pending_payment', lapsed);
 
-    const result = await claimSlot(prisma, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
+    const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
 
     expect(result.status).toBe('claimed');
     await expect(statusOf(reference(1))).resolves.toBe('pending_payment');
@@ -269,7 +281,7 @@ describe('claimSlot and stale holds', () => {
     await insertBooking(ids, reference(1), EIGHT, 'pending_payment', lapsed);
     await insertBooking(ids, reference(2), TEN, 'confirmed');
 
-    const result = await claimSlot(prisma, claimInput(ids, reference(3), NINE), HOLD_MINUTES);
+    const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(3), NINE), HOLD_MINUTES);
 
     expect(result).toEqual({ status: 'slot_taken' });
     // No partial row, and the stale hold is as it was: the whole step-2 UPDATE
@@ -289,7 +301,7 @@ describe('claimSlot and the occupancy table', () => {
       const ids = await insertCatalogue();
       await insertBooking(ids, reference(1), NINE, status);
 
-      const result = await claimSlot(prisma, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
+      const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
 
       const booking = claimedBooking(result);
       await expect(bookingsSharingRangeWith(booking.id)).resolves.toBe(2);
@@ -303,7 +315,7 @@ describe('claimSlot and the occupancy table', () => {
       const ids = await insertCatalogue();
       await insertBooking(ids, reference(1), NINE, status);
 
-      const result = await claimSlot(prisma, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
+      const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
 
       expect(result).toEqual({ status: 'slot_taken' });
       await expect(prisma.booking.count()).resolves.toBe(1);
@@ -316,10 +328,10 @@ describe('claimSlot and the occupancy table', () => {
 describe('claimSlot and the range edges', () => {
   it('accepts a claim starting exactly at the previous buffer end', async () => {
     const ids = await insertCatalogue();
-    const first = await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
+    const first = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
     expect(first.status).toBe('claimed');
 
-    const second = await claimSlot(prisma, claimInput(ids, reference(2), TEN_THIRTY), HOLD_MINUTES);
+    const second = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), TEN_THIRTY), HOLD_MINUTES);
 
     expect(second.status).toBe('claimed');
     await expect(prisma.booking.count()).resolves.toBe(2);
@@ -327,9 +339,9 @@ describe('claimSlot and the range edges', () => {
 
   it('refuses a claim that overlaps only the buffer of an existing booking', async () => {
     const ids = await insertCatalogue();
-    await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
+    await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
 
-    const result = await claimSlot(prisma, claimInput(ids, reference(2), IN_BUFFER), HOLD_MINUTES);
+    const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), IN_BUFFER), HOLD_MINUTES);
 
     expect(result).toEqual({ status: 'slot_taken' });
     await expect(prisma.booking.count()).resolves.toBe(1);
@@ -348,7 +360,7 @@ describe('the hold window', () => {
     const ids = await insertCatalogue();
 
     const before = Date.now();
-    const result = await claimSlot(prisma, claimInput(ids, reference(1), NINE), minutes);
+    const result = await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), minutes);
     const after = Date.now();
 
     const booking = claimedBooking(result);
@@ -371,7 +383,7 @@ describe('the hold window', () => {
     );
     const databaseNow = Number(firstRow(clock).ms);
 
-    await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
+    await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
 
     const stored = await holdExpiresAtMs(reference(1));
     expect(stored - databaseNow).toBeGreaterThan(29 * MINUTE_MS);
@@ -386,7 +398,7 @@ describe('what claimSlot writes', () => {
     const ids = await insertCatalogue();
 
     const booking = claimedBooking(
-      await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES),
+      await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES),
     );
 
     expect(booking.status).toBe('pending_payment');
@@ -397,7 +409,7 @@ describe('what claimSlot writes', () => {
     const ids = await insertCatalogue();
 
     const booking = claimedBooking(
-      await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES),
+      await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES),
     );
 
     expect(booking.startsAt.toISOString()).toBe(NINE.startsAt.toISOString());
@@ -412,7 +424,7 @@ describe('what claimSlot writes', () => {
     // through the raw driver, is the only honest witness.
     const ids = await insertCatalogue();
 
-    await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
+    await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
 
     await expect(columnMs(reference(1), 'starts_at')).resolves.toBe(NINE.startsAt.getTime());
     await expect(columnMs(reference(1), 'ends_at')).resolves.toBe(NINE.endsAt.getTime());
@@ -427,7 +439,7 @@ describe('what claimSlot writes', () => {
     const lapsed = new Date(Date.now() - MINUTE_MS);
     await insertBooking(ids, reference(1), NINE, 'pending_payment', lapsed);
 
-    await claimSlot(prisma, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
+    await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(2), NINE), HOLD_MINUTES);
 
     await expect(statusOf(reference(1))).resolves.toBe('expired');
     await expect(prisma.outbox.count()).resolves.toBe(0);
@@ -439,11 +451,11 @@ describe('what claimSlot writes', () => {
 describe('claimSlot and errors that are not 23P01', () => {
   it('throws on a duplicate reference rather than reporting a taken slot', async () => {
     const ids = await insertCatalogue();
-    await claimSlot(prisma, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
+    await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES);
 
     // A different, non-overlapping slot: only `reference` can fail here, with
     // 23505. Swallowing it as `slot_taken` would hide a real defect.
-    const duplicate = claimSlot(prisma, claimInput(ids, reference(1), AFTERNOON), HOLD_MINUTES);
+    const duplicate = claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), AFTERNOON), HOLD_MINUTES);
 
     await expect(duplicate).rejects.toThrow();
     await expect(prisma.booking.count()).resolves.toBe(1);
@@ -454,7 +466,7 @@ describe('claimSlot and errors that are not 23P01', () => {
     const input = claimInput(ids, reference(1), NINE);
     input.packageId = '00000000-0000-0000-0000-000000000000';
 
-    await expect(claimSlot(prisma, input, HOLD_MINUTES)).rejects.toThrow();
+    await expect(claimSlot(prisma, ids.photographerId, input, HOLD_MINUTES)).rejects.toThrow();
     await expect(prisma.booking.count()).resolves.toBe(0);
   });
 
@@ -462,7 +474,7 @@ describe('claimSlot and errors that are not 23P01', () => {
     const ids = await insertCatalogue();
     const input = { ...claimInput(ids, reference(1), NINE), locale: 'rw' };
 
-    await expect(claimSlot(prisma, input, HOLD_MINUTES)).rejects.toThrow();
+    await expect(claimSlot(prisma, ids.photographerId, input, HOLD_MINUTES)).rejects.toThrow();
     await expect(prisma.booking.count()).resolves.toBe(0);
   });
 });
@@ -485,7 +497,7 @@ describe('claimSlot with an input builder', () => {
       clientId: await insertClientThrough(tx, 'built@example.com'),
     }));
 
-    const booking = claimedBooking(await claimSlot(prisma, builder, HOLD_MINUTES));
+    const booking = claimedBooking(await claimSlot(prisma, ids.photographerId, builder, HOLD_MINUTES));
 
     expect(builder).toHaveBeenCalledTimes(1);
     // A transaction client, not the root client the claim was handed.
@@ -502,6 +514,7 @@ describe('claimSlot with an input builder', () => {
 
     const result = await claimSlot(
       prisma,
+      ids.photographerId,
       async (tx) => ({
         ...claimInput(ids, reference(2), NINE),
         clientId: await insertClientThrough(tx, 'loser@example.com'),
@@ -530,6 +543,7 @@ describe('claimSlot with an input builder', () => {
     const booking = claimedBooking(
       await claimSlot(
         prisma,
+        ids.photographerId,
         async (tx) => {
           attempts += 1;
           const clientId = await insertClientThrough(tx, `attempt-${attempts}@example.com`);
@@ -548,14 +562,14 @@ describe('claimSlot with an input builder', () => {
   });
 
   it(`gives up after ${MAX_CLAIM_ATTEMPTS} deadlocks in a row, writing nothing`, async () => {
-    await insertCatalogue();
+    const ids = await insertCatalogue();
     const clientsBefore = await prisma.client.count();
     const builder = vi.fn(async (tx: Prisma.TransactionClient) => {
       await insertClientThrough(tx, `doomed-${builder.mock.calls.length}@example.com`);
       throw DEADLOCK;
     });
 
-    await expect(claimSlot(prisma, builder, HOLD_MINUTES)).rejects.toMatchObject({ code: 'P2034' });
+    await expect(claimSlot(prisma, ids.photographerId, builder, HOLD_MINUTES)).rejects.toMatchObject({ code: 'P2034' });
 
     expect(builder).toHaveBeenCalledTimes(MAX_CLAIM_ATTEMPTS);
     await expect(prisma.client.count()).resolves.toBe(clientsBefore);
@@ -563,12 +577,12 @@ describe('claimSlot with an input builder', () => {
   });
 
   it('does not retry an error that is not contention', async () => {
-    await insertCatalogue();
+    const ids = await insertCatalogue();
     const builder = vi.fn(async () => {
       throw new Error('the builder failed');
     });
 
-    await expect(claimSlot(prisma, builder, HOLD_MINUTES)).rejects.toThrow('the builder failed');
+    await expect(claimSlot(prisma, ids.photographerId, builder, HOLD_MINUTES)).rejects.toThrow('the builder failed');
     expect(builder).toHaveBeenCalledTimes(1);
   });
 
@@ -580,6 +594,7 @@ describe('claimSlot with an input builder', () => {
 
     const result = await claimSlot(
       prisma,
+      ids.photographerId,
       async (tx) => ({
         ...claimInput(ids, reference(3), NINE),
         clientId: await insertClientThrough(tx, 'loser@example.com'),
@@ -593,11 +608,12 @@ describe('claimSlot with an input builder', () => {
   });
 
   it('aborts with the builder’s own error and writes nothing when the builder throws', async () => {
-    await insertCatalogue();
+    const ids = await insertCatalogue();
     const failure = new Error('the builder could not resolve its input');
 
     const claim = claimSlot(
       prisma,
+      ids.photographerId,
       async (tx) => {
         await insertClientThrough(tx, 'half-done@example.com');
         throw failure;
@@ -616,6 +632,7 @@ describe('claimSlot with an input builder', () => {
 
     const claim = claimSlot(
       prisma,
+      ids.photographerId,
       async () => {
         throw new RangeError('no input');
       },
@@ -633,7 +650,7 @@ describe('claimSlot with an input builder', () => {
 
     const before = Date.now();
     const booking = claimedBooking(
-      await claimSlot(prisma, async () => claimInput(ids, reference(2), NINE), HOLD_MINUTES),
+      await claimSlot(prisma, ids.photographerId, async () => claimInput(ids, reference(2), NINE), HOLD_MINUTES),
     );
     const after = Date.now();
 
@@ -662,6 +679,7 @@ describe('claimSlot with an input builder', () => {
         Array.from({ length: 10 }, (_unused, i) =>
           claimSlot(
             prisma,
+            ids.photographerId,
             async (tx) => ({
               ...claimInput(ids, reference(i), NINE),
               clientId: await insertClientThrough(tx, `racer-${round}-${i}@example.com`),
@@ -685,5 +703,100 @@ describe('claimSlot with an input builder', () => {
     expect(Object.keys(outcomes).filter((key) => key.startsWith('threw')), JSON.stringify(outcomes)).toEqual([]);
     // One winner per round, and the nine losers left no client behind.
     expect(badRounds, JSON.stringify(outcomes)).toEqual([]);
+  });
+});
+
+// --- Per photographer (marketplace-spec.md R1.3, T1.3) -----------------------------
+
+describe('claimSlot per photographer', () => {
+  it('lets two photographers each win the same range when their claims race, and each exactly once', async () => {
+    const a = await insertCatalogue();
+    const b = await insertCatalogue({ handle: 'hills-and-light' });
+
+    // Interleaved, so neither photographer's claims simply run first.
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_unused, i) => {
+        const ids = i % 2 === 0 ? a : b;
+        return claimSlot(prisma, ids.photographerId, claimInput(ids, reference(i), NINE), HOLD_MINUTES).then((result) => ({
+          photographerId: ids.photographerId,
+          result,
+        }));
+      }),
+    );
+
+    for (const ids of [a, b]) {
+      const own = results.filter((entry) => entry.photographerId === ids.photographerId).map((entry) => entry.result.status);
+      expect(own.filter((status) => status === 'claimed')).toHaveLength(1);
+      expect(own.filter((status) => status === 'slot_taken')).toHaveLength(4);
+      await expect(prisma.booking.count({ where: { photographerId: ids.photographerId } })).resolves.toBe(1);
+    }
+    // The same range, held twice: once in each calendar.
+    await expect(bookingsOverlapping(NINE)).resolves.toBe(2);
+  });
+
+  it('claims a range another photographer has confirmed', async () => {
+    const a = await insertCatalogue();
+    const b = await insertCatalogue({ handle: 'hills-and-light' });
+    await insertBooking(b, reference(1), NINE, 'confirmed');
+
+    const booking = claimedBooking(await claimSlot(prisma, a.photographerId, claimInput(a, reference(2), NINE), HOLD_MINUTES));
+
+    expect(booking.photographerId).toBe(a.photographerId);
+    await expect(statusOf(reference(1))).resolves.toBe('confirmed');
+  });
+
+  it('writes the photographer whose calendar it locked, whatever the input says', async () => {
+    const a = await insertCatalogue();
+    const b = await insertCatalogue({ handle: 'hills-and-light' });
+    // An input smuggling another photographer's id past the type: the claim's own wins.
+    const input = { ...claimInput(a, reference(1), NINE), photographerId: b.photographerId } as ClaimSlotInput;
+
+    const booking = claimedBooking(await claimSlot(prisma, a.photographerId, input, HOLD_MINUTES));
+
+    expect(booking.photographerId).toBe(a.photographerId);
+  });
+
+  it('never expires another photographer’s lapsed hold, which is in nobody’s way', async () => {
+    const a = await insertCatalogue();
+    const b = await insertCatalogue({ handle: 'hills-and-light' });
+    const lapsed = new Date(Date.now() - MINUTE_MS);
+    await insertBooking(b, reference(1), NINE, 'pending_payment', lapsed);
+    await insertBooking(a, reference(2), NINE, 'pending_payment', lapsed);
+
+    claimedBooking(await claimSlot(prisma, a.photographerId, claimInput(a, reference(3), NINE), HOLD_MINUTES));
+
+    // A's own dead hold was in the way and is expired; B's is left for the sweeper.
+    await expect(statusOf(reference(2))).resolves.toBe('expired');
+    await expect(statusOf(reference(1))).resolves.toBe('pending_payment');
+  });
+
+  it.each(['pending', 'suspended'] as const)('refuses a %s photographer inside the claim, writing nothing', async (status) => {
+    const ids = await insertCatalogue({ status });
+    const builder = vi.fn(async (tx: Prisma.TransactionClient) => ({
+      ...claimInput(ids, reference(1), NINE),
+      clientId: (await tx.client.create({ data: { fullName: 'Never Written', email: 'never@example.com', phone: '+250788111111' } })).id,
+    }));
+
+    await expect(claimSlot(prisma, ids.photographerId, builder, HOLD_MINUTES)).resolves.toEqual({ status: 'not_bookable' });
+
+    // Decided before the input is built: nothing of the builder's ran.
+    expect(builder).not.toHaveBeenCalled();
+    await expect(prisma.booking.count()).resolves.toBe(0);
+    await expect(prisma.client.count({ where: { email: 'never@example.com' } })).resolves.toBe(0);
+  });
+
+  it('refuses once a photographer is suspended after the caller looked, and books again once they are approved', async () => {
+    const ids = await insertCatalogue();
+    await prisma.photographer.update({
+      where: { id: ids.photographerId },
+      data: { status: 'suspended', suspendedAt: new Date('2026-10-01T06:00:00Z') },
+    });
+
+    await expect(claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES)).resolves.toEqual({
+      status: 'not_bookable',
+    });
+
+    await prisma.photographer.update({ where: { id: ids.photographerId }, data: { status: 'approved', suspendedAt: null } });
+    claimedBooking(await claimSlot(prisma, ids.photographerId, claimInput(ids, reference(1), NINE), HOLD_MINUTES));
   });
 });

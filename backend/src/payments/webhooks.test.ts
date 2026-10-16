@@ -7,13 +7,14 @@ import { createPrismaClient } from '../db/client.js';
 import { renderEmail } from '../email/render.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
-  ADMIN_EMAIL,
   BUFFER_MINUTES,
   CLIENT,
   DAY_MS,
   DURATION_MINUTES,
   MINUTE_MS,
+  PHOTOGRAPHER_EMAIL,
   type PaymentWorld,
+  SECOND_PHOTOGRAPHER_EMAIL,
   UUID,
   insertBooking,
   insertPayment,
@@ -21,6 +22,7 @@ import {
   mtnDelivery,
   mtnProvider,
   mtnStatusBody,
+  seedSecondPhotographer,
   seedWorld,
   stubProvider,
 } from '../test/payment-fixtures.js';
@@ -38,7 +40,7 @@ import { type WebhookDeps, type WebhookOutcome, receiveWebhook, recordEvent } fr
  * - a valid `succeeded` event confirms the booking -- hold nulled,
  *   `confirmed_at` set, `access_token_hash` the SHA-256 of a token that lives
  *   365 days -- records the payment, and enqueues `booking_confirmation` and
- *   `admin_new_booking` with payloads that render;
+ *   `photographer_new_booking` with payloads that render;
  * - the same `(provider, event_id)` twice, in turn or at once, is one `applied`
  *   row, the rest `ignored`, and one confirmation;
  * - an event for a payment already `succeeded`, `failed`, `refunded` (or
@@ -50,10 +52,16 @@ import { type WebhookDeps, type WebhookOutcome, receiveWebhook, recordEvent } fr
  *   payload, for inspection;
  * - a late success re-confirms an expired booking whose slot is free -- stale
  *   holds in the way do not count -- and otherwise leaves it expired, the
- *   payment `refund_due`, and an `admin_alert` queued; a second fee for a paid
+ *   payment `refund_due`, and an `photographer_alert` queued; a second fee for a paid
  *   booking is `refund_due` too;
  * - the plaintext token is in the confirmation's outbox payload and in no column
  *   of any booking, nor anywhere else in the database, nor in a log line.
+ *
+ * Per photographer (marketplace-spec.md R1.3, R1.7, T1.3): every alert goes to
+ * the booking's own photographer; a late success is checked against its own
+ * photographer's calendar only, so another photographer's booking at the same
+ * hour never refuses it and their lapsed hold is never expired by it; and it
+ * queues on that photographer's claim lock alone.
  * Beyond the bullets: failures and amount mismatches, the provider_ref match,
  * processing failures that a retry reprocesses, contention retries, and bodies
  * PostgreSQL would otherwise refuse.
@@ -261,7 +269,7 @@ describe('a valid succeeded event', () => {
     ]);
   });
 
-  it('enqueues booking_confirmation to the booking’s contact email with the plaintext token, and admin_new_booking to the photographer', async () => {
+  it('enqueues booking_confirmation to the booking’s contact email with the plaintext token, and photographer_new_booking to the photographer', async () => {
     const { booking, payment } = await waitingBooking({ addons: ['shared', 'own'] });
 
     await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
@@ -282,10 +290,19 @@ describe('a valid succeeded event', () => {
     expect(await outbox()).toStrictEqual([
       {
         kind: 'email',
-        template: 'admin_new_booking',
-        recipient: ADMIN_EMAIL,
+        template: 'booking_confirmation',
+        recipient: CLIENT.email,
         booking_id: booking.id,
-        dedupe_key: `email:admin_new_booking:${booking.id}`,
+        dedupe_key: `email:booking_confirmation:${booking.id}`,
+        status: 'pending',
+        payload: { ...basics, accessToken: tokens[0]?.token },
+      },
+      {
+        kind: 'email',
+        template: 'photographer_new_booking',
+        recipient: PHOTOGRAPHER_EMAIL,
+        booking_id: booking.id,
+        dedupe_key: `email:photographer_new_booking:${booking.id}`,
         status: 'pending',
         payload: {
           ...basics,
@@ -300,15 +317,6 @@ describe('a valid succeeded event', () => {
           ],
           totalRwf: 55_000,
         },
-      },
-      {
-        kind: 'email',
-        template: 'booking_confirmation',
-        recipient: CLIENT.email,
-        booking_id: booking.id,
-        dedupe_key: `email:booking_confirmation:${booking.id}`,
-        status: 'pending',
-        payload: { ...basics, accessToken: tokens[0]?.token },
       },
     ]);
   });
@@ -367,25 +375,33 @@ describe('a valid succeeded event', () => {
     await expect(deliver(statusDelivery(second.payment.ourRef, 'SUCCESSFUL', { amount: '20000.0' }))).resolves.toMatchObject({ status: 'applied' });
   });
 
-  it('sends admin_new_booking to the oldest admin account when there are two', async () => {
-    await raw.query(`INSERT INTO admin_user (email, password_hash, created_at) VALUES ('first@bookly.example', 'x', now() - interval '1 year')`);
-    const { payment } = await waitingBooking();
+  it('sends photographer_new_booking to the booking’s own photographer, and files it under them', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const booking = await insertBooking(prisma, second);
+    const payment = await insertPayment(prisma, booking.id, { status: 'pending' });
 
     await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
 
-    expect((await outbox()).find((row) => row.template === 'admin_new_booking')?.recipient).toBe('first@bookly.example');
+    const alert = (await outbox()).find((row) => row.template === 'photographer_new_booking');
+    expect(alert?.recipient).toBe(SECOND_PHOTOGRAPHER_EMAIL);
+    const filed = await raw.query<{ photographer_id: string }>(
+      "SELECT photographer_id::text AS photographer_id FROM outbox WHERE template = 'photographer_new_booking'",
+    );
+    expect(filed.rows).toEqual([{ photographer_id: second.photographerId }]);
   });
 
-  it('still confirms and emails the client when there is no admin account, logging the skipped alert', async () => {
-    await raw.query('DELETE FROM admin_user');
+  it('confirms and alerts the photographer with no platform admin on file: a booking always has its photographer', async () => {
+    await truncateAll(raw);
+    world = await seedWorld(prisma, { platformAdmin: false });
     const { booking, payment } = await waitingBooking();
 
-    const outcome = await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
+    await expect(deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'))).resolves.toMatchObject({ status: 'applied' });
 
-    expect(outcome.status).toBe('applied');
     expect((await bookingRow(booking.id)).status).toBe('confirmed');
-    expect((await outbox()).map((row) => row.template)).toEqual(['booking_confirmation']);
-    expect(sink.entries).toContainEqual(expect.objectContaining({ event: 'admin_new_booking_skipped', reason: 'no_admin_user' }));
+    expect((await outbox()).map((row) => [row.template, row.recipient])).toEqual([
+      ['booking_confirmation', CLIENT.email],
+      ['photographer_new_booking', PHOTOGRAPHER_EMAIL],
+    ]);
   });
 
   it('generates a real 43-character token when none is injected', async () => {
@@ -513,7 +529,7 @@ describe('a duplicate delivery of one (provider, event_id)', () => {
     expect(outcomes.filter((outcome) => outcome.status === 'applied')).toHaveLength(1);
     expect(outcomes.filter((outcome) => outcome.status === 'ignored')).toHaveLength(7);
     expect((await events()).filter((row) => row.status === 'applied')).toHaveLength(1);
-    expect((await outbox()).map((row) => row.template).sort()).toEqual(['admin_new_booking', 'booking_confirmation']);
+    expect((await outbox()).map((row) => row.template).sort()).toEqual(['booking_confirmation', 'photographer_new_booking']);
     expect((await bookingRow(booking.id)).status).toBe('confirmed');
     expect(tokens).toHaveLength(1);
   });
@@ -725,11 +741,11 @@ describe('failures and pending events', () => {
 
     // Task 20: the client is receipted and the photographer told, while the
     // booking itself does not move.
-    const [alert, receipt] = await outbox();
+    const [receipt, alert] = await outbox();
     expect(alert).toMatchObject({
-      template: 'admin_alert',
-      recipient: ADMIN_EMAIL,
-      dedupe_key: `email:admin_alert:payment_received:${sessionFee.id}`,
+      template: 'photographer_alert',
+      recipient: PHOTOGRAPHER_EMAIL,
+      dedupe_key: `email:photographer_alert:payment_received:${sessionFee.id}`,
       payload: { variant: 'payment_received', kind: 'session_fee', amountRwf: 30_000, paidAt: NOW.toISOString(), outstandingRwf: 0 },
     });
     expect(receipt).toMatchObject({
@@ -937,7 +953,7 @@ describe('a late success for an expired booking (spec §6.9)', () => {
       access_token_expires_at: new Date(NOW.getTime() + 365 * DAY_MS),
     });
     expect((await paymentRow(payment.id)).status).toBe('succeeded');
-    expect((await outbox()).map((row) => row.template).sort()).toEqual(['admin_new_booking', 'booking_confirmation']);
+    expect((await outbox()).map((row) => row.template).sort()).toEqual(['booking_confirmation', 'photographer_new_booking']);
   });
 
   it('re-confirms when the only booking in the way is a lapsed hold, which it expires', async () => {
@@ -969,7 +985,7 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     expect((await bookingRow(booking.id)).status).toBe('confirmed');
   });
 
-  it('leaves the booking expired, sets the payment refund_due and enqueues an admin_alert when the slot is taken', async () => {
+  it('leaves the booking expired, sets the payment refund_due and enqueues a photographer_alert when the slot is taken', async () => {
     const { booking, payment } = await expiredWithPayment();
     await insertBooking(prisma, world, { status: 'confirmed', startsAt: minutes(30) });
     const bookingBefore = await rowJson('booking', booking.id);
@@ -990,10 +1006,10 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     expect(await outbox()).toStrictEqual([
       {
         kind: 'email',
-        template: 'admin_alert',
-        recipient: ADMIN_EMAIL,
+        template: 'photographer_alert',
+        recipient: PHOTOGRAPHER_EMAIL,
         booking_id: null,
-        dedupe_key: `email:admin_alert:refund_due:${payment.id}`,
+        dedupe_key: `email:photographer_alert:refund_due:${payment.id}`,
         status: 'pending',
         payload: {
           variant: 'refund_due',
@@ -1016,7 +1032,7 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
 
     const [alert] = await outbox();
-    const email = renderEmail('admin_alert', alert?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
+    const email = renderEmail('photographer_alert', alert?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
     expect(email.subject).toContain('Refund due: 20,000 RWF');
     expect(email.text).toContain('booked by someone else');
     expect(email.text).toContain('The system does not move money.');
@@ -1060,16 +1076,84 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     expect((await outbox())[0]?.payload.paymentReference).toBe(payment.ourRef);
   });
 
-  it('still sets refund_due without an admin account, logging that no alert could be addressed', async () => {
-    await raw.query('DELETE FROM admin_user');
-    const { payment } = await expiredWithPayment();
+  it.each([
+    ['a confirmed booking at the very same time', 'confirmed', 0, undefined],
+    ['a live hold at the very same time', 'pending_payment', 0, 30],
+    ['a completed booking overlapping the shoot', 'completed', 45, undefined],
+  ])('re-confirms though another photographer has %s (T1.3)', async (_case, status, offset, holdMinutes) => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const { booking, payment } = await expiredWithPayment();
+    const theirs = await insertBooking(prisma, second, { status, startsAt: minutes(offset), ...(holdMinutes === undefined ? {} : { holdMinutes }) });
+
+    await expect(deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'))).resolves.toMatchObject({ status: 'applied', note: 'booking_reconfirmed' });
+
+    expect((await bookingRow(booking.id)).status).toBe('confirmed');
+    expect((await bookingRow(theirs.id)).status).toBe(status);
+    expect((await paymentRow(payment.id)).status).toBe('succeeded');
+  });
+
+  it('leaves another photographer’s lapsed hold in the same slot alone: it is in nobody’s way here', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const { booking, payment } = await expiredWithPayment();
+    const theirs = await insertBooking(prisma, second, { status: 'pending_payment', startsAt: SLOT, holdMinutes: -1 });
+
+    await expect(deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'))).resolves.toMatchObject({ note: 'booking_reconfirmed' });
+
+    expect((await bookingRow(booking.id)).status).toBe('confirmed');
+    expect((await bookingRow(theirs.id)).status).toBe('pending_payment');
+  });
+
+  it('still refuses a late success its own photographer’s booking has displaced, with another photographer free', async () => {
+    await seedSecondPhotographer(prisma, world);
+    const { booking, payment } = await expiredWithPayment();
     await insertBooking(prisma, world, { status: 'confirmed', startsAt: SLOT });
+
+    await expect(deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'))).resolves.toMatchObject({ note: 'refund_due_slot_taken' });
+    expect((await bookingRow(booking.id)).status).toBe('expired');
+  });
+
+  it('alerts the booking’s own photographer that the late payment is owed back', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const booking = await insertBooking(prisma, second, { status: 'expired', startsAt: SLOT });
+    const payment = await insertPayment(prisma, booking.id, { status: 'pending', ageSeconds: 40 * 60 });
+    await insertBooking(prisma, second, { status: 'confirmed', startsAt: SLOT });
 
     await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
 
-    expect((await paymentRow(payment.id)).status).toBe('refund_due');
-    expect(await outbox()).toEqual([]);
-    expect(sink.entries).toContainEqual(expect.objectContaining({ event: 'refund_due_alert_skipped' }));
+    expect((await outbox()).map((row) => [row.template, row.recipient])).toEqual([['photographer_alert', SECOND_PHOTOGRAPHER_EMAIL]]);
+  });
+
+  it('queues behind its own photographer’s claim lock, and never behind another photographer’s', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const { booking, payment } = await expiredWithPayment();
+    const holder = connect();
+    await holder.connect();
+    try {
+      // Another photographer's claim in progress: the late success does not wait for it.
+      await holder.query('BEGIN');
+      await holder.query("SELECT pg_advisory_xact_lock(hashtext('bookly.claim_slot:' || $1::text))", [second.photographerId]);
+      await expect(deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'))).resolves.toMatchObject({ note: 'booking_reconfirmed' });
+      await holder.query('ROLLBACK');
+
+      // Its own photographer's claim in progress: it waits until that commits.
+      const other = await insertBooking(prisma, world, { status: 'expired', startsAt: new Date(SLOT.getTime() + 7 * DAY_MS) });
+      const otherPayment = await insertPayment(prisma, other.id, { status: 'pending', ageSeconds: 40 * 60 });
+      await holder.query('BEGIN');
+      await holder.query("SELECT pg_advisory_xact_lock(hashtext('bookly.claim_slot:' || $1::text))", [world.photographerId]);
+      let settled = false;
+      const waiting = deliver(statusDelivery(otherPayment.ourRef, 'SUCCESSFUL')).then((outcome) => {
+        settled = true;
+        return outcome;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(settled).toBe(false);
+      await holder.query('COMMIT');
+      await expect(waiting).resolves.toMatchObject({ note: 'booking_reconfirmed' });
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      await holder.end();
+    }
+    expect((await bookingRow(booking.id)).status).toBe('confirmed');
   });
 
   it('finds the slot taken when a writer outside the claim lock takes it mid-confirmation (23P01, retried)', async () => {
@@ -1119,7 +1203,7 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     expect(outcome).toMatchObject({ status: 'applied', note: 'refund_due_slot_taken' });
     expect((await bookingRow(booking.id)).status).toBe('expired');
     expect((await paymentRow(payment.id)).status).toBe('refund_due');
-    expect((await outbox()).map((row) => row.template)).toEqual(['admin_alert']);
+    expect((await outbox()).map((row) => row.template)).toEqual(['photographer_alert']);
   });
 });
 
@@ -1139,8 +1223,8 @@ describe('a second booking fee for a booking already paid', () => {
     expect(await paymentRow(second.id)).toMatchObject({ status: 'refund_due', settled_at: NOW, provider_ref: 'SECOND-FEE' });
     const rows = await outbox();
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ template: 'admin_alert', recipient: ADMIN_EMAIL, payload: { variant: 'refund_due', reason: 'duplicate_payment', paymentReference: 'SECOND-FEE' } });
-    const email = renderEmail('admin_alert', rows[0]?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
+    expect(rows[0]).toMatchObject({ template: 'photographer_alert', recipient: PHOTOGRAPHER_EMAIL, payload: { variant: 'refund_due', reason: 'duplicate_payment', paymentReference: 'SECOND-FEE' } });
+    const email = renderEmail('photographer_alert', rows[0]?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
     expect(email.text).toContain('paid the booking fee twice');
     expect(tokens).toEqual([]);
   });
@@ -1156,7 +1240,7 @@ describe('a second booking fee for a booking already paid', () => {
     const statuses = [(await paymentRow(first.id)).status, (await paymentRow(second.id)).status].sort();
     expect(statuses).toEqual(['refund_due', 'succeeded']);
     expect((await bookingRow(booking.id)).status).toBe('confirmed');
-    expect((await outbox()).map((row) => row.template).sort()).toEqual(['admin_alert', 'admin_new_booking', 'booking_confirmation']);
+    expect((await outbox()).map((row) => row.template).sort()).toEqual(['booking_confirmation', 'photographer_alert', 'photographer_new_booking']);
     expect(tokens).toHaveLength(1);
   });
 });
@@ -1459,13 +1543,13 @@ describe('a succeeded session fee', () => {
     await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '30000', financialTransactionId: '5551234' }));
 
     const messages = await outbox();
-    expect(messages.map((row) => row.template)).toEqual(['admin_alert', 'payment_receipt']);
+    expect(messages.map((row) => row.template)).toEqual(['payment_receipt', 'photographer_alert']);
     expect(messages.filter((row) => row.template === 'payment_receipt')).toHaveLength(1);
-    const [alert, receipt] = messages;
+    const [receipt, alert] = messages;
     expect(alert).toMatchObject({
       kind: 'email',
-      recipient: ADMIN_EMAIL,
-      dedupe_key: `email:admin_alert:payment_received:${sessionFee.id}`,
+      recipient: PHOTOGRAPHER_EMAIL,
+      dedupe_key: `email:photographer_alert:payment_received:${sessionFee.id}`,
       payload: {
         variant: 'payment_received',
         reference: booking.reference,
@@ -1595,7 +1679,7 @@ describe('a succeeded session fee', () => {
 
     const messages = await outbox();
     const receipt = messages.find((row) => row.template === 'payment_receipt');
-    const alert = messages.find((row) => row.template === 'admin_alert');
+    const alert = messages.find((row) => row.template === 'photographer_alert');
     expect(receipt?.payload).toMatchObject({ amountRwf: 10_000, totalRwf: 50_000, paidRwf: 30_000, outstandingRwf: 20_000 });
     expect(alert?.payload).toMatchObject({ amountRwf: 10_000, outstandingRwf: 20_000 });
 
@@ -1624,8 +1708,8 @@ describe('a succeeded session fee', () => {
     await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
 
     const messages = await outbox();
-    expect(messages.map((row) => row.template).sort()).toEqual(['admin_alert', 'admin_alert', 'payment_receipt']);
-    expect(messages.find((row) => row.dedupe_key === `email:admin_alert:overpayment:${sessionFee.id}`)?.payload).toMatchObject({
+    expect(messages.map((row) => row.template).sort()).toEqual(['payment_receipt', 'photographer_alert', 'photographer_alert']);
+    expect(messages.find((row) => row.dedupe_key === `email:photographer_alert:overpayment:${sessionFee.id}`)?.payload).toMatchObject({
       variant: 'refund_due',
       reason: 'overpayment',
       amountRwf: 10_000,
@@ -1660,27 +1744,13 @@ describe('a succeeded session fee', () => {
     expect(email.html).toMatch(/refund/i);
   });
 
-  it('still receipts the client when there is no admin account to alert, and logs the skip', async () => {
-    const { sessionFee } = await askedFor();
-    await prisma.adminUser.deleteMany();
-
-    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '30000' }));
-
-    const messages = await outbox();
-    expect(messages.map((row) => row.template)).toEqual(['payment_receipt']);
-    expect(messages[0]).toMatchObject({ recipient: CLIENT.email, payload: { outstandingRwf: 0, accessToken: null } });
-    expect(sink.entries).toContainEqual(
-      expect.objectContaining({ level: 'error', event: 'payment_received_alert_skipped', reason: 'no_admin_user' }),
-    );
-  });
-
   it('receipts nothing for a booking fee: its confirmation email is its receipt', async () => {
     const { payment } = await waitingBooking();
 
     await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
 
     const messages = await outbox();
-    expect(messages.map((row) => row.template).sort()).toEqual(['admin_new_booking', 'booking_confirmation']);
+    expect(messages.map((row) => row.template).sort()).toEqual(['booking_confirmation', 'photographer_new_booking']);
     expect(messages.filter((row) => row.template === 'payment_receipt')).toEqual([]);
   });
 

@@ -4,15 +4,18 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { findAvailability } from '../availability/query.js';
 import { createPrismaClient } from '../db/client.js';
 import { renderEmail } from '../email/render.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
-  ADMIN_EMAIL,
   CLIENT,
+  PHOTOGRAPHER_EMAIL,
+  SECOND_PHOTOGRAPHER_EMAIL,
   type PaymentWorld,
   grantAccessToken,
   insertBooking,
   insertBookingWithToken,
   insertPayment,
+  seedSecondPhotographer,
   seedWorld,
 } from '../test/payment-fixtures.js';
 import { cancelByClient } from './cancel.js';
@@ -24,17 +27,23 @@ import { cancelByClient } from './cancel.js';
  * What is proven: confirming moves the booking to `cancelled_by_client` with
  * `cancelled_at` set, and the slot AND its buffer come straight back to the
  * public calendar -- checked through the same availability query the booking
- * page uses. The booking fee is **not** refunded: it stays `succeeded`,
- * forfeited. A session fee already collected is different money -- it becomes
- * `refund_due`, the photographer gets a `refund_due` alert naming
+ * page uses. By default the booking fee is **not** refunded: it stays
+ * `succeeded`, forfeited. A session fee already collected is different money --
+ * it becomes `refund_due`, the photographer gets a `refund_due` alert naming
  * `session_fee_after_client_cancel`, and the cancellation email promises the
  * client exactly that sum and no more. Both emails are enqueued once, with
  * payloads that render. Cancelling twice changes nothing and enqueues nothing
  * more; a shoot that has started, a completed, no-show, expired or already
  * cancelled booking, and an unknown token, are all `not_cancellable` and touch
- * nothing. With no photographer on file the booking still cancels and no admin
- * mail is queued. And when an enqueue fails, the status, the refund and the
- * other message roll back with it.
+ * nothing. The alert goes to the booking's own photographer. And when an
+ * enqueue fails, the status, the refund and the other message roll back with it.
+ *
+ * The booking's photographer's cancellation policy (marketplace-spec.md R1.8,
+ * brief decision 5), each branch: a cut-off of N hours closes cancellation N
+ * hours before the shoot (0 = until the shoot); a refundable booking fee is
+ * flagged `refund_due` with an alert of its own and promised to the client,
+ * and the emails stop calling it non-refundable. Only the booking's own
+ * photographer's policy counts.
  */
 
 let prisma: PrismaClient;
@@ -102,7 +111,7 @@ async function paymentStatuses(bookingId: string): Promise<{ kind: string; statu
 /** Mon-Fri 09:00-17:00, so the fixture days generate slots at all. */
 async function openTheDiary(): Promise<void> {
   await prisma.workingHours.createMany({
-    data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })),
+    data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: world.photographerId, weekday, opensMinute: 540, closesMinute: 1020 })),
   });
 }
 
@@ -110,6 +119,7 @@ async function openTheDiary(): Promise<void> {
 async function freeStarts(instant: Date): Promise<string[]> {
   const date = new Date(instant.getTime() + 2 * 60 * 60_000).toISOString().slice(0, 10);
   const days = await findAvailability(prisma, {
+    photographerId: world.photographerId,
     from: date,
     to: date,
     packageDurationMinutes: 90,
@@ -191,11 +201,11 @@ describe('the emails a cancellation enqueues', () => {
 
     const rows = await outbox();
     expect(rows.map((row) => row.dedupe_key).sort()).toEqual(
-      [`email:admin_alert:booking_cancelled:${booking.id}`, `email:cancellation:${booking.id}`].sort(),
+      [`email:photographer_alert:booking_cancelled:${booking.id}`, `email:cancellation:${booking.id}`].sort(),
     );
     expect(rows.map((row) => [row.template, row.recipient]).sort()).toEqual(
       [
-        ['admin_alert', ADMIN_EMAIL],
+        ['photographer_alert', PHOTOGRAPHER_EMAIL],
         ['cancellation', CLIENT.email],
       ].sort(),
     );
@@ -233,6 +243,7 @@ describe('the emails a cancellation enqueues', () => {
       reason: null,
       bookingFeeRwf: 18_000,
       refundRwf: 0,
+      bookingFeeRefunded: false,
     });
   });
 
@@ -251,6 +262,7 @@ describe('the emails a cancellation enqueues', () => {
       startsAt: booking.startsAt.toISOString(),
       endsAt: booking.endsAt.toISOString(),
       bookingFeeRwf: 18_000,
+      bookingFeeRefunded: false,
     });
   });
 
@@ -303,8 +315,8 @@ describe('cancelling after paying a session fee (spec §6.10, §6.16)', () => {
     ]);
 
     const rows = await outbox();
-    const refund = rows.find((row) => row.dedupe_key === `email:admin_alert:refund_due:${sessionFee.id}`);
-    expect(refund?.recipient).toBe(ADMIN_EMAIL);
+    const refund = rows.find((row) => row.dedupe_key === `email:photographer_alert:refund_due:${sessionFee.id}`);
+    expect(refund?.recipient).toBe(PHOTOGRAPHER_EMAIL);
     expect(refund?.payload).toStrictEqual({
       variant: 'refund_due',
       reference: booking.reference,
@@ -330,7 +342,7 @@ describe('cancelling after paying a session fee (spec §6.10, §6.16)', () => {
 
     const rows = await outbox();
     expect(rows.filter((row) => row.dedupe_key.includes('refund_due')).map((row) => row.dedupe_key).sort()).toEqual(
-      [`email:admin_alert:refund_due:${first.id}`, `email:admin_alert:refund_due:${second.id}`].sort(),
+      [`email:photographer_alert:refund_due:${first.id}`, `email:photographer_alert:refund_due:${second.id}`].sort(),
     );
     expect(rows.find((row) => row.template === 'cancellation')?.payload).toMatchObject({ refundRwf: 27_000 });
     expect((await paymentStatuses(booking.id)).map((row) => row.status)).toEqual(['succeeded', 'refund_due', 'refund_due']);
@@ -364,7 +376,7 @@ describe('cancelling after paying a session fee (spec §6.10, §6.16)', () => {
     await cancelByClient(deps(), token);
 
     const refund = (await outbox()).find((row) => row.dedupe_key.includes('refund_due'));
-    const email = renderEmail('admin_alert', refund?.payload, { webOrigin: 'https://bookly.example' });
+    const email = renderEmail('photographer_alert', refund?.payload, { webOrigin: 'https://bookly.example' });
     expect(email.subject).toContain('Refund due: 27,000 RWF');
     expect(email.text).toContain('cancelled after paying the session fee');
     expect(email.text).toContain(booking.reference);
@@ -466,35 +478,188 @@ describe('a booking the client cannot cancel', () => {
   });
 });
 
-// --- No photographer on file -----------------------------------------------------------------
+// --- Whose photographer is told (R1.7) ---------------------------------------------------------
 
-describe('with no admin account', () => {
-  beforeEach(async () => {
-    await truncateAll(raw);
-    world = await seedWorld(prisma, { admin: false });
-  });
-
-  it('still cancels, still emails the client, and queues no admin mail', async () => {
-    const { booking, token } = await insertBookingWithToken(prisma, world);
+describe('the photographer told', () => {
+  it('is the booking’s own photographer, at their login, never another photographer', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const { booking, token } = await insertBookingWithToken(prisma, second);
     await insertPayment(prisma, booking.id, { status: 'succeeded', kind: 'session_fee', amountRwf: 27_000 });
-
-    await expect(cancelByClient(deps(), token)).resolves.toMatchObject({ status: 'cancelled' });
-
-    expect(await bookingRow(booking.id)).toMatchObject({ status: 'cancelled_by_client' });
-    const rows = await outbox();
-    expect(rows.map((row) => row.template)).toEqual(['cancellation']);
-    // The refund is still owed, even with nobody queued to be told.
-    expect((await paymentStatuses(booking.id)).map((row) => row.status)).toEqual(['refund_due']);
-  });
-
-  it('sends the alert to the oldest admin when there are several', async () => {
-    await prisma.adminUser.create({ data: { email: 'first@bookly.example', passwordHash: 'x', createdAt: new Date('2020-01-01T00:00:00Z') } });
-    await prisma.adminUser.create({ data: { email: 'second@bookly.example', passwordHash: 'x', createdAt: new Date('2021-01-01T00:00:00Z') } });
-    const { token } = await insertBookingWithToken(prisma, world);
 
     await cancelByClient(deps(), token);
 
-    expect((await outbox()).find((row) => row.template === 'admin_alert')?.recipient).toBe('first@bookly.example');
+    const alerts = (await outbox()).filter((row) => row.template === 'photographer_alert');
+    expect(alerts).toHaveLength(2);
+    expect(alerts.map((row) => row.recipient)).toEqual([SECOND_PHOTOGRAPHER_EMAIL, SECOND_PHOTOGRAPHER_EMAIL]);
+    const filed = await raw.query<{ photographer_id: string }>(
+      "SELECT photographer_id::text AS photographer_id FROM outbox WHERE template = 'photographer_alert'",
+    );
+    expect(filed.rows.map((row) => row.photographer_id)).toEqual([second.photographerId, second.photographerId]);
+  });
+
+  it('is told with no platform admin on file either: a booking always has its photographer', async () => {
+    await truncateAll(raw);
+    world = await seedWorld(prisma, { platformAdmin: false });
+    const { token } = await insertBookingWithToken(prisma, world);
+
+    await expect(cancelByClient(deps(), token)).resolves.toMatchObject({ status: 'cancelled' });
+
+    expect((await outbox()).map((row) => [row.template, row.recipient]).sort()).toEqual(
+      [
+        ['cancellation', CLIENT.email],
+        ['photographer_alert', PHOTOGRAPHER_EMAIL],
+      ].sort(),
+    );
+  });
+});
+
+// --- The photographer's cancellation policy (R1.8, brief decision 5) ----------------------------------
+
+describe('a cancellation cut-off', () => {
+  const HOUR_MS = 3_600_000;
+  const startsAt = new Date('2027-02-03T07:00:00Z');
+
+  it('closes cancellation that many hours before the shoot: allowed a millisecond before, refused at it', async () => {
+    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 48 }, prisma);
+    const { booking, token } = await insertBookingWithToken(prisma, world, { startsAt });
+    const cutoff = new Date(startsAt.getTime() - 48 * HOUR_MS);
+
+    for (const late of [cutoff, new Date(cutoff.getTime() + HOUR_MS), new Date(startsAt.getTime() - 1)]) {
+      await expect(cancelByClient(deps(late), token)).resolves.toStrictEqual({ status: 'not_cancellable' });
+    }
+    expect(await bookingRow(booking.id)).toMatchObject({ status: 'confirmed', cancelled_at: null });
+    expect(await outbox()).toEqual([]);
+
+    await expect(cancelByClient(deps(new Date(cutoff.getTime() - 1)), token)).resolves.toMatchObject({ status: 'cancelled' });
+  });
+
+  it('of 0 hours leaves cancellation open until the shoot itself, as before the marketplace', async () => {
+    await updatePhotographerSettings(world.photographerId, { clientCancelCutoffHours: 0 }, prisma);
+    const { token } = await insertBookingWithToken(prisma, world, { startsAt });
+
+    await expect(cancelByClient(deps(new Date(startsAt.getTime() - 1)), token)).resolves.toMatchObject({ status: 'cancelled' });
+  });
+
+  it('is read from the booking’s own photographer, as it stands at cancellation', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    await updatePhotographerSettings(second.photographerId, { clientCancelCutoffHours: 720 }, prisma);
+    const mine = await insertBookingWithToken(prisma, world, { startsAt });
+    const theirs = await insertBookingWithToken(prisma, second, { startsAt: new Date(startsAt.getTime() + 7 * 24 * HOUR_MS) });
+    const now = new Date(startsAt.getTime() - 24 * HOUR_MS);
+
+    // The other photographer's 30 days do not bind this one's client...
+    await expect(cancelByClient(deps(now), mine.token)).resolves.toMatchObject({ status: 'cancelled' });
+    // ...and bind their own.
+    await expect(cancelByClient(deps(now), theirs.token)).resolves.toStrictEqual({ status: 'not_cancellable' });
+
+    // An edit applies to bookings already made: the policy is not snapshotted.
+    await updatePhotographerSettings(second.photographerId, { clientCancelCutoffHours: 1 }, prisma);
+    await expect(cancelByClient(deps(now), theirs.token)).resolves.toMatchObject({ status: 'cancelled' });
+  });
+});
+
+describe('a booking fee the photographer refunds on a client’s cancellation', () => {
+  beforeEach(async () => {
+    await updatePhotographerSettings(world.photographerId, { bookingFeeRefundableOnClientCancel: true }, prisma);
+  });
+
+  it('is marked refund_due with an alert of its own, and promised to the client', async () => {
+    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRwf: 18_000 });
+    const fee = await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 18_000, providerRef: '4100000777' });
+
+    await cancelByClient(deps(), token);
+
+    expect(await paymentStatuses(booking.id)).toStrictEqual([{ kind: 'booking_fee', status: 'refund_due', amount_rwf: 18_000 }]);
+    const rows = await outbox();
+    const refund = rows.find((row) => row.dedupe_key === `email:photographer_alert:refund_due:${fee.id}`);
+    expect(refund?.recipient).toBe(PHOTOGRAPHER_EMAIL);
+    expect(refund?.payload).toStrictEqual({
+      variant: 'refund_due',
+      reference: booking.reference,
+      clientName: CLIENT.name,
+      amountRwf: 18_000,
+      reason: 'booking_fee_after_client_cancel',
+      paymentReference: '4100000777',
+      provider: 'mtn_momo_direct',
+      startsAt: booking.startsAt.toISOString(),
+    });
+    expect(rows.find((row) => row.template === 'cancellation')?.payload).toMatchObject({
+      bookingFeeRwf: 18_000,
+      refundRwf: 18_000,
+      bookingFeeRefunded: true,
+    });
+    expect(rows.find((row) => row.dedupe_key.includes('booking_cancelled'))?.payload).toMatchObject({ bookingFeeRefunded: true });
+  });
+
+  it('is owed back together with a paid session fee, one alert each, and summed for the client', async () => {
+    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRwf: 18_000 });
+    await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 18_000, ageSeconds: 300 });
+    await insertPayment(prisma, booking.id, { status: 'succeeded', kind: 'session_fee', amountRwf: 27_000, ageSeconds: 100 });
+
+    await cancelByClient(deps(), token);
+
+    expect((await paymentStatuses(booking.id)).map((row) => row.status)).toEqual(['refund_due', 'refund_due']);
+    const rows = await outbox();
+    expect(rows.filter((row) => row.dedupe_key.includes('refund_due')).map((row) => row.payload.reason).sort()).toEqual([
+      'booking_fee_after_client_cancel',
+      'session_fee_after_client_cancel',
+    ]);
+    expect(rows.find((row) => row.template === 'cancellation')?.payload).toMatchObject({ refundRwf: 45_000, bookingFeeRefunded: true });
+  });
+
+  it('owes nothing when the fee was never collected', async () => {
+    const { booking, token } = await insertBookingWithToken(prisma, world);
+    await insertPayment(prisma, booking.id, { status: 'failed' });
+
+    await cancelByClient(deps(), token);
+
+    expect((await paymentStatuses(booking.id)).map((row) => row.status)).toEqual(['failed']);
+    expect((await outbox()).find((row) => row.template === 'cancellation')?.payload).toMatchObject({ refundRwf: 0, bookingFeeRefunded: false });
+    expect((await outbox()).some((row) => row.dedupe_key.includes('refund_due'))).toBe(false);
+  });
+
+  it('renders emails that no longer call the fee non-refundable', async () => {
+    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRwf: 18_000 });
+    await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 18_000 });
+
+    await cancelByClient(deps(), token);
+
+    const rows = await outbox();
+    const render = (row: OutboxRow | undefined) => renderEmail(row?.template as string, row?.payload, { webOrigin: 'https://bookly.example' }).text;
+    const toClient = render(rows.find((row) => row.template === 'cancellation'));
+    expect(toClient).not.toMatch(/non-refundable/i);
+    expect(toClient).toContain('We owe you a refund of 18,000 RWF');
+    const cancelled = render(rows.find((row) => row.dedupe_key.includes('booking_cancelled')));
+    expect(cancelled).not.toMatch(/non-refundable/i);
+    expect(cancelled).toContain('Your cancellation policy refunds their booking fee of 18,000 RWF');
+    expect(render(rows.find((row) => row.dedupe_key.includes('refund_due')))).toContain('your cancellation policy refunds the booking fee');
+  });
+
+  it('is the booking’s own photographer’s choice: another photographer’s refundable policy refunds nothing here', async () => {
+    await updatePhotographerSettings(world.photographerId, { bookingFeeRefundableOnClientCancel: false }, prisma);
+    const second = await seedSecondPhotographer(prisma, world);
+    await updatePhotographerSettings(second.photographerId, { bookingFeeRefundableOnClientCancel: true }, prisma);
+    const { booking, token } = await insertBookingWithToken(prisma, world);
+    await insertPayment(prisma, booking.id, { status: 'succeeded' });
+
+    await cancelByClient(deps(), token);
+
+    expect((await paymentStatuses(booking.id)).map((row) => row.status)).toEqual(['succeeded']);
+    expect((await outbox()).find((row) => row.template === 'cancellation')?.payload).toMatchObject({ refundRwf: 0, bookingFeeRefunded: false });
+  });
+});
+
+describe('a booking fee kept on a client’s cancellation (the default)', () => {
+  it('renders emails that say so, to the client and to the photographer', async () => {
+    const { booking, token } = await insertBookingWithToken(prisma, world, { bookingFeeRwf: 18_000 });
+    await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 18_000 });
+
+    await cancelByClient(deps(), token);
+
+    const rows = await outbox();
+    const render = (row: OutboxRow | undefined) => renderEmail(row?.template as string, row?.payload, { webOrigin: 'https://bookly.example' }).text;
+    expect(render(rows.find((row) => row.template === 'cancellation'))).toContain('the booking fee of 18,000 RWF is non-refundable');
+    expect(render(rows.find((row) => row.dedupe_key.includes('booking_cancelled')))).toContain('non-refundable and has been kept');
   });
 });
 

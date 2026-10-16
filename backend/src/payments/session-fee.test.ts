@@ -143,7 +143,7 @@ async function totalsOf(bookingId: string) {
 
 /** A catalogue add-on of this service, at whatever price the test needs. */
 async function catalogueAddon(priceRwf: number, name = 'Extra prints') {
-  return prisma.addon.create({ data: { serviceId: world.serviceId, nameEn: name, priceRwf } });
+  return prisma.addon.create({ data: { photographerId: world.photographerId, serviceId: world.serviceId, nameEn: name, priceRwf } });
 }
 
 /**

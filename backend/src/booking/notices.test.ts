@@ -66,8 +66,8 @@ describe('clientNotices', () => {
       sources({
         outbox: [
           row('c1', 'session_fee_request', { amountRwf: 1 }, '2027-01-01T10:00:00Z', 'cancelled'),
-          row('a1', 'admin_alert', { variant: 'payment_received' }, '2027-01-01T10:00:00Z'),
-          row('a2', 'admin_new_booking', {}, '2027-01-01T10:00:00Z'),
+          row('a1', 'photographer_alert', { variant: 'payment_received' }, '2027-01-01T10:00:00Z'),
+          row('a2', 'photographer_new_booking', {}, '2027-01-01T10:00:00Z'),
           row('l1', 'booking_confirmation', {}, '2027-01-01T10:00:00Z'),
           row('l2', 'access_link_resend', {}, '2027-01-01T10:00:00Z'),
           row('l3', 'booking_links', {}, '2027-01-01T10:00:00Z'),

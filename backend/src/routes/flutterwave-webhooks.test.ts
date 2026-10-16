@@ -11,7 +11,7 @@ import { FLUTTERWAVE_WEBHOOK_PATH, FlutterwaveProvider } from '../payments/flutt
 import { reconcilePendingPayments } from '../payments/reconcile.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
-  ADMIN_EMAIL,
+  PHOTOGRAPHER_EMAIL,
   type PaymentWorld,
   TEST_SECRET,
   callbackPath,
@@ -180,8 +180,8 @@ describe('a signed charge.completed at /api/webhooks/flutterwave', () => {
       { status: 'succeeded', provider_ref: CHARGE_ID, method: 'momo_mtn', amount_rwf: 20_000 },
     ]);
     expect((await rows<{ template: string; recipient: string }>('SELECT template, recipient FROM outbox ORDER BY template')).map((r) => [r.template, r.recipient])).toEqual([
-      ['admin_new_booking', ADMIN_EMAIL],
       ['booking_confirmation', 'aline.private@example.com'],
+      ['photographer_new_booking', PHOTOGRAPHER_EMAIL],
     ]);
     expect(await rows('SELECT event_id, status, signature_valid FROM webhook_event')).toEqual([
       { event_id: `${ourRef}:SUCCEEDED`, status: 'applied', signature_valid: true },

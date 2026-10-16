@@ -235,7 +235,7 @@ describe('refunds', () => {
 
     const [row] = await sessionFees(booking.id);
     expect(row).toMatchObject({ provider: 'cash', status: 'refund_due' });
-    const alert = await prisma.outbox.findFirstOrThrow({ where: { dedupeKey: `email:admin_alert:refund_due:${row?.id}` } });
+    const alert = await prisma.outbox.findFirstOrThrow({ where: { dedupeKey: `email:photographer_alert:refund_due:${row?.id}` } });
     expect(alert.payload).toMatchObject({ provider: 'cash', amountRwf: 10_000 });
   });
 });

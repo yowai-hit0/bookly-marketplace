@@ -7,6 +7,10 @@ import { accessToken, bookingLink, defineTemplate, personName, reference, text, 
  * each of their current bookings with a fresh link. Every token is new, so the
  * email says plainly that older links are dead. It is sent only to the address
  * on the bookings, so asking for someone else's links reaches only them.
+ *
+ * One address can hold bookings with several photographers, so each line names
+ * its photographer (marketplace-data-model.md §6). Optional, so a message queued
+ * before the marketplace still renders.
  */
 
 /** Far above what one client books at once; a bound, so a payload cannot grow without end. */
@@ -19,6 +23,7 @@ export const bookingLinks = defineTemplate({
       .array(
         z.object({
           reference,
+          photographerName: text(200).optional(),
           serviceName: text(200),
           packageName: text(200),
           startsAt: instant,
@@ -41,6 +46,9 @@ export const bookingLinks = defineTemplate({
           {
             type: 'details' as const,
             rows: [
+              ...(booking.photographerName === undefined
+                ? []
+                : [{ label: tr(ctx, 'email:common.labels.photographer'), value: booking.photographerName }]),
               {
                 label: tr(ctx, 'email:common.labels.service'),
                 value: tr(ctx, 'email:common.serviceValue', { service: booking.serviceName, package: booking.packageName }),

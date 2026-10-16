@@ -3,6 +3,7 @@ import { kigaliDateOf } from '../availability/engine.js';
 import { findAvailability } from '../availability/query.js';
 import { type ResolvedBasket, resolveBasket } from '../catalogue/basket.js';
 import { SQLSTATE, sqlstateOf } from '../db/errors.js';
+import { getPlatformSettings } from '../settings/index.js';
 import { claimSlot } from './claim.js';
 import { upsertClient } from './client.js';
 import { generateReference } from './reference.js';
@@ -22,6 +23,14 @@ import { generateReference } from './reference.js';
  * Money is computed here and nowhere later: `booking_fee_rate` and
  * `booking_fee_rwf` are written at creation per data-model_v2.md §9.5, and
  * every amount after this is `bookingTotals()` over the snapshots.
+ *
+ * The photographer is the package's (marketplace-data-model.md §2.9): never a
+ * value from the request. Their settings price the basket and size the buffer,
+ * their calendar decides the start, and the claim locks and writes their
+ * calendar alone. The hold is the platform's (`platform_setting.hold_minutes`):
+ * checkout is payment infrastructure, not a photographer's choice. A package
+ * whose photographer cannot be booked -- at the first read or inside the claim
+ * -- is refused as a package that cannot be booked (brief decision 4).
  */
 
 export type BookingRequest = {
@@ -61,7 +70,9 @@ export const MAX_REFERENCE_ATTEMPTS = 5;
 /**
  * Live `pending_payment` holds one email address may have at once (spec §6.22;
  * security review 2026-10-11, finding 2). Without it one visitor could hold
- * every slot on the calendar and never pay.
+ * every slot on the calendar and never pay. Counted across the whole platform,
+ * not per photographer: one address holding three photographers' afternoons is
+ * the same abuse spread wider.
  */
 export const MAX_LIVE_HOLDS_PER_EMAIL = 3;
 
@@ -77,11 +88,13 @@ export async function createBooking(deps: CreateBookingDeps, request: BookingReq
   const basket = await resolveBasket(prisma, { packageId: request.packageId, addonIds: request.addonIds });
   if (!basket.ok) return { status: 'invalid', fields: basket.fields };
   const { package: pkg, addons, settings, bookingFeeRate, quote } = basket;
+  const { holdMinutes } = await getPlatformSettings(prisma);
 
   // The engine decides, not the client: the start must be offered for this
-  // package, on its Kigali date, at this moment.
+  // package, in its photographer's calendar, on its Kigali date, at this moment.
   const date = kigaliDateOf(request.startsAt);
   const [day] = await findAvailability(prisma, {
+    photographerId: pkg.photographerId,
     from: date,
     to: date,
     packageDurationMinutes: pkg.durationMinutes,
@@ -100,9 +113,14 @@ export async function createBooking(deps: CreateBookingDeps, request: BookingReq
     try {
       const result = await claimSlot(
         prisma,
+        pkg.photographerId,
         async (tx) => {
-          // Counted inside the claim, behind its lock: two requests at once
-          // from one address cannot both see two holds and take a fourth.
+          // Counted inside the claim, behind a lock of its own: the claim's
+          // lock is one photographer's, and the cap spans them all, so two
+          // requests at once from one address -- for one photographer or two --
+          // cannot both see two holds and take a fourth. Taken after the
+          // calendar lock, always in that order, so the two never deadlock.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('bookly.holds_per_email:' || lower(${request.email})))`;
           const [held] = await tx.$queryRaw<{ live: number }[]>`
             SELECT count(*)::int AS live
               FROM booking
@@ -152,9 +170,10 @@ export async function createBooking(deps: CreateBookingDeps, request: BookingReq
             },
           };
         },
-        settings.holdMinutes,
+        holdMinutes,
       );
       if (result.status === 'slot_taken') return { status: 'slot_taken' };
+      if (result.status === 'not_bookable') return { status: 'invalid', fields: ['packageId'] };
       return { status: 'created', booking: result.booking, basket };
     } catch (error) {
       if (error instanceof TooManyHolds) return { status: 'too_many_holds' };

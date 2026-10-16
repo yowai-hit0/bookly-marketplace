@@ -2,8 +2,9 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
-import { updateSettings } from '../settings/index.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
 import { type BasketResult, type PricedBasket, priceBasket } from './basket.js';
 import { findPublicService } from './public.js';
 
@@ -13,13 +14,21 @@ import { findPublicService } from './public.js';
  * and every amount is read off those rows as they stand now.
  *
  * Only what the public can see is priced -- an active package on an active
- * service, and active add-ons that service offers (its own or the shared ones).
- * Anything else is refused by field. The add-ons come back as the service page
- * lists them: the service's own, then the shared ones, each in display order.
+ * service of a bookable photographer, and active add-ons that service offers
+ * (its own or its photographer's shared ones). Anything else is refused by
+ * field. The add-ons come back as the service page lists them: the service's
+ * own, then the shared ones, each in display order.
+ *
+ * The photographer is the package's (marketplace-spec.md R1.5): their rate
+ * prices the basket, and another photographer's add-on -- one they offer on
+ * every service included -- is refused like an unknown id. A pending or
+ * suspended photographer's package is refused like an inactive one.
  */
 
 let prisma: PrismaClient;
 let raw: pg.Client;
+/** The approved photographer every fixture below belongs to unless it names another. */
+let photographerId: string;
 
 const NONEXISTENT_ID = '00000000-0000-4000-8000-000000000000';
 
@@ -39,24 +48,24 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
-  // getSettings() throws on a missing row (data-model_v2.md §5.2).
-  await prisma.setting.create({ data: { id: 1, bookingFeeRate: '0.400' } });
+  // Born with its settings row at the defaults: a 40% booking fee.
+  ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
 });
 
 // --- Fixtures ---------------------------------------------------------------
 
 function insertService(slug: string, data: Partial<Prisma.ServiceUncheckedCreateInput> = {}) {
-  return prisma.service.create({ data: { slug, nameEn: slug, ...data } });
+  return prisma.service.create({ data: { photographerId, slug, nameEn: slug, ...data } });
 }
 
 function insertPackage(serviceId: string, nameEn: string, data: Partial<Prisma.PackageUncheckedCreateInput> = {}) {
   return prisma.package.create({
-    data: { serviceId, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
+    data: { photographerId, serviceId, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
   });
 }
 
 function insertAddon(serviceId: string | null, nameEn: string, data: Partial<Prisma.AddonUncheckedCreateInput> = {}) {
-  return prisma.addon.create({ data: { serviceId, nameEn, priceRwf: 10_000, ...data } });
+  return prisma.addon.create({ data: { photographerId, serviceId, nameEn, priceRwf: 10_000, ...data } });
 }
 
 /** The quote of a result that must have priced, with a readable failure if not. */
@@ -296,7 +305,7 @@ describe('the quote’s add-ons', () => {
     const chosen = [created[5], created[0], created[1], created[4]].map((addon) => addon?.id ?? '');
 
     const quote = quoted(await priceBasket(prisma, { packageId: pkg.id, addonIds: chosen }));
-    const detail = await findPublicService(prisma, 'portraits');
+    const detail = await findPublicService(prisma, photographerId, 'portraits');
 
     const pageOrder = (detail?.addons ?? []).map((addon) => addon.id).filter((id) => chosen.includes(id));
     expect(quote.addons.map((addon) => addon.id)).toEqual(pageOrder);
@@ -325,12 +334,12 @@ describe('the quote reflects the catalogue as it stands', () => {
     expect(amounts(quote)).toEqual({ totalRwf: 75_000, bookingFeeRwf: 30_000, sessionFeeRwf: 45_000 });
   });
 
-  it('re-prices after the global rate changes, and after an override is set or cleared', async () => {
+  it('re-prices after the photographer’s rate changes, and after an override is set or cleared', async () => {
     const service = await insertService('portraits');
     const pkg = await insertPackage(service.id, 'Standard', { priceRwf: 50_000 });
     const basket = { packageId: pkg.id, addonIds: [] };
 
-    await updateSettings({ bookingFeeRate: 0.25 }, prisma);
+    await updatePhotographerSettings(photographerId, { bookingFeeRate: 0.25 }, prisma);
     let quote = quoted(await priceBasket(prisma, basket));
     expect([quote.bookingFeeRate, quote.bookingFeeRwf]).toEqual([0.25, 12_500]);
 
@@ -343,7 +352,7 @@ describe('the quote reflects the catalogue as it stands', () => {
     expect([quote.bookingFeeRate, quote.bookingFeeRwf]).toEqual([0.25, 12_500]);
   });
 
-  it('uses an override of 0.000 as a 0% booking fee, not the global rate', async () => {
+  it('uses an override of 0.000 as a 0% booking fee, not the photographer’s rate', async () => {
     const service = await insertService('portraits', { bookingFeeRateOverride: '0.000' });
     const pkg = await insertPackage(service.id, 'Standard', { priceRwf: 50_000 });
 
@@ -365,5 +374,60 @@ describe('the quote reflects the catalogue as it stands', () => {
       ok: false,
       fields: ['addonIds'],
     });
+  });
+});
+
+// --- Per photographer (marketplace-spec.md R1.5; brief decisions 2 and 4) -----------------
+
+describe('priceBasket per photographer', () => {
+  /** A second approved photographer, with a service of the same slug. */
+  async function otherPhotographer(status: 'pending' | 'approved' | 'suspended' = 'approved') {
+    const other = await createPhotographer(prisma, { email: 'other@bookly.example', handle: 'hills-and-light', displayName: 'Hills & Light', status });
+    const service = await insertService('portraits', { photographerId: other.photographerId });
+    return { photographerId: other.photographerId, service };
+  }
+
+  it('refuses another photographer’s add-on, whether on their service or offered on all of them', async () => {
+    const service = await insertService('portraits');
+    const pkg = await insertPackage(service.id, 'Standard');
+    const own = await insertAddon(service.id, 'Extra hour');
+    const other = await otherPhotographer();
+    const theirsOnService = await insertAddon(other.service.id, 'Second shooter', { photographerId: other.photographerId });
+    // `service_id IS NULL`: offered on every one of THEIR services, never on this one.
+    const theirsGlobal = await insertAddon(null, 'Rush edit', { photographerId: other.photographerId });
+
+    for (const addonIds of [[theirsOnService.id], [theirsGlobal.id], [own.id, theirsGlobal.id]]) {
+      await expect(priceBasket(prisma, { packageId: pkg.id, addonIds })).resolves.toStrictEqual({ ok: false, fields: ['addonIds'] });
+    }
+    expect(quoted(await priceBasket(prisma, { packageId: pkg.id, addonIds: [own.id] })).totalRwf).toBe(50_000);
+  });
+
+  it('prices with the package’s photographer’s rate, not another’s', async () => {
+    const service = await insertService('portraits');
+    const pkg = await insertPackage(service.id, 'Standard', { priceRwf: 50_000 });
+    const other = await otherPhotographer();
+    const theirs = await insertPackage(other.service.id, 'Standard', { photographerId: other.photographerId, priceRwf: 50_000 });
+    await updatePhotographerSettings(other.photographerId, { bookingFeeRate: 0.1 }, prisma);
+
+    expect(quoted(await priceBasket(prisma, { packageId: pkg.id, addonIds: [] })).bookingFeeRwf).toBe(20_000);
+    expect(quoted(await priceBasket(prisma, { packageId: theirs.id, addonIds: [] })).bookingFeeRwf).toBe(5_000);
+  });
+
+  it.each(['pending', 'suspended'] as const)('refuses a %s photographer’s package exactly as an inactive one', async (status) => {
+    const other = await otherPhotographer(status);
+    const pkg = await insertPackage(other.service.id, 'Standard', { photographerId: other.photographerId });
+    const addon = await insertAddon(null, 'Rush edit', { photographerId: other.photographerId });
+
+    await expect(priceBasket(prisma, { packageId: pkg.id, addonIds: [addon.id] })).resolves.toStrictEqual({ ok: false, fields: ['packageId'] });
+  });
+
+  it('prices a photographer’s package again once they are approved', async () => {
+    const other = await otherPhotographer('pending');
+    const pkg = await insertPackage(other.service.id, 'Standard', { photographerId: other.photographerId });
+    expect((await priceBasket(prisma, { packageId: pkg.id, addonIds: [] })).ok).toBe(false);
+
+    await prisma.photographer.update({ where: { id: other.photographerId }, data: { status: 'approved', approvedAt: new Date('2026-10-01T06:00:00Z') } });
+
+    expect((await priceBasket(prisma, { packageId: pkg.id, addonIds: [] })).ok).toBe(true);
   });
 });

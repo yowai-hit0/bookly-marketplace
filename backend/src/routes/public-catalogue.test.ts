@@ -8,10 +8,19 @@ import { createApp } from '../app.js';
 import { listPublicCatalogue } from '../catalogue/public.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * The public catalogue over HTTP, against real PostgreSQL (plan.md Task 11;
- * spec §3.1 steps 1-3 and 7, §6.14, P-01).
+ * spec §3.1 steps 1-3 and 7, §6.14, P-01; brief decision 4).
+ *
+ * Browsing is by photographer: `/api/photographers` lists the bookable ones,
+ * `/api/photographers/:handle` is one's public profile, and their catalogue is
+ * under `/api/photographers/:handle/services`. An unknown handle and the handle
+ * of a photographer who cannot be booked (pending, suspended) are the same 404,
+ * and so is another photographer's slug under this one's handle. The profile
+ * never carries the login email, the status or the settings. The old
+ * `/api/services` routes are gone.
  *
  * Anonymous by design: no route here reads a credential, and a bogus one
  * changes nothing. The quote is the API's authority over money -- a body
@@ -26,6 +35,8 @@ import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 let prisma: PrismaClient;
 let raw: pg.Client;
 let app: Express;
+/** The approved photographer at PHOTOGRAPHER_HANDLE who owns the seeded catalogue. */
+let photographerId: string;
 
 const WEB_ORIGIN = 'https://bookly.example';
 const SECRET = 'public-catalogue-test-secret-at-least-32-characters';
@@ -39,7 +50,9 @@ const MALFORMED_IDS = [
   '{00000000-0000-4000-8000-000000000000}',
 ];
 const QUOTE = '/api/quote';
-const SERVICES = '/api/services';
+const PHOTOGRAPHERS = '/api/photographers';
+const PROFILE = `${PHOTOGRAPHERS}/${PHOTOGRAPHER_HANDLE}`;
+const SERVICES = `${PROFILE}/services`;
 
 /** Column names and keys the public must never receive (spec A-4b; plan.md Task 10). */
 const HIDDEN_KEYS = [
@@ -55,6 +68,12 @@ const HIDDEN_KEYS = [
   'updatedAt',
   'nameFr',
   'descriptionFr',
+  'photographerId',
+  'photographer_id',
+  'userId',
+  'contactEmail',
+  'approvedAt',
+  'suspendedAt',
 ];
 
 beforeAll(async () => {
@@ -72,8 +91,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
-  // getSettings() throws on a missing row (data-model_v2.md §5.2).
-  await prisma.setting.create({ data: { id: 1, bookingFeeRate: '0.400' } });
+  // Born with its settings row at the defaults: a 40% booking fee.
+  ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
   app = createApp({ corsOrigin: WEB_ORIGIN, publicApi: { prisma } });
 });
 
@@ -96,21 +115,21 @@ type Catalogue = {
 };
 
 function insertService(slug: string, data: Partial<Prisma.ServiceUncheckedCreateInput> = {}) {
-  return prisma.service.create({ data: { slug, nameEn: slug, ...data } });
+  return prisma.service.create({ data: { photographerId, slug, nameEn: slug, ...data } });
 }
 
 function insertPackage(serviceId: string, nameEn: string, data: Partial<Prisma.PackageUncheckedCreateInput> = {}) {
   return prisma.package.create({
-    data: { serviceId, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
+    data: { photographerId, serviceId, nameEn, priceRwf: 40_000, photoCount: 20, durationMinutes: 60, ...data },
   });
 }
 
 function insertAddon(serviceId: string | null, nameEn: string, data: Partial<Prisma.AddonUncheckedCreateInput> = {}) {
-  return prisma.addon.create({ data: { serviceId, nameEn, priceRwf: 10_000, ...data } });
+  return prisma.addon.create({ data: { photographerId, serviceId, nameEn, priceRwf: 10_000, ...data } });
 }
 
 /**
- * Portraits at the global 40%, Weddings overriding to 30%, and a deactivated
+ * Portraits at the photographer's 40%, Weddings overriding to 30%, and a deactivated
  * Events service, each with active and inactive rows, plus shared add-ons.
  * French text and sort keys are set so a leak would be visible.
  */
@@ -167,7 +186,7 @@ function expectRefused(res: Response, fields: string[]): void {
 
 // --- GET /api/services --------------------------------------------------------------------
 
-describe('GET /api/services', () => {
+describe('GET /api/photographers/:handle/services', () => {
   it('lists active services with their active packages, own add-ons and then shared add-ons', async () => {
     const c = await seedCatalogue();
 
@@ -212,7 +231,7 @@ describe('GET /api/services', () => {
 
     const body = bodyOf<unknown>(await request(app).get(SERVICES), 200);
 
-    expect(body).toStrictEqual({ services: JSON.parse(JSON.stringify(await listPublicCatalogue(prisma))) });
+    expect(body).toStrictEqual({ services: JSON.parse(JSON.stringify(await listPublicCatalogue(prisma, photographerId))) });
   });
 
   it('lists nothing for an empty catalogue', async () => {
@@ -231,8 +250,8 @@ describe('GET /api/services', () => {
 
 // --- GET /api/services/:slug --------------------------------------------------------------
 
-describe('GET /api/services/:slug', () => {
-  it('returns one active service with its active rows and the global rate', async () => {
+describe('GET /api/photographers/:handle/services/:slug', () => {
+  it('returns one active service with its active rows and the photographer’s rate', async () => {
     const c = await seedCatalogue();
 
     const body = bodyOf<unknown>(await request(app).get(`${SERVICES}/portraits`), 200);
@@ -256,7 +275,7 @@ describe('GET /api/services/:slug', () => {
     });
   });
 
-  it('carries the service’s own rate where it overrides the global one: 0.300 is 0.3', async () => {
+  it('carries the service’s own rate where it overrides the photographer’s: 0.300 is 0.3', async () => {
     await seedCatalogue();
 
     const body = bodyOf<{ service: { bookingFeeRate: unknown } }>(await request(app).get(`${SERVICES}/weddings`), 200);
@@ -384,7 +403,7 @@ describe('POST /api/quote', () => {
   it('accepts 50 add-ons, the ceiling', async () => {
     const c = await seedCatalogue();
     await prisma.addon.createMany({
-      data: Array.from({ length: 50 }, (_, index) => ({ serviceId: null, nameEn: `Print ${index}`, priceRwf: 1_000, sortOrder: 10 })),
+      data: Array.from({ length: 50 }, (_, index) => ({ photographerId, serviceId: null, nameEn: `Print ${index}`, priceRwf: 1_000, sortOrder: 10 })),
     });
     const prints = await prisma.addon.findMany({ where: { nameEn: { startsWith: 'Print ' } } });
     expect(prints).toHaveLength(50);
@@ -449,7 +468,7 @@ describe('a tampered quote request', () => {
 
     const pkg = await prisma.package.findUniqueOrThrow({ where: { id: c.standard.id } });
     const addon = await prisma.addon.findUniqueOrThrow({ where: { id: c.extraHour.id } });
-    const setting = await prisma.setting.findUniqueOrThrow({ where: { id: 1 } });
+    const setting = await prisma.photographerSetting.findUniqueOrThrow({ where: { photographerId } });
     expect([pkg.priceRwf, addon.priceRwf, setting.bookingFeeRate.toFixed(3)]).toEqual([40_000, 10_000, '0.400']);
     expect(await prisma.booking.count()).toBe(0);
   });
@@ -648,6 +667,8 @@ describe('mounting', () => {
     const closed = createApp({ corsOrigin: WEB_ORIGIN });
 
     for (const res of [
+      await request(closed).get(PHOTOGRAPHERS),
+      await request(closed).get(PROFILE),
       await request(closed).get(SERVICES),
       await request(closed).get(`${SERVICES}/portraits`),
       await request(closed).post(QUOTE).send({ packageId: c.standard.id }),
@@ -657,7 +678,7 @@ describe('mounting', () => {
     }
   });
 
-  it('serves only the three routes it declares, with their own methods', async () => {
+  it('serves only the routes it declares, with their own methods', async () => {
     const c = await seedCatalogue();
 
     for (const res of [
@@ -666,11 +687,15 @@ describe('mounting', () => {
       await request(app).delete(`${SERVICES}/portraits`),
       await request(app).patch(`${SERVICES}/portraits`).send({ nameEn: 'Hacked' }),
       await request(app).put(QUOTE).send({ packageId: c.standard.id }),
+      await request(app).post(PHOTOGRAPHERS).send({ handle: 'new-one' }),
+      await request(app).patch(PROFILE).send({ displayName: 'Hacked' }),
+      await request(app).delete(PROFILE),
     ]) {
       expect(res.status).toBe(404);
       expect(res.body).toStrictEqual({ error: 'not_found' });
     }
     expect((await prisma.service.findUniqueOrThrow({ where: { id: c.portraits.id } })).nameEn).toBe('Portraits');
+    expect((await prisma.photographer.findUniqueOrThrow({ where: { id: photographerId } })).displayName).toBe('Kigali Lens');
   });
 
   it('opens no /api/admin/* route: without the admin option they 404', async () => {
@@ -712,6 +737,8 @@ describe('every public response', () => {
     const c = await seedCatalogue();
 
     const responses = [
+      await request(app).get(PHOTOGRAPHERS),
+      await request(app).get(PROFILE),
       await request(app).get(SERVICES),
       await request(app).get(`${SERVICES}/portraits`),
       await request(app).get(`${SERVICES}/weddings`),
@@ -724,6 +751,8 @@ describe('every public response', () => {
       expect(res.text).not.toMatch(/processing/i);
       expect(res.text).not.toMatch(/gateway/i);
       for (const key of HIDDEN_KEYS) expect(res.text, key).not.toContain(key);
+      // Nor the photographer's login, their status or their settings.
+      for (const secret of [PHOTOGRAPHER_EMAIL, 'approved', 'minLeadTimeMinutes', 'bufferMinutes']) expect(res.text, secret).not.toContain(secret);
       for (const french of ['FR', 'en studio', 'Heure en plus']) expect(res.text, french).not.toContain(french);
       // Nor anything inactive.
       for (const inactive of ['Retired', 'Old frame', 'Discontinued prints', 'Events', 'Half day', 'Drone']) {
@@ -752,5 +781,193 @@ describe('every public response', () => {
     ]);
     expect(Object.keys(body.quote.service ?? {}).sort()).toEqual(['id', 'nameEn', 'slug']);
     expect(Object.keys(body.quote.package ?? {}).sort()).toEqual(['id', 'nameEn', 'priceRwf']);
+  });
+});
+
+// --- Photographers (brief decision 4) --------------------------------------------------------------
+
+/** Another photographer with a catalogue of the same slugs, approved unless told otherwise. */
+async function seedOtherPhotographer(
+  { handle = 'hills-and-light', displayName = 'Hills & Light', status = 'approved' }: {
+    handle?: string;
+    displayName?: string;
+    status?: 'pending' | 'approved' | 'suspended';
+  } = {},
+) {
+  const other = await createPhotographer(prisma, { email: `${handle}@bookly.example`, handle, displayName, status });
+  const owner = { photographerId: other.photographerId };
+  const portraits = await insertService('portraits', { ...owner, nameEn: 'Their portraits' });
+  const onlyTheirs = await insertService('drone-shoots', { ...owner, nameEn: 'Drone shoots' });
+  return {
+    photographerId: other.photographerId,
+    handle,
+    portraits,
+    onlyTheirs,
+    standard: await insertPackage(portraits.id, 'Their standard', owner),
+    extraHour: await insertAddon(portraits.id, 'Their extra hour', owner),
+    rushEdit: await insertAddon(null, 'Their rush edit', owner),
+  };
+}
+
+function expectNotFound(res: Response, label = ''): void {
+  expect(res.status, `${label} answered ${res.status} ${JSON.stringify(res.body)}`).toBe(404);
+  expect(res.body).toStrictEqual({ error: 'not_found' });
+}
+
+describe('GET /api/photographers', () => {
+  it('lists the bookable photographers by name: handle, display name and cover only', async () => {
+    await prisma.photographer.update({ where: { id: photographerId }, data: { coverImageUrl: 'https://images.example.com/kigali.jpg', bio: 'Hidden here.' } });
+    await seedOtherPhotographer({ handle: 'amahoro-studio', displayName: 'Amahoro Studio' });
+    await seedOtherPhotographer({ handle: 'pending-one', displayName: 'A Pending One', status: 'pending' });
+    await seedOtherPhotographer({ handle: 'suspended-one', displayName: 'A Suspended One', status: 'suspended' });
+
+    const body = bodyOf<unknown>(await request(app).get(PHOTOGRAPHERS), 200);
+
+    expect(body).toStrictEqual({
+      photographers: [
+        { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null },
+        { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg' },
+      ],
+    });
+  });
+
+  it('lists nobody when nobody can be booked', async () => {
+    await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'suspended', suspendedAt: new Date('2026-10-01T06:00:00Z') } });
+
+    expect(bodyOf<unknown>(await request(app).get(PHOTOGRAPHERS), 200)).toStrictEqual({ photographers: [] });
+  });
+});
+
+describe('GET /api/photographers/:handle', () => {
+  it('returns the public profile, with the contact email and never the login email', async () => {
+    await prisma.photographer.update({
+      where: { id: photographerId },
+      data: {
+        bio: 'Portraits in natural light.',
+        contactPhone: '+250788000001',
+        whatsappPhone: '+250788000002',
+        contactEmail: 'hello@kigalilens.example',
+        coverImageUrl: 'https://images.example.com/kigali.jpg',
+      },
+    });
+
+    const res = await request(app).get(PROFILE);
+
+    expect(bodyOf<unknown>(res, 200)).toStrictEqual({
+      photographer: {
+        handle: PHOTOGRAPHER_HANDLE,
+        displayName: 'Kigali Lens',
+        bio: 'Portraits in natural light.',
+        contactPhone: '+250788000001',
+        whatsappPhone: '+250788000002',
+        email: 'hello@kigalilens.example',
+        coverImageUrl: 'https://images.example.com/kigali.jpg',
+      },
+    });
+    expect(res.text).not.toContain(PHOTOGRAPHER_EMAIL);
+    expect(res.text).not.toContain(photographerId);
+  });
+
+  it('404s an unknown handle, a pending or suspended photographer and a malformed handle alike', async () => {
+    await seedOtherPhotographer({ handle: 'pending-one', status: 'pending' });
+    await seedOtherPhotographer({ handle: 'suspended-one', status: 'suspended' });
+
+    for (const handle of ['nobody-here', 'pending-one', 'suspended-one', 'Kigali-Lens', 'kigali%25', 'x'.repeat(40)]) {
+      expectNotFound(await request(app).get(`${PHOTOGRAPHERS}/${handle}`), handle);
+    }
+  });
+});
+
+describe('a photographer’s catalogue under their handle', () => {
+  it('lists only that photographer’s services and add-ons, shared ones included', async () => {
+    await seedCatalogue();
+    const other = await seedOtherPhotographer();
+
+    const mine = bodyOf<{ services: { slug: string; addons: { nameEn: string }[] }[] }>(await request(app).get(SERVICES), 200);
+    const theirs = bodyOf<{ services: { slug: string; addons: { nameEn: string }[] }[] }>(
+      await request(app).get(`${PHOTOGRAPHERS}/${other.handle}/services`),
+      200,
+    );
+
+    expect(mine.services.map((service) => service.slug)).toEqual(['portraits', 'weddings']);
+    expect(JSON.stringify(mine)).not.toContain('Their');
+    expect(theirs.services.map((service) => [service.slug, service.addons.map((addon) => addon.nameEn)])).toEqual([
+      ['drone-shoots', ['Their rush edit']],
+      ['portraits', ['Their extra hour', 'Their rush edit']],
+    ]);
+  });
+
+  it('serves the same slug as two services under two handles', async () => {
+    const c = await seedCatalogue();
+    const other = await seedOtherPhotographer();
+
+    const mine = bodyOf<{ service: { id: string } }>(await request(app).get(`${SERVICES}/portraits`), 200);
+    const theirs = bodyOf<{ service: { id: string } }>(await request(app).get(`${PHOTOGRAPHERS}/${other.handle}/services/portraits`), 200);
+
+    expect(mine.service.id).toBe(c.portraits.id);
+    expect(theirs.service.id).toBe(other.portraits.id);
+  });
+
+  it('404s another photographer’s slug under this handle', async () => {
+    await seedCatalogue();
+    await seedOtherPhotographer();
+
+    expectNotFound(await request(app).get(`${SERVICES}/drone-shoots`));
+  });
+
+  it('404s an unbookable or unknown photographer’s catalogue and services, even with a real slug', async () => {
+    const pending = await seedOtherPhotographer({ handle: 'pending-one', status: 'pending' });
+    const suspended = await seedOtherPhotographer({ handle: 'suspended-one', status: 'suspended' });
+
+    for (const handle of [pending.handle, suspended.handle, 'nobody-here']) {
+      expectNotFound(await request(app).get(`${PHOTOGRAPHERS}/${handle}/services`), handle);
+      expectNotFound(await request(app).get(`${PHOTOGRAPHERS}/${handle}/services/portraits`), handle);
+    }
+  });
+
+  it('404s a photographer the moment they are suspended', async () => {
+    await seedCatalogue();
+    expect((await request(app).get(`${SERVICES}/portraits`)).status).toBe(200);
+
+    await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'suspended', suspendedAt: new Date('2026-10-01T06:00:00Z') } });
+
+    for (const path of [PROFILE, SERVICES, `${SERVICES}/portraits`]) expectNotFound(await request(app).get(path), path);
+  });
+});
+
+describe('the replaced /api/services routes', () => {
+  it('are gone', async () => {
+    await seedCatalogue();
+
+    expectNotFound(await request(app).get('/api/services'));
+    expectNotFound(await request(app).get('/api/services/portraits'));
+  });
+});
+
+describe('POST /api/quote across photographers', () => {
+  it('refuses another photographer’s add-on, on their service or offered on all of them, with 422', async () => {
+    const c = await seedCatalogue();
+    const other = await seedOtherPhotographer();
+
+    for (const addonIds of [[other.extraHour.id], [other.rushEdit.id], [c.extraHour.id, other.rushEdit.id]]) {
+      expectRefused(await quote({ packageId: c.standard.id, addonIds }), ['addonIds']);
+    }
+  });
+
+  it('prices the other photographer’s own package with their own add-ons', async () => {
+    const other = await seedOtherPhotographer();
+
+    const body = bodyOf<{ quote: { totalRwf: number } }>(await quote({ packageId: other.standard.id, addonIds: [other.extraHour.id, other.rushEdit.id] }), 200);
+
+    expect(body.quote.totalRwf).toBe(60_000);
+  });
+
+  it.each(['pending', 'suspended'] as const)('refuses a %s photographer’s package as one that cannot be booked', async (status) => {
+    const other = await seedOtherPhotographer({ status });
+
+    const res = await quote({ packageId: other.standard.id, addonIds: [other.rushEdit.id] });
+
+    expectRefused(res, ['packageId']);
+    expect(res.text).not.toContain(status);
   });
 });

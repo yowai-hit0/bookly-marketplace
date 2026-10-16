@@ -29,7 +29,8 @@
         "paymentFor": "Payment for",
         "paidAt": "Paid on",
         "paymentReference": "Payment reference",
-        "provider": "Paid through"
+        "provider": "Paid through",
+        "photographer": "Photographer"
       },
       "paymentKinds": {
         "booking_fee": "booking fee",
@@ -219,7 +220,8 @@
           "late_payment_slot_taken": "The client's payment arrived after their hold had expired and the time had been booked by someone else.",
           "duplicate_payment": "The client paid the booking fee twice. The booking stands on the first payment; this one is owed back.",
           "session_fee_after_client_cancel": "The client cancelled after paying the session fee, which is refunded.",
-          "overpayment": "This booking has been paid more than it is worth, so the difference is owed back."
+          "overpayment": "This booking has been paid more than it is worth, so the difference is owed back.",
+          "booking_fee_after_client_cancel": "The client cancelled, and your cancellation policy refunds the booking fee."
         },
         "howTo": "The system does not move money. Refund the client through {{provider}}, then record the refund on the booking.",
         "howToCash": "The system does not move money. This was paid in cash: give it back to the client, then record the refund on the booking."
@@ -229,7 +231,8 @@
         "preheader": "The time is free again.",
         "heading": "A client cancelled their booking",
         "intro": "{{client}} cancelled their booking for {{service}} on {{when}}. The time is free again.",
-        "feeKept": "Their booking fee of {{amount}} is non-refundable and has been kept."
+        "feeKept": "Their booking fee of {{amount}} is non-refundable and has been kept.",
+        "feeRefunded": "Your cancellation policy refunds their booking fee of {{amount}}. A separate alert tells you how to send it."
       }
     },
     "platformAlert": {

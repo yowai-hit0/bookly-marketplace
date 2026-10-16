@@ -4,6 +4,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { createPhotographer } from '../test/payment-fixtures.js';
 import { HOLD_SWEEP_SCHEDULE, startHoldSweeper, sweepExpiredHolds } from './hold-sweeper.js';
 
 /**
@@ -13,6 +14,9 @@ import { HOLD_SWEEP_SCHEDULE, startHoldSweeper, sweepExpiredHolds } from './hold
  * schedule is tidiness, and a test that slept for a minute would assert the
  * clock rather than the query. What the cron layer owes us is only that the
  * expression is valid and that the task can be stopped.
+ *
+ * Unlike the claim, the sweeper stays global (marketplace-data-model.md §2.9):
+ * it expires every photographer's lapsed holds in one pass.
  */
 
 let prisma: PrismaClient;
@@ -36,7 +40,7 @@ beforeEach(async () => {
 // --- Fixtures ---------------------------------------------------------------
 
 type Slot = { startsAt: Date; endsAt: Date; bufferEndsAt: Date };
-type Catalogue = { serviceId: string; packageId: string; clientId: string };
+type Catalogue = { photographerId: string; serviceId: string; packageId: string; clientId: string };
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -51,10 +55,13 @@ function slotAt(n: number): Slot {
   };
 }
 
-async function insertCatalogue(): Promise<Catalogue> {
-  const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+/** A photographer with one service and package, and the shared client. */
+async function insertCatalogue(handle = 'kigali-lens'): Promise<Catalogue> {
+  const { photographerId } = await createPhotographer(prisma, { email: `${handle}@bookly.example`, handle, displayName: handle });
+  const service = await prisma.service.create({ data: { photographerId, slug: 'portrait', nameEn: 'Portrait' } });
   const pkg = await prisma.package.create({
     data: {
+      photographerId,
       serviceId: service.id,
       nameEn: 'Standard',
       priceRwf: 40_000,
@@ -62,10 +69,10 @@ async function insertCatalogue(): Promise<Catalogue> {
       durationMinutes: 60,
     },
   });
-  const client = await prisma.client.create({
-    data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
-  });
-  return { serviceId: service.id, packageId: pkg.id, clientId: client.id };
+  const client =
+    (await prisma.client.findFirst({ where: { email: 'aline@example.com' } })) ??
+    (await prisma.client.create({ data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' } }));
+  return { photographerId, serviceId: service.id, packageId: pkg.id, clientId: client.id };
 }
 
 async function insertBooking(
@@ -73,10 +80,12 @@ async function insertBooking(
   n: number,
   status: string,
   holdExpiresAt: Date | null,
+  slot: Slot = slotAt(n),
 ): Promise<Booking> {
   return prisma.booking.create({
     data: {
       reference: `BKY-2610-${String(n).padStart(5, '0')}`,
+      photographerId: ids.photographerId,
       clientId: ids.clientId,
       contactName: 'Aline Uwase',
       contactEmail: 'aline@example.com',
@@ -94,7 +103,7 @@ async function insertBooking(
       bookingFeeRwf: 16_000,
       status,
       holdExpiresAt,
-      ...slotAt(n),
+      ...slot,
     },
   });
 }
@@ -116,6 +125,19 @@ describe('sweepExpiredHolds', () => {
     const ids = await insertCatalogue();
     await insertBooking(ids, 1, 'pending_payment', lapsed());
     await insertBooking(ids, 2, 'pending_payment', lapsed());
+
+    await expect(sweepExpiredHolds(prisma)).resolves.toBe(2);
+
+    await expect(statusOf(1)).resolves.toBe('expired');
+    await expect(statusOf(2)).resolves.toBe('expired');
+  });
+
+  it('expires every photographer’s lapsed holds in one pass, the same hour included', async () => {
+    const a = await insertCatalogue();
+    const b = await insertCatalogue('hills-and-light');
+    await insertBooking(a, 1, 'pending_payment', lapsed());
+    // Another photographer's calendar: the same hour as booking 1 is no conflict.
+    await insertBooking(b, 2, 'pending_payment', lapsed(), slotAt(1));
 
     await expect(sweepExpiredHolds(prisma)).resolves.toBe(2);
 

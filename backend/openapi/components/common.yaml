@@ -213,6 +213,16 @@ responses:
           error: unauthenticated
 
 parameters:
+  Handle:
+    name: handle
+    in: path
+    required: true
+    description: |
+      A photographer's handle, as in `/p/{handle}`: lowercase letters, digits
+      and hyphens, 3 to 30 characters. Anything else is a 404, as an unknown
+      handle is.
+    schema: { type: string, examples: [kigali-lens] }
+
   AccessToken:
     name: token
     in: path

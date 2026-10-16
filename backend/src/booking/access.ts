@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { type PhotographerSettings, getPhotographerSettings } from '../settings/index.js';
 import { hashAccessToken } from './access-token.js';
 
 /**
@@ -28,7 +29,15 @@ export const FULL_BOOKING = {
   notes: { where: { deletedAt: null }, select: { id: true, body: true, createdAt: true, deletedAt: true } },
 } satisfies Prisma.BookingInclude;
 
-export type AccessedBooking = Prisma.BookingGetPayload<{ include: typeof FULL_BOOKING }>;
+/**
+ * The booking's photographer's client cancellation policy (marketplace-spec.md
+ * R1.8): until when the client may cancel, and whether that refunds the booking
+ * fee. Read live from the photographer's settings -- the booking keeps no copy
+ * of it -- through the one settings accessor.
+ */
+export type CancellationPolicy = Pick<PhotographerSettings, 'clientCancelCutoffHours' | 'bookingFeeRefundableOnClientCancel'>;
+
+export type AccessedBooking = Prisma.BookingGetPayload<{ include: typeof FULL_BOOKING }> & { cancellationPolicy: CancellationPolicy };
 
 /**
  * The booking a token addresses, or null when there is none to show. Records the
@@ -47,5 +56,13 @@ export async function findBookingByToken(prisma: PrismaClient, token: string): P
   const id = used[0]?.id;
   if (id === undefined) return null;
 
-  return prisma.booking.findUnique({ where: { id }, include: FULL_BOOKING });
+  const booking = await prisma.booking.findUnique({ where: { id }, include: FULL_BOOKING });
+  if (booking === null) return null;
+  return { ...booking, cancellationPolicy: await cancellationPolicyOf(prisma, booking.photographerId) };
+}
+
+/** The policy a client's cancellation is judged by: their booking's photographer's, as it stands now. */
+export async function cancellationPolicyOf(prisma: PrismaClient, photographerId: string): Promise<CancellationPolicy> {
+  const { clientCancelCutoffHours, bookingFeeRefundableOnClientCancel } = await getPhotographerSettings(photographerId, prisma);
+  return { clientCancelCutoffHours, bookingFeeRefundableOnClientCancel };
 }

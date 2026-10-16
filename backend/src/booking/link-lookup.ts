@@ -65,7 +65,7 @@ export async function emailBookingLinks(deps: LinkLookupDeps, typedEmail: string
          AND status IN ('confirmed', 'completed')`;
     const candidates = await tx.booking.findMany({
       where: { id: { in: matched.map((row) => row.id) } },
-      include: { addons: true, payments: true },
+      include: { addons: true, payments: true, photographer: { select: { displayName: true } } },
       orderBy: { startsAt: 'asc' },
     });
     const today = kigaliDateOf(now);
@@ -87,6 +87,9 @@ export async function emailBookingLinks(deps: LinkLookupDeps, typedEmail: string
     for (const booking of current) {
       bookings.push({
         reference: booking.reference,
+        // One address can hold bookings with several photographers: each line
+        // says whose it is (marketplace-data-model.md §6).
+        photographerName: booking.photographer.displayName,
         serviceName: booking.serviceNameSnapshot,
         packageName: booking.packageNameSnapshot,
         startsAt: booking.startsAt.toISOString(),

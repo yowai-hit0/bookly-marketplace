@@ -1,12 +1,17 @@
 import type { PrismaClient } from '@prisma/client';
 import { OCCUPYING_STATUSES } from '../db/statuses.js';
-import { getSettings } from '../settings/index.js';
+import { getPhotographerSettings } from '../settings/index.js';
 import { type KigaliDate, assertKigaliDate, availableStarts, kigaliMinuteToUtc } from './engine.js';
 
 /**
  * The database side of availability (plan.md Task 8): loads the rows the pure
  * engine needs for a run of Kigali dates, reads the operating values through
- * `getSettings()`, and returns what a visitor may see.
+ * `getPhotographerSettings()`, and returns what a visitor may see.
+ *
+ * One photographer's calendar at a time (marketplace-spec.md T1.4): their
+ * working hours, their blocks, their bookings and their lead time and buffer.
+ * Another photographer's busy afternoon is nobody else's: each photographer
+ * books their own time, and the exclusion constraint is per photographer too.
  *
  * The result is the PUBLIC projection -- dates and start instants, nothing
  * else. Block reasons, booking ids and client names are never selected from the
@@ -21,6 +26,8 @@ export type DayAvailability = {
 };
 
 export type FindAvailabilityOptions = {
+  /** Whose calendar: the package's photographer, never a value from the request (R1.4). */
+  photographerId: string;
   /** First Kigali date, inclusive. */
   from: KigaliDate;
   /** Last Kigali date, inclusive. */
@@ -37,16 +44,17 @@ export async function findAvailability(
   prisma: PrismaClient,
   options: FindAvailabilityOptions,
 ): Promise<DayAvailability[]> {
-  const { from, to, packageDurationMinutes, now } = options;
+  const { photographerId, from, to, packageDurationMinutes, now } = options;
   const dates = kigaliDatesBetween(from, to);
 
   const rangeStart = kigaliMinuteToUtc(from, 0);
   const rangeEnd = kigaliMinuteToUtc(to, MINUTES_PER_DAY);
-  const { minLeadTimeMinutes, bufferMinutes } = await getSettings(prisma);
+  const { minLeadTimeMinutes, bufferMinutes } = await getPhotographerSettings(photographerId, prisma);
 
   const [workingHours, blocks, bookings] = await Promise.all([
     prisma.workingHours.findMany({
       where: {
+        photographerId,
         OR: [
           { effectiveDate: null },
           { effectiveDate: { gte: utcMidnight(from), lte: utcMidnight(to) } },
@@ -61,11 +69,12 @@ export async function findAvailability(
       },
     }),
     prisma.availabilityBlock.findMany({
-      where: { startsAt: { lt: rangeEnd }, endsAt: { gt: rangeStart } },
+      where: { photographerId, startsAt: { lt: rangeEnd }, endsAt: { gt: rangeStart } },
       select: { startsAt: true, endsAt: true },
     }),
     prisma.booking.findMany({
       where: {
+        photographerId,
         status: { in: [...OCCUPYING_STATUSES] },
         bufferEndsAt: { gt: rangeStart },
         // A candidate near the last closing reserves its own buffer past it, so

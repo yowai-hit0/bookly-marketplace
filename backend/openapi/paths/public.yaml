@@ -16,16 +16,73 @@ health:
               properties:
                 ok: { const: true }
 
-services:
+photographers:
   get:
-    operationId: listServices
+    operationId: listPhotographers
     tags: [Catalogue & availability]
-    summary: List active services
-    description: Active services, each with their active packages and the add-ons they offer. Anonymous.
+    summary: List the photographers who can be booked
+    description: |
+      Every photographer who can be booked, by display name. No filters yet:
+      the directory's category, district, price and date filters come later.
+      Anonymous.
     security: []
     responses:
       '200':
-        description: The public catalogue.
+        description: The bookable photographers.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photographers]
+              additionalProperties: false
+              properties:
+                photographers:
+                  type: array
+                  items: { $ref: ../components/catalogue.yaml#/schemas/PublicPhotographerSummary }
+
+photographer:
+  get:
+    operationId: getPhotographer
+    tags: [Catalogue & availability]
+    summary: One photographer's public profile
+    description: |
+      The profile behind `/p/{handle}`. Never the photographer's login email,
+      status or operating settings: `email` is the public contact address they
+      chose, or null. An unknown handle and the handle of a photographer who
+      cannot be booked are the same 404. Anonymous.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/Handle
+    responses:
+      '200':
+        description: The public profile.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photographer]
+              additionalProperties: false
+              properties:
+                photographer: { $ref: ../components/catalogue.yaml#/schemas/PublicPhotographerProfile }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+services:
+  get:
+    operationId: listPhotographerServices
+    tags: [Catalogue & availability]
+    summary: List one photographer's active services
+    description: |
+      The photographer's active services, each with its active packages and the
+      add-ons it offers: its own, then those the photographer offers on every
+      service. Never another photographer's. A 404 for a handle that is unknown
+      or cannot be booked. Anonymous.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/Handle
+    responses:
+      '200':
+        description: The photographer's public catalogue.
         content:
           application/json:
             schema:
@@ -36,14 +93,22 @@ services:
                 services:
                   type: array
                   items: { $ref: ../components/catalogue.yaml#/schemas/PublicService }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
 
 service:
   get:
-    operationId: getService
+    operationId: getPhotographerService
     tags: [Catalogue & availability]
-    summary: One service by slug
+    summary: One of a photographer's services by slug
+    description: |
+      Slugs are unique per photographer, so the same slug under another handle is
+      another service. A 404 for an unknown or inactive slug, a slug only another
+      photographer has, and a handle that is unknown or cannot be booked.
+      Anonymous.
     security: []
     parameters:
+      - $ref: ../components/common.yaml#/parameters/Handle
       - name: slug
         in: path
         required: true
@@ -88,7 +153,11 @@ quote:
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '422':
-        description: A package or add-on the public cannot book; names the field.
+        description: |
+          A package or add-on the public cannot book; names the field. A package
+          whose photographer cannot be booked is refused as `packageId`, and an
+          add-on of another photographer -- even one they offer on every service
+          -- as `addonIds`.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
@@ -121,7 +190,10 @@ availability:
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '422':
-        description: An unbookable package, or a month the engine cannot compute.
+        description: |
+          An unbookable package -- its photographer's included, answered exactly
+          as an unknown package -- or a month the engine cannot compute. The
+          month is the package's photographer's calendar alone.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
@@ -156,7 +228,11 @@ bookings:
             schema: { $ref: ../components/common.yaml#/schemas/Error }
             example: { error: slot_taken }
       '422':
-        description: Something named cannot be booked, or the start is not currently offered.
+        description: |
+          Something named cannot be booked, or the start is not currently offered
+          in the package's photographer's calendar. A package whose photographer
+          cannot be booked is `packageId`; another photographer's add-on is
+          `addonIds`.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/ValidationError }

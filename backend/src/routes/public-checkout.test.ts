@@ -596,7 +596,9 @@ describe('mounting', () => {
 
 describe('POST /api/bookings with payments mounted', () => {
   beforeEach(async () => {
-    await prisma.workingHours.createMany({ data: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, opensMinute: 540, closesMinute: 1020 })) });
+    await prisma.workingHours.createMany({
+      data: [1, 2, 3, 4, 5].map((weekday) => ({ photographerId: world.photographerId, weekday, opensMinute: 540, closesMinute: 1020 })),
+    });
   });
 
   const body = () => ({

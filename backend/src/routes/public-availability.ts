@@ -15,8 +15,10 @@ import { kigaliDate, parseOrReject } from './validation.js';
  * Every rule lives in the engine (data-model_v2.md §8) and the projection in
  * `findAvailability()`, which never selects a block reason, a booking id or a
  * client name; this route returns it unchanged. A package the public cannot
- * book -- unknown, inactive, or on an inactive service -- is a 422 naming
- * `packageId`, the same answer the quote gives.
+ * book -- unknown, inactive, on an inactive service, or sold by a photographer
+ * who cannot be booked -- is a 422 naming `packageId`, the same answer the
+ * quote gives, and never a hint of which. The calendar is the package's
+ * photographer's alone: their hours, blocks and bookings (T1.4).
  *
  * No caching layer, and `Cache-Control: no-store` so no browser or proxy adds
  * one: the database is the single source of truth for availability, and a
@@ -46,7 +48,7 @@ export function availabilityRouter(prisma: PrismaClient, now: () => Date): Route
 
     const pkg = await prisma.package.findFirst({
       where: { id: query.packageId, ...BOOKABLE_PACKAGE },
-      select: { durationMinutes: true },
+      select: { durationMinutes: true, photographerId: true },
     });
     if (pkg === null) {
       res.status(422).json({ error: 'validation_failed', fields: ['packageId'] });
@@ -54,6 +56,7 @@ export function availabilityRouter(prisma: PrismaClient, now: () => Date): Route
     }
 
     const days = await findAvailability(prisma, {
+      photographerId: pkg.photographerId,
       from: `${query.month}-01`,
       to: `${query.month}-${lastDayOfMonth(query.month)}`,
       packageDurationMinutes: pkg.durationMinutes,

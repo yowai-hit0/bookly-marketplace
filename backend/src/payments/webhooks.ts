@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Booking, Prisma, PrismaClient } from '@prisma/client';
 import { type AccessToken, accessTokenExpiry, generateAccessToken } from '../booking/access-token.js';
 import { completeIfSettled } from '../booking/auto-complete.js';
-import { expireOverlappingStaleHolds } from '../booking/claim.js';
+import { expireOverlappingStaleHolds, lockPhotographerCalendar } from '../booking/claim.js';
 import { bookingTotals } from '../booking/totals.js';
 import { isSlotTaken, isTransactionConflict } from '../db/errors.js';
 import { OCCUPYING_STATUSES } from '../db/statuses.js';
@@ -40,7 +40,9 @@ import {
  * token exists only inside the confirmation email's outbox payload.
  *
  * A fee arriving after the hold expired (spec §6.9) re-confirms the booking only
- * if its slot is still free, checked under the slot-claim lock; otherwise the
+ * if its slot is still free in its own photographer's calendar, checked under
+ * that photographer's slot-claim lock (marketplace-spec.md R1.3, T1.3): another
+ * photographer's booking at the same hour takes nothing from it. Otherwise the
  * booking stays `expired`, the payment is `refund_due`, and the photographer is
  * told at once. A second fee for a booking that already has one is the same
  * kind of money: owed back, and flagged.
@@ -184,6 +186,8 @@ async function applyWithRetry(deps: WebhookDeps, providerId: PaymentProviderId, 
 type PaymentRecord = {
   id: string;
   booking_id: string;
+  /** The booking's photographer: whose calendar lock a success takes. */
+  photographer_id: string;
   provider: string;
   kind: string;
   status: PaymentStatus;
@@ -214,15 +218,16 @@ async function applyEvent(
     SELECT status FROM webhook_event WHERE id = ${eventRowId}::uuid FOR UPDATE`;
   if (held[0]?.status !== 'received') return { status: 'ignored', note: 'already_processed', logs };
 
-  // A success may confirm a booking into its slot, so it queues behind slot
-  // claims -- the same lock, taken first, so the two can never wait on each other.
-  if (event.reportedStatus === 'succeeded') {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('bookly.claim_slot'))`;
-  }
-
-  // Step 3.
+  // Step 3. The payment row is locked first: it names the booking, and so the
+  // photographer, whose lock comes next.
   const payment = await matchPayment(tx, providerId, event);
   if (payment === null) return finish('ignored', 'no_matching_payment');
+
+  // A success may confirm a booking into its slot, so it queues behind that
+  // photographer's slot claims -- the claim's own lock (R1.3). The order is
+  // always payment row, then photographer lock, then booking row. A claim never
+  // touches a payment row, so it can never hold the lock while waiting on one.
+  if (event.reportedStatus === 'succeeded') await lockPhotographerCalendar(tx, payment.photographer_id);
 
   // Step 4.
   if ((SETTLED_PAYMENT_STATUSES as readonly string[]).includes(payment.status)) {
@@ -293,7 +298,7 @@ async function applyEvent(
 
   if (booking.status === 'expired') {
     // Dead holds in the way do not count as taken (data-model_v2.md §9.2).
-    await expireOverlappingStaleHolds(tx, booking.startsAt, booking.bufferEndsAt);
+    await expireOverlappingStaleHolds(tx, booking.photographerId, booking.startsAt, booking.bufferEndsAt);
     if (await slotOccupied(tx, booking)) {
       await refundDue(tx, logs, booking, payment, reported, settledAt, 'late_payment_slot_taken');
       return finish('applied', 'refund_due_slot_taken');
@@ -311,32 +316,43 @@ async function applyEvent(
 }
 
 async function matchPayment(tx: Prisma.TransactionClient, providerId: PaymentProviderId, event: ProviderEvent): Promise<PaymentRecord | null> {
+  // `FOR UPDATE OF p`: the payment row only. The booking is read for its
+  // photographer here and locked later, after that photographer's lock.
   if (event.ourRef !== null && UUID.test(event.ourRef)) {
     const byOurRef = await tx.$queryRaw<PaymentRecord[]>`
-      SELECT id::text AS id, booking_id::text AS booking_id, provider, kind, status, our_ref::text AS our_ref, provider_ref, method, amount_rwf
-        FROM payment
-       WHERE our_ref = ${event.ourRef}::uuid AND provider = ${providerId}
-         FOR UPDATE`;
+      SELECT p.id::text AS id, p.booking_id::text AS booking_id, b.photographer_id::text AS photographer_id, p.provider, p.kind,
+             p.status, p.our_ref::text AS our_ref, p.provider_ref, p.method, p.amount_rwf
+        FROM payment p
+        JOIN booking b ON b.id = p.booking_id
+       WHERE p.our_ref = ${event.ourRef}::uuid AND p.provider = ${providerId}
+         FOR UPDATE OF p`;
     if (byOurRef[0] !== undefined) return byOurRef[0];
   }
   if (event.providerRef !== null) {
     const byProviderRef = await tx.$queryRaw<PaymentRecord[]>`
-      SELECT id::text AS id, booking_id::text AS booking_id, provider, kind, status, our_ref::text AS our_ref, provider_ref, method, amount_rwf
-        FROM payment
-       WHERE provider_ref = ${event.providerRef} AND provider = ${providerId}
-         FOR UPDATE`;
+      SELECT p.id::text AS id, p.booking_id::text AS booking_id, b.photographer_id::text AS photographer_id, p.provider, p.kind,
+             p.status, p.our_ref::text AS our_ref, p.provider_ref, p.method, p.amount_rwf
+        FROM payment p
+        JOIN booking b ON b.id = p.booking_id
+       WHERE p.provider_ref = ${event.providerRef} AND p.provider = ${providerId}
+         FOR UPDATE OF p`;
     if (byProviderRef[0] !== undefined) return byProviderRef[0];
   }
   return null;
 }
 
-/** Whether any other booking holds time overlapping this one's reserved range. */
+/**
+ * Whether another booking of the same photographer holds time overlapping this
+ * one's reserved range. Another photographer's booking never does: their
+ * calendars are separate, as the exclusion constraint is (R1.3, T1.3).
+ */
 async function slotOccupied(tx: Prisma.TransactionClient, booking: Booking): Promise<boolean> {
   const rows = await tx.$queryRaw<{ taken: boolean }[]>`
     SELECT EXISTS (
       SELECT 1
         FROM booking
        WHERE id <> ${booking.id}::uuid
+         AND photographer_id = ${booking.photographerId}::uuid
          AND status = ANY(${[...OCCUPYING_STATUSES]}::text[])
          AND tstzrange(starts_at, buffer_ends_at, '[)')
              && tstzrange(${booking.startsAt}::timestamptz, ${booking.bufferEndsAt}::timestamptz, '[)')

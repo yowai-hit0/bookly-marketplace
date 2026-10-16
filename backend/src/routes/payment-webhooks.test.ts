@@ -14,7 +14,7 @@ import type { MtnMomoProvider } from '../payments/mtn-momo.js';
 import type { PaymentProvider } from '../payments/provider.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
-  ADMIN_EMAIL,
+  PHOTOGRAPHER_EMAIL,
   API_ORIGIN,
   DAY_MS,
   type PaymentWorld,
@@ -195,8 +195,8 @@ describe('a verified success delivered to the callback URL MTN was given', () =>
     ]);
     const queued = await outbox();
     expect(queued.map((row) => [row.template, row.recipient])).toEqual([
-      ['admin_new_booking', ADMIN_EMAIL],
       ['booking_confirmation', 'aline.private@example.com'],
+      ['photographer_new_booking', PHOTOGRAPHER_EMAIL],
     ]);
     expect(await events()).toMatchObject([{ event_id: `${ourRef}:SUCCESSFUL`, status: 'applied', signature_valid: true }]);
   });
@@ -283,8 +283,8 @@ describe('a verified success delivered to the callback URL MTN was given', () =>
     expect(email.text).toContain(`${WEB_ORIGIN}/`);
     expect(email.text).toContain(confirmation?.payload.accessToken as string);
 
-    const admin = queued.find((row) => row.template === 'admin_new_booking');
-    const adminEmail = renderEmail('admin_new_booking', admin?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
+    const admin = queued.find((row) => row.template === 'photographer_new_booking');
+    const adminEmail = renderEmail('photographer_new_booking', admin?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
     expect(adminEmail.text).toContain('aline.private@example.com');
     expect(adminEmail.text).not.toContain(confirmation?.payload.accessToken as string);
   });
@@ -486,7 +486,7 @@ describe('what the route answers', () => {
     expect(await bookingStatus(booking.reference)).toMatchObject({ status: 'confirmed', hold_expires_at: null });
   });
 
-  it('200, the booking left expired, the payment refund_due and an admin_alert queued for a late success whose slot is taken', async () => {
+  it('200, the booking left expired, the payment refund_due and a photographer_alert queued for a late success whose slot is taken', async () => {
     const mtn = fakeMtn();
     const app = appWith(mtn.provider);
     const slot = new Date('2027-05-05T07:00:00Z');
@@ -498,7 +498,7 @@ describe('what the route answers', () => {
 
     expect((await bookingStatus(booking.reference)).status).toBe('expired');
     expect(await rows('SELECT status FROM payment')).toEqual([{ status: 'refund_due' }]);
-    expect(await outbox()).toMatchObject([{ template: 'admin_alert', recipient: ADMIN_EMAIL, payload: { variant: 'refund_due', reason: 'late_payment_slot_taken' } }]);
+    expect(await outbox()).toMatchObject([{ template: 'photographer_alert', recipient: PHOTOGRAPHER_EMAIL, payload: { variant: 'refund_due', reason: 'late_payment_slot_taken' } }]);
   });
 
   it('500 when processing fails, and the provider’s retry of the same delivery is processed', async () => {
