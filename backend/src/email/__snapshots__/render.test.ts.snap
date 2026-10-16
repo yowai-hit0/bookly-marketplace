@@ -1,0 +1,1381 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`access_link_resend > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your booking link (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">A new link to your booking.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Here is your booking link</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">Here is a new link to your booking for Portrait on Wednesday, 7 October 2026.</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">View your booking</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="color:#71717a;">https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe</a></p>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">Any link we sent you before no longer works. Keep this email, and please do not share the link.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+</table>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`access_link_resend > matches its snapshot > subject 1`] = `"Your booking link (BKY-2610-7K3MQ)"`;
+
+exports[`access_link_resend > matches its snapshot > text 1`] = `
+"Here is your booking link
+
+Hello Aline Uwase,
+
+Here is a new link to your booking for Portrait on Wednesday, 7 October 2026.
+
+View your booking:
+https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe
+
+** Any link we sent you before no longer works. Keep this email, and please do not share the link. **
+
+Booking reference: BKY-2610-7K3MQ
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`admin_alert booking_cancelled > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Booking cancelled: Aline Uwase, Wednesday, 7 October 2026 (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">The time is free again.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">A client cancelled their booking</h1>
+<p style="margin:0 0 14px;">Aline Uwase cancelled their booking for Portrait on Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time). The time is free again.</p>
+<p style="margin:0 0 14px;">Their booking fee of 18,000 RWF is non-refundable and has been kept.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+</table>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`admin_alert booking_cancelled > matches its snapshot > subject 1`] = `"Booking cancelled: Aline Uwase, Wednesday, 7 October 2026 (BKY-2610-7K3MQ)"`;
+
+exports[`admin_alert booking_cancelled > matches its snapshot > text 1`] = `
+"A client cancelled their booking
+
+Aline Uwase cancelled their booking for Portrait on Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time). The time is free again.
+
+Their booking fee of 18,000 RWF is non-refundable and has been kept.
+
+Booking reference: BKY-2610-7K3MQ
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`admin_alert login_lockout > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin sign-in locked after 5 failed attempts</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Sign-in is locked until 14 Mar 2026, 17:00 (Kigali time).</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Admin sign-in is locked</h1>
+<p style="margin:0 0 14px;">The wrong password was entered for the admin account 5 times, so sign-in is locked until 14 Mar 2026, 17:00 (Kigali time).</p>
+<p style="margin:0 0 14px;">If this was not you, someone may be trying to guess your password. Once the lock ends, consider resetting your password.</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/admin/login" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Go to the sign-in page</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/admin/login" style="color:#71717a;">https://bookly.example/admin/login</a></p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`admin_alert login_lockout > matches its snapshot > subject 1`] = `"Admin sign-in locked after 5 failed attempts"`;
+
+exports[`admin_alert login_lockout > matches its snapshot > text 1`] = `
+"Admin sign-in is locked
+
+The wrong password was entered for the admin account 5 times, so sign-in is locked until 14 Mar 2026, 17:00 (Kigali time).
+
+If this was not you, someone may be trying to guess your password. Once the lock ends, consider resetting your password.
+
+Go to the sign-in page:
+https://bookly.example/admin/login
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`admin_alert password_reset > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset your admin password</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">The link works once, until 1 Jan 2027, 00:00 (Kigali time).</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Reset your admin password</h1>
+<p style="margin:0 0 14px;">Someone asked to reset the password for the admin account. The link below works once, until 1 Jan 2027, 00:00 (Kigali time).</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/admin/reset-password#token=rS3tT0k3n_aB9cD8eF7gH6iJ5kL4mN3o" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Choose a new password</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/admin/reset-password#token=rS3tT0k3n_aB9cD8eF7gH6iJ5kL4mN3o" style="color:#71717a;">https://bookly.example/admin/reset-password#token=rS3tT0k3n_aB9cD8eF7gH6iJ5kL4mN3o</a></p>
+<p style="margin:0 0 14px;">If you did not ask for this, ignore this email: your password stays as it is.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`admin_alert password_reset > matches its snapshot > subject 1`] = `"Reset your admin password"`;
+
+exports[`admin_alert password_reset > matches its snapshot > text 1`] = `
+"Reset your admin password
+
+Someone asked to reset the password for the admin account. The link below works once, until 1 Jan 2027, 00:00 (Kigali time).
+
+Choose a new password:
+https://bookly.example/admin/reset-password#token=rS3tT0k3n_aB9cD8eF7gH6iJ5kL4mN3o
+
+If you did not ask for this, ignore this email: your password stays as it is.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`admin_alert payment_received > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment received: 18,000 RWF from Aline Uwase (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Aline Uwase paid the booking fee.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Payment received</h1>
+<p style="margin:0 0 14px;">Aline Uwase has paid the booking fee of 18,000 RWF.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Client</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Aline Uwase</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Amount</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">18,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid on</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">1 Jul 2026, 08:00 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Still to pay</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">27,000 RWF</td></tr>
+</table>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Open the day in your calendar</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="color:#71717a;">https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07</a></p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`admin_alert payment_received > matches its snapshot > subject 1`] = `"Payment received: 18,000 RWF from Aline Uwase (BKY-2610-7K3MQ)"`;
+
+exports[`admin_alert payment_received > matches its snapshot > text 1`] = `
+"Payment received
+
+Aline Uwase has paid the booking fee of 18,000 RWF.
+
+Booking reference: BKY-2610-7K3MQ
+Client: Aline Uwase
+Amount: 18,000 RWF
+Paid on: 1 Jul 2026, 08:00 (Kigali time)
+Still to pay: 27,000 RWF
+
+Open the day in your calendar:
+https://bookly.example/admin/calendar?view=day&date=2026-10-07
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`admin_alert refund_due > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refund due: 18,000 RWF to Aline Uwase (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">The system does not move money: this refund is yours to make.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">A refund is due</h1>
+<p style="margin:0 0 14px;">You cancelled this booking, so the client is owed a full refund.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Client</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Aline Uwase</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Amount</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">18,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">PAY-7F3K9Q</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid through</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">MTN MoMo</td></tr>
+</table>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">The system does not move money. Refund the client through MTN MoMo, then record the refund on the booking.</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Open the day in your calendar</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="color:#71717a;">https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07</a></p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`admin_alert refund_due > matches its snapshot > subject 1`] = `"Refund due: 18,000 RWF to Aline Uwase (BKY-2610-7K3MQ)"`;
+
+exports[`admin_alert refund_due > matches its snapshot > text 1`] = `
+"A refund is due
+
+You cancelled this booking, so the client is owed a full refund.
+
+Booking reference: BKY-2610-7K3MQ
+Client: Aline Uwase
+Amount: 18,000 RWF
+Payment reference: PAY-7F3K9Q
+Paid through: MTN MoMo
+
+** The system does not move money. Refund the client through MTN MoMo, then record the refund on the booking. **
+
+Open the day in your calendar:
+https://bookly.example/admin/calendar?view=day&date=2026-10-07
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`admin_alert retries_exhausted > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A message could not be sent</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">The system gave up after 8 attempts.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">A message could not be sent</h1>
+<p style="margin:0 0 14px;">After 8 attempts, the system gave up sending the message below. It will not try again.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Message</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Booking confirmation to the client</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Last error</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Error: Resend answered 503: service unavailable</td></tr>
+</table>
+<p style="margin:0 0 14px;">If it was for a client, you may want to contact them directly.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`admin_alert retries_exhausted > matches its snapshot > subject 1`] = `"A message could not be sent"`;
+
+exports[`admin_alert retries_exhausted > matches its snapshot > text 1`] = `
+"A message could not be sent
+
+After 8 attempts, the system gave up sending the message below. It will not try again.
+
+Message: Booking confirmation to the client
+Booking reference: BKY-2610-7K3MQ
+Last error: Error: Resend answered 503: service unavailable
+
+If it was for a client, you may want to contact them directly.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`admin_new_booking > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New booking: Aline Uwase, Portrait on Wednesday, 7 October 2026</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">BKY-2610-7K3MQ: booking fee of 18,000 RWF received.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">New booking</h1>
+<p style="margin:0 0 14px;">Aline Uwase has booked and paid the booking fee. The booking is confirmed.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Client</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Aline Uwase</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Email</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">aline@example.com</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Phone</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">+250788000000</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Extra 10 photos</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">5,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">When</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Location</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Kigali Heights, KG 7 Ave</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">People</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">3</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Special requests</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Outdoor shots if the weather allows.<br>Please bring a reflector.</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Total</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">45,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">18,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Still to pay</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">27,000 RWF</td></tr>
+</table>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Open the day in your calendar</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="color:#71717a;">https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07</a></p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`admin_new_booking > matches its snapshot > subject 1`] = `"New booking: Aline Uwase, Portrait on Wednesday, 7 October 2026"`;
+
+exports[`admin_new_booking > matches its snapshot > text 1`] = `
+"New booking
+
+Aline Uwase has booked and paid the booking fee. The booking is confirmed.
+
+Booking reference: BKY-2610-7K3MQ
+Client: Aline Uwase
+Email: aline@example.com
+Phone: +250788000000
+Service: Portrait, Standard
+Extra 10 photos: 5,000 RWF
+When: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Location: Kigali Heights, KG 7 Ave
+People: 3
+Special requests: Outdoor shots if the weather allows.
+Please bring a reflector.
+Total: 45,000 RWF
+Paid: 18,000 RWF
+Still to pay: 27,000 RWF
+
+Open the day in your calendar:
+https://bookly.example/admin/calendar?view=day&date=2026-10-07
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`booking_confirmation > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Booking confirmed: Portrait on Wednesday, 7 October 2026 (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Your date is secured. Your booking reference is BKY-2610-7K3MQ.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your booking is confirmed</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">Thank you for your booking. We have received your booking fee and your date is secured.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">When</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Location</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Kigali Heights, KG 7 Ave</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">18,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Still to pay</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">27,000 RWF</td></tr>
+</table>
+<p style="margin:0 0 14px;">The remaining 27,000 RWF is due after the shoot. We will send you a link to pay it.</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">View your booking</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="color:#71717a;">https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe</a></p>
+<p style="margin:0 0 14px;">Keep this email. The link above is how you view or cancel your booking. Anyone with the link can open it, so please do not share it.</p>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">The booking fee is non-refundable if you cancel.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`booking_confirmation > matches its snapshot > subject 1`] = `"Booking confirmed: Portrait on Wednesday, 7 October 2026 (BKY-2610-7K3MQ)"`;
+
+exports[`booking_confirmation > matches its snapshot > text 1`] = `
+"Your booking is confirmed
+
+Hello Aline Uwase,
+
+Thank you for your booking. We have received your booking fee and your date is secured.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+When: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Location: Kigali Heights, KG 7 Ave
+Paid: 18,000 RWF
+Still to pay: 27,000 RWF
+
+The remaining 27,000 RWF is due after the shoot. We will send you a link to pay it.
+
+View your booking:
+https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe
+
+Keep this email. The link above is how you view or cancel your booking. Anyone with the link can open it, so please do not share it.
+
+** The booking fee is non-refundable if you cancel. **
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`booking_links > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your booking links</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">New links to your bookings.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Here are your booking links</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">You asked for the links to your bookings. Each button below opens one of them.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">When</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+</table>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Open booking BKY-2610-7K3MQ</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="color:#71717a;">https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe</a></p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Events, Half day</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">When</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Friday, 9 October 2026, 11:00 to 15:00 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-9P2RT</td></tr>
+</table>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/booking/Qw8E1rT5yU2iO9pA3sD7fG4hJ6kL0zXc" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Open booking BKY-2610-9P2RT</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/booking/Qw8E1rT5yU2iO9pA3sD7fG4hJ6kL0zXc" style="color:#71717a;">https://bookly.example/booking/Qw8E1rT5yU2iO9pA3sD7fG4hJ6kL0zXc</a></p>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">Any link we sent you before no longer works. Keep this email, and please do not share the links.</p>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">If you did not ask for this, you can ignore this email: your bookings have not changed, only their links.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`booking_links > matches its snapshot > subject 1`] = `"Your booking links"`;
+
+exports[`booking_links > matches its snapshot > text 1`] = `
+"Here are your booking links
+
+Hello Aline Uwase,
+
+You asked for the links to your bookings. Each button below opens one of them.
+
+Service: Portrait, Standard
+When: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Booking reference: BKY-2610-7K3MQ
+
+Open booking BKY-2610-7K3MQ:
+https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe
+
+Service: Events, Half day
+When: Friday, 9 October 2026, 11:00 to 15:00 (Kigali time)
+Booking reference: BKY-2610-9P2RT
+
+Open booking BKY-2610-9P2RT:
+https://bookly.example/booking/Qw8E1rT5yU2iO9pA3sD7fG4hJ6kL0zXc
+
+** Any link we sent you before no longer works. Keep this email, and please do not share the links. **
+
+** If you did not ask for this, you can ignore this email: your bookings have not changed, only their links. **
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`cancellation (by admin) > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Booking cancelled: BKY-2610-7K3MQ</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Your booking for Wednesday, 7 October 2026 has been cancelled.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your booking has been cancelled</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">We are sorry: we have had to cancel your booking for Portrait on Wednesday, 7 October 2026.</p>
+<p style="margin:0 0 14px;">Reason: The photographer is unwell.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+</table>
+<p style="margin:0 0 14px;">We owe you a refund of 18,000 RWF. We will contact you to arrange it.</p>
+<p style="margin:0 0 14px;">You are welcome to book again at any time.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`cancellation (by admin) > matches its snapshot > subject 1`] = `"Booking cancelled: BKY-2610-7K3MQ"`;
+
+exports[`cancellation (by admin) > matches its snapshot > text 1`] = `
+"Your booking has been cancelled
+
+Hello Aline Uwase,
+
+We are sorry: we have had to cancel your booking for Portrait on Wednesday, 7 October 2026.
+
+Reason: The photographer is unwell.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+
+We owe you a refund of 18,000 RWF. We will contact you to arrange it.
+
+You are welcome to book again at any time.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`cancellation (by client) > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Booking cancelled: BKY-2610-7K3MQ</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Your booking for Wednesday, 7 October 2026 has been cancelled.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your booking has been cancelled</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">As you asked, we have cancelled your booking for Portrait on Wednesday, 7 October 2026.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+</table>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">As stated when you booked, the booking fee of 18,000 RWF is non-refundable.</p>
+<p style="margin:0 0 14px;">You are welcome to book again at any time.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`cancellation (by client) > matches its snapshot > subject 1`] = `"Booking cancelled: BKY-2610-7K3MQ"`;
+
+exports[`cancellation (by client) > matches its snapshot > text 1`] = `
+"Your booking has been cancelled
+
+Hello Aline Uwase,
+
+As you asked, we have cancelled your booking for Portrait on Wednesday, 7 October 2026.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+
+** As stated when you booked, the booking fee of 18,000 RWF is non-refundable. **
+
+You are welcome to book again at any time.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`client_note > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A message about your booking (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Your photographer wrote to you.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">A message from your photographer</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">Please bring a jacket: it gets cold up there.<br>See you at 09:30.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">When</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+</table>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">You will also find this message on your booking page.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`client_note > matches its snapshot > subject 1`] = `"A message about your booking (BKY-2610-7K3MQ)"`;
+
+exports[`client_note > matches its snapshot > text 1`] = `
+"A message from your photographer
+
+Hello Aline Uwase,
+
+Please bring a jacket: it gets cold up there.
+See you at 09:30.
+
+Service: Portrait, Standard
+When: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Booking reference: BKY-2610-7K3MQ
+
+** You will also find this message on your booking page. **
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`content rules > a client cancellation with a session fee to refund (plan.md Task 18) matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Booking cancelled: BKY-2610-7K3MQ</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Your booking for Wednesday, 7 October 2026 has been cancelled.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your booking has been cancelled</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">As you asked, we have cancelled your booking for Portrait on Wednesday, 7 October 2026.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+</table>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">As stated when you booked, the booking fee of 18,000 RWF is non-refundable.</p>
+<p style="margin:0 0 14px;">We owe you a refund of 27,000 RWF. We will contact you to arrange it.</p>
+<p style="margin:0 0 14px;">You are welcome to book again at any time.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`content rules > a client cancellation with a session fee to refund (plan.md Task 18) matches its snapshot > subject 1`] = `"Booking cancelled: BKY-2610-7K3MQ"`;
+
+exports[`content rules > a client cancellation with a session fee to refund (plan.md Task 18) matches its snapshot > text 1`] = `
+"Your booking has been cancelled
+
+Hello Aline Uwase,
+
+As you asked, we have cancelled your booking for Portrait on Wednesday, 7 October 2026.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+
+** As stated when you booked, the booking fee of 18,000 RWF is non-refundable. **
+
+We owe you a refund of 27,000 RWF. We will contact you to arrange it.
+
+You are welcome to book again at any time.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`content rules > refund_due for a duplicate booking fee (plan.md Task 17) matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refund due: 18,000 RWF to Aline Uwase (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">The system does not move money: this refund is yours to make.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">A refund is due</h1>
+<p style="margin:0 0 14px;">The client paid the booking fee twice. The booking stands on the first payment; this one is owed back.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Client</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Aline Uwase</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Amount</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">18,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">4100000123</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid through</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">MTN MoMo</td></tr>
+</table>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">The system does not move money. Refund the client through MTN MoMo, then record the refund on the booking.</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Open the day in your calendar</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07" style="color:#71717a;">https://bookly.example/admin/calendar?view=day&amp;date=2026-10-07</a></p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`content rules > refund_due for a duplicate booking fee (plan.md Task 17) matches its snapshot > subject 1`] = `"Refund due: 18,000 RWF to Aline Uwase (BKY-2610-7K3MQ)"`;
+
+exports[`content rules > refund_due for a duplicate booking fee (plan.md Task 17) matches its snapshot > text 1`] = `
+"A refund is due
+
+The client paid the booking fee twice. The booking stands on the first payment; this one is owed back.
+
+Booking reference: BKY-2610-7K3MQ
+Client: Aline Uwase
+Amount: 18,000 RWF
+Payment reference: 4100000123
+Paid through: MTN MoMo
+
+** The system does not move money. Refund the client through MTN MoMo, then record the refund on the booking. **
+
+Open the day in your calendar:
+https://bookly.example/admin/calendar?view=day&date=2026-10-07
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`email_change_confirm > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirm your new email (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">One click to use this address for your booking.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Confirm your new email</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">You asked to use aline.new@example.com for your booking. Confirm it, and we will write to this address from now on.</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/email-confirm/Cf7mN2bV9cX4zL1kJ8hG5fD3sA6pO0iU" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Confirm this email</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/email-confirm/Cf7mN2bV9cX4zL1kJ8hG5fD3sA6pO0iU" style="color:#71717a;">https://bookly.example/email-confirm/Cf7mN2bV9cX4zL1kJ8hG5fD3sA6pO0iU</a></p>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">This link works for 24 hours. Until you confirm, we keep writing to the address we had.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">When</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+</table>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">If you did not ask for this, ignore this email: nothing changes unless the button is used.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`email_change_confirm > matches its snapshot > subject 1`] = `"Confirm your new email (BKY-2610-7K3MQ)"`;
+
+exports[`email_change_confirm > matches its snapshot > text 1`] = `
+"Confirm your new email
+
+Hello Aline Uwase,
+
+You asked to use aline.new@example.com for your booking. Confirm it, and we will write to this address from now on.
+
+Confirm this email:
+https://bookly.example/email-confirm/Cf7mN2bV9cX4zL1kJ8hG5fD3sA6pO0iU
+
+** This link works for 24 hours. Until you confirm, we keep writing to the address we had. **
+
+Service: Portrait, Standard
+When: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Booking reference: BKY-2610-7K3MQ
+
+** If you did not ask for this, ignore this email: nothing changes unless the button is used. **
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`email_changed_notice > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your booking email was changed (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">We will now write to a different address.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your booking email was changed</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">The email for your booking is now aline.new@example.com. This is the last message about it we will send to this address.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">When</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+</table>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">If you did not make this change, reply to this email straight away so the photographer can put it back.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`email_changed_notice > matches its snapshot > subject 1`] = `"Your booking email was changed (BKY-2610-7K3MQ)"`;
+
+exports[`email_changed_notice > matches its snapshot > text 1`] = `
+"Your booking email was changed
+
+Hello Aline Uwase,
+
+The email for your booking is now aline.new@example.com. This is the last message about it we will send to this address.
+
+Service: Portrait, Standard
+When: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Booking reference: BKY-2610-7K3MQ
+
+** If you did not make this change, reply to this email straight away so the photographer can put it back. **
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`payment_receipt > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment received: 27,000 RWF for BKY-2610-7K3MQ</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Thank you. We have received 27,000 RWF.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Thank you, your payment has arrived</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">This email is your receipt for the session fee of 27,000 RWF.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment for</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Session fee</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Amount</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">27,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid on</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">15 Jan 2026, 23:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">PAY-7F3K9Q</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Total</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">45,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">45,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Still to pay</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">0 RWF</td></tr>
+</table>
+<p style="margin:0 0 14px;">Your booking is now paid in full.</p>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">View your booking</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="color:#71717a;">https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe</a></p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`payment_receipt > matches its snapshot > subject 1`] = `"Payment received: 27,000 RWF for BKY-2610-7K3MQ"`;
+
+exports[`payment_receipt > matches its snapshot > text 1`] = `
+"Thank you, your payment has arrived
+
+Hello Aline Uwase,
+
+This email is your receipt for the session fee of 27,000 RWF.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+Payment for: Session fee
+Amount: 27,000 RWF
+Paid on: 15 Jan 2026, 23:30 (Kigali time)
+Payment reference: PAY-7F3K9Q
+Total: 45,000 RWF
+Paid: 45,000 RWF
+Still to pay: 0 RWF
+
+Your booking is now paid in full.
+
+View your booking:
+https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`payment_receipt with and without an access token > matches its snapshot for a part payment that leaves money outstanding > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment received: 20,000 RWF for BKY-2610-7K3MQ</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Thank you. We have received 20,000 RWF.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Thank you, your payment has arrived</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">This email is your receipt for the session fee of 20,000 RWF.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment for</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Session fee</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Amount</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">20,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid on</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">15 Jan 2026, 23:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">PAY-7F3K9Q</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Total</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">45,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">38,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Still to pay</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">7,000 RWF</td></tr>
+</table>
+<p style="margin:0 0 14px;">Your booking link has not changed: the one in your confirmation email still opens this booking.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`payment_receipt with and without an access token > matches its snapshot for a part payment that leaves money outstanding > subject 1`] = `"Payment received: 20,000 RWF for BKY-2610-7K3MQ"`;
+
+exports[`payment_receipt with and without an access token > matches its snapshot for a part payment that leaves money outstanding > text 1`] = `
+"Thank you, your payment has arrived
+
+Hello Aline Uwase,
+
+This email is your receipt for the session fee of 20,000 RWF.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+Payment for: Session fee
+Amount: 20,000 RWF
+Paid on: 15 Jan 2026, 23:30 (Kigali time)
+Payment reference: PAY-7F3K9Q
+Total: 45,000 RWF
+Paid: 38,000 RWF
+Still to pay: 7,000 RWF
+
+Your booking link has not changed: the one in your confirmation email still opens this booking.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`payment_receipt with and without an access token > matches its snapshot without a token > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment received: 27,000 RWF for BKY-2610-7K3MQ</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Thank you. We have received 27,000 RWF.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Thank you, your payment has arrived</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">This email is your receipt for the session fee of 27,000 RWF.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment for</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Session fee</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Amount</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">27,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid on</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">15 Jan 2026, 23:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Payment reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">PAY-7F3K9Q</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Total</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">45,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Paid</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">45,000 RWF</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Still to pay</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">0 RWF</td></tr>
+</table>
+<p style="margin:0 0 14px;">Your booking is now paid in full.</p>
+<p style="margin:0 0 14px;">Your booking link has not changed: the one in your confirmation email still opens this booking.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`payment_receipt with and without an access token > matches its snapshot without a token > subject 1`] = `"Payment received: 27,000 RWF for BKY-2610-7K3MQ"`;
+
+exports[`payment_receipt with and without an access token > matches its snapshot without a token > text 1`] = `
+"Thank you, your payment has arrived
+
+Hello Aline Uwase,
+
+This email is your receipt for the session fee of 27,000 RWF.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+Payment for: Session fee
+Amount: 27,000 RWF
+Paid on: 15 Jan 2026, 23:30 (Kigali time)
+Payment reference: PAY-7F3K9Q
+Total: 45,000 RWF
+Paid: 45,000 RWF
+Still to pay: 0 RWF
+
+Your booking is now paid in full.
+
+Your booking link has not changed: the one in your confirmation email still opens this booking.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`photo_delivery > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your photos are ready (BKY-2610-7K3MQ)</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">Download your photos by Friday, 1 January 2027.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your photos are ready</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">Your photos from your Portrait shoot are ready to download.</p>
+<p style="margin:0 0 14px;">A note from your photographer: Thank you for a lovely morning!</p>
+<p style="margin:20px 0 8px;"><a href="https://photos.example-host.com/s/abc123" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Download your photos</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://photos.example-host.com/s/abc123" style="color:#71717a;">https://photos.example-host.com/s/abc123</a></p>
+<p style="margin:0 0 14px;padding:10px 12px;border-left:3px solid #18181b;background:#fafafa;font-weight:600;">The download link works until the end of Friday, 1 January 2027 (Kigali time). Please save your photos before then: after that date the link will no longer work.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+</table>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`photo_delivery > matches its snapshot > subject 1`] = `"Your photos are ready (BKY-2610-7K3MQ)"`;
+
+exports[`photo_delivery > matches its snapshot > text 1`] = `
+"Your photos are ready
+
+Hello Aline Uwase,
+
+Your photos from your Portrait shoot are ready to download.
+
+A note from your photographer: Thank you for a lovely morning!
+
+Download your photos:
+https://photos.example-host.com/s/abc123
+
+** The download link works until the end of Friday, 1 January 2027 (Kigali time). Please save your photos before then: after that date the link will no longer work. **
+
+Booking reference: BKY-2610-7K3MQ
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`reschedule > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your booking BKY-2610-7K3MQ has moved to Friday, 9 October 2026</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">New time: Friday, 9 October 2026, 11:00 to 12:00 (Kigali time).</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your booking has a new time</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">Your booking for Portrait has been moved. Everything else about it stays the same.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Was</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Now</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Friday, 9 October 2026, 11:00 to 12:00 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Location</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Kigali Heights, KG 7 Ave</td></tr>
+</table>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">View your booking</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="color:#71717a;">https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe</a></p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`reschedule > matches its snapshot > subject 1`] = `"Your booking BKY-2610-7K3MQ has moved to Friday, 9 October 2026"`;
+
+exports[`reschedule > matches its snapshot > text 1`] = `
+"Your booking has a new time
+
+Hello Aline Uwase,
+
+Your booking for Portrait has been moved. Everything else about it stays the same.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+Was: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Now: Friday, 9 October 2026, 11:00 to 12:00 (Kigali time)
+Location: Kigali Heights, KG 7 Ave
+
+View your booking:
+https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`reschedule with and without an access token > matches its snapshot without a token > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your booking BKY-2610-7K3MQ has moved to Friday, 9 October 2026</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">New time: Friday, 9 October 2026, 11:00 to 12:00 (Kigali time).</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your booking has a new time</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">Your booking for Portrait has been moved. Everything else about it stays the same.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Was</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Now</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Friday, 9 October 2026, 11:00 to 12:00 (Kigali time)</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Location</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Kigali Heights, KG 7 Ave</td></tr>
+</table>
+<p style="margin:0 0 14px;">Your booking link has not changed: the one in your confirmation email still opens this booking.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`reschedule with and without an access token > matches its snapshot without a token > subject 1`] = `"Your booking BKY-2610-7K3MQ has moved to Friday, 9 October 2026"`;
+
+exports[`reschedule with and without an access token > matches its snapshot without a token > text 1`] = `
+"Your booking has a new time
+
+Hello Aline Uwase,
+
+Your booking for Portrait has been moved. Everything else about it stays the same.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+Was: Wednesday, 7 October 2026, 09:30 to 10:30 (Kigali time)
+Now: Friday, 9 October 2026, 11:00 to 12:00 (Kigali time)
+Location: Kigali Heights, KG 7 Ave
+
+Your booking link has not changed: the one in your confirmation email still opens this booking.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;
+
+exports[`session_fee_request > matches its snapshot > html 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session fee due for your booking BKY-2610-7K3MQ</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0;">The remaining 27,000 RWF for your shoot is now due.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;color:#18181b;">
+<tr><td style="padding:24px 28px 0;font-size:14px;font-weight:600;letter-spacing:0.04em;color:#71717a;">Bookly</td></tr>
+<tr><td style="padding:8px 28px 28px;font-size:15px;line-height:1.55;">
+<h1 style="margin:12px 0 16px;font-size:22px;line-height:1.3;">Your session fee is due</h1>
+<p style="margin:0 0 14px;">Hello Aline Uwase,</p>
+<p style="margin:0 0 14px;">Thank you for your shoot on Wednesday, 7 October 2026. The remaining session fee is now due.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px;border-top:1px solid #e4e4e7;">
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Booking reference</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">BKY-2610-7K3MQ</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Service</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">Portrait, Standard</td></tr>
+<tr><td style="padding:8px 12px 8px 0;border-bottom:1px solid #e4e4e7;color:#71717a;vertical-align:top;white-space:nowrap;">Amount due</td><td style="padding:8px 0;border-bottom:1px solid #e4e4e7;text-align:right;vertical-align:top;">27,000 RWF</td></tr>
+</table>
+<p style="margin:20px 0 8px;"><a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#18181b;color:#ffffff;font-weight:600;text-decoration:none;">Pay the session fee</a></p>
+<p style="margin:0 0 16px;font-size:12px;color:#71717a;word-break:break-all;">If the button does not work, copy this link into your browser: <a href="https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe" style="color:#71717a;">https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe</a></p>
+<p style="margin:0 0 14px;">We will email you a receipt once your payment has arrived.</p>
+</td></tr>
+</table>
+<p style="max-width:560px;margin:16px auto 0;font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.5;color:#71717a;">Bookly, Kigali. All times are Kigali time (UTC+2).</p>
+</td></tr>
+</table>
+</body>
+</html>"
+`;
+
+exports[`session_fee_request > matches its snapshot > subject 1`] = `"Session fee due for your booking BKY-2610-7K3MQ"`;
+
+exports[`session_fee_request > matches its snapshot > text 1`] = `
+"Your session fee is due
+
+Hello Aline Uwase,
+
+Thank you for your shoot on Wednesday, 7 October 2026. The remaining session fee is now due.
+
+Booking reference: BKY-2610-7K3MQ
+Service: Portrait, Standard
+Amount due: 27,000 RWF
+
+Pay the session fee:
+https://bookly.example/booking/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe
+
+We will email you a receipt once your payment has arrived.
+
+--
+Bookly, Kigali. All times are Kigali time (UTC+2)."
+`;

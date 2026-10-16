@@ -1,0 +1,1 @@
+Still open from before: whether a payment arriving after we marked it failed should raise an admin alert; what a 0% booking fee should do; whether the status-lookup reconciler stays; and the session-fee amount rule (frozen request amount vs current outstanding).

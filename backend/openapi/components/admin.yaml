@@ -1,0 +1,473 @@
+# Admin schemas: auth, availability, settings, calendar and bookings.
+
+schemas:
+  # --- Auth ----------------------------------------------------------------
+
+  PublicAdmin:
+    type: object
+    description: The only shape of the admin that leaves the API. No hash, reset or lockout state.
+    required: [id, email, lastLoginAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      email: { type: string, format: email }
+      lastLoginAt: { type: [string, 'null'], format: date-time }
+
+  LoginRequest:
+    type: object
+    required: [email, password]
+    properties:
+      email: { type: string, minLength: 1, maxLength: 320 }
+      password: { type: string, minLength: 1, maxLength: 1024 }
+
+  LoginResponse:
+    type: object
+    required: [admin, token, tokenType, expiresAt]
+    additionalProperties: false
+    properties:
+      admin: { $ref: '#/schemas/PublicAdmin' }
+      token:
+        type: string
+        description: "Send as `Authorization: Bearer <token>`. Keep it in memory or `sessionStorage`, never `localStorage`."
+      tokenType: { const: Bearer }
+      expiresAt: { $ref: 'common.yaml#/schemas/Instant' }
+
+  AdminEnvelope:
+    type: object
+    required: [admin]
+    additionalProperties: false
+    properties:
+      admin: { $ref: '#/schemas/PublicAdmin' }
+
+  # --- Working hours and blocks -------------------------------------------
+
+  WorkingHours:
+    type: object
+    description: A weekly rule (`weekday` set) or a one-date override (`effectiveDate` set), never both.
+    required: [id, weekday, effectiveDate, opensMinute, closesMinute, isOpen, note]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      weekday:
+        type: [integer, 'null']
+        minimum: 0
+        maximum: 6
+        description: 0 is Sunday.
+      effectiveDate:
+        type: [string, 'null']
+        format: date
+      opensMinute:
+        type: [integer, 'null']
+        description: Minutes after Kigali midnight (540 is 09:00).
+      closesMinute: { type: [integer, 'null'] }
+      isOpen: { type: boolean }
+      note: { type: [string, 'null'] }
+
+  WorkingHoursWrite:
+    description: |
+      Exactly one of `weekday` and `effectiveDate`: both or neither is a 400.
+      An open day needs `opensMinute` before `closesMinute` (else 422). One rule
+      per weekday and one override per date: a duplicate is 409 `working_hours_exists`.
+    oneOf:
+      - type: object
+        title: Weekly rule
+        required: [weekday]
+        additionalProperties: false
+        properties:
+          weekday: { type: integer, minimum: 0, maximum: 6 }
+          opensMinute: { type: [integer, 'null'], minimum: 0, maximum: 1440, default: null }
+          closesMinute: { type: [integer, 'null'], minimum: 0, maximum: 1440, default: null }
+          isOpen: { type: boolean, default: true }
+          note: { type: [string, 'null'], maxLength: 500, default: null }
+      - type: object
+        title: Dated override
+        required: [effectiveDate]
+        additionalProperties: false
+        properties:
+          effectiveDate: { $ref: 'common.yaml#/schemas/KigaliDate' }
+          opensMinute: { type: [integer, 'null'], minimum: 0, maximum: 1440, default: null }
+          closesMinute: { type: [integer, 'null'], minimum: 0, maximum: 1440, default: null }
+          isOpen: { type: boolean, default: true }
+          note: { type: [string, 'null'], maxLength: 500, default: null }
+
+  Block:
+    type: object
+    required: [id, startsAt, endsAt, isAllDay, reason]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      endsAt:
+        $ref: 'common.yaml#/schemas/Instant'
+        description: Exclusive. A whole-day block ends at the Kigali midnight after its last day.
+      isAllDay: { type: boolean }
+      reason:
+        type: [string, 'null']
+        description: Private to the admin. No public endpoint ever returns it.
+
+  BlockWrite:
+    description: |
+      Whole days as inclusive Kigali dates, or a time range as instants with an
+      offset. Overlapping a `confirmed` booking is a 409 naming it unless
+      `confirm: true` is sent; the booking is never cancelled by a block.
+    oneOf:
+      - type: object
+        title: Whole days
+        required: [isAllDay, startDate, endDate]
+        additionalProperties: false
+        properties:
+          isAllDay: { const: true }
+          startDate: { $ref: 'common.yaml#/schemas/KigaliDate' }
+          endDate:
+            $ref: 'common.yaml#/schemas/KigaliDate'
+            description: Inclusive; not before `startDate`.
+          reason: { type: [string, 'null'], maxLength: 500, default: null }
+          confirm: { type: boolean, default: false }
+      - type: object
+        title: Time range
+        required: [isAllDay, startsAt, endsAt]
+        additionalProperties: false
+        properties:
+          isAllDay: { const: false }
+          startsAt: { $ref: 'common.yaml#/schemas/OffsetInstant' }
+          endsAt:
+            $ref: 'common.yaml#/schemas/OffsetInstant'
+            description: After `startsAt`.
+          reason: { type: [string, 'null'], maxLength: 500, default: null }
+          confirm: { type: boolean, default: false }
+
+  BlockConflict:
+    type: object
+    description: "The block would cover confirmed bookings. Resend with `confirm: true` to save it anyway."
+    required: [error, bookings]
+    additionalProperties: false
+    properties:
+      error: { const: block_overlaps_confirmed_bookings }
+      bookings:
+        type: array
+        items:
+          type: object
+          required: [id, reference, contactName, startsAt, endsAt]
+          additionalProperties: false
+          properties:
+            id: { $ref: 'common.yaml#/schemas/Uuid' }
+            reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+            contactName: { type: string }
+            startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+            endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+
+  # --- Settings and calendar ----------------------------------------------
+
+  Settings:
+    type: object
+    required: [bookingFeeRate, minLeadTimeMinutes, holdMinutes, bufferMinutes, deliveryExpiryDays]
+    additionalProperties: false
+    properties:
+      bookingFeeRate:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: Share of the total paid up front (0.4 seeded). At most three decimal places.
+      minLeadTimeMinutes: { type: integer, minimum: 0, description: Minimum notice before a bookable start (120 seeded). }
+      holdMinutes: { type: integer, minimum: 1, description: How long an unpaid booking holds its slot (30 seeded). }
+      bufferMinutes: { type: integer, minimum: 0, description: Gap reserved after every shoot (30 seeded). }
+      deliveryExpiryDays: { type: integer, minimum: 1, description: Default photo-link lifetime (90 seeded). }
+
+  SettingsPatch:
+    type: object
+    description: Any subset of the five values. An unknown key is a 400, so a misspelt field never silently saves nothing.
+    additionalProperties: false
+    properties:
+      bookingFeeRate: { type: number, minimum: 0, maximum: 1 }
+      minLeadTimeMinutes: { type: integer, minimum: 0, maximum: 2147483647 }
+      holdMinutes: { type: integer, minimum: 1, maximum: 2147483647 }
+      bufferMinutes: { type: integer, minimum: 0, maximum: 2147483647 }
+      deliveryExpiryDays: { type: integer, minimum: 1, maximum: 2147483647 }
+
+  SettingsEnvelope:
+    type: object
+    required: [settings]
+    additionalProperties: false
+    properties:
+      settings: { $ref: '#/schemas/Settings' }
+
+  Calendar:
+    type: object
+    required: [bookings, blocks]
+    additionalProperties: false
+    properties:
+      bookings:
+        type: array
+        description: What occupies time. `pending_payment` appears only while its hold is live; cancelled and expired bookings are left out.
+        items:
+          type: object
+          required: [id, reference, status, startsAt, endsAt, contactName, serviceName, packageName, conflictsWithBlock]
+          additionalProperties: false
+          properties:
+            id: { $ref: 'common.yaml#/schemas/Uuid' }
+            reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+            status: { type: string, enum: [pending_payment, confirmed, completed, no_show] }
+            startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+            endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+            contactName: { type: string }
+            serviceName: { type: string }
+            packageName: { type: string }
+            conflictsWithBlock:
+              type: boolean
+              description: The session overlaps a block that was saved over it anyway.
+      blocks:
+        type: array
+        items:
+          type: object
+          required: [id, startsAt, endsAt, isAllDay, reason]
+          additionalProperties: false
+          properties:
+            id: { $ref: 'common.yaml#/schemas/Uuid' }
+            startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+            endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+            isAllDay: { type: boolean }
+            reason: { type: [string, 'null'] }
+
+  # --- Bookings -------------------------------------------------------------
+
+  BookingListRow:
+    type: object
+    required: [id, reference, status, stage, startsAt, endsAt, contactName, contactEmail, contactPhone, serviceName, packageName, grandTotalRwf, collectedRwf, outstandingRwf, refundDueRwf, hasRefundDue]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+      status: { $ref: 'common.yaml#/schemas/BookingStatus' }
+      stage: { $ref: 'common.yaml#/schemas/BookingStage' }
+      startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      contactName: { type: string }
+      contactEmail: { type: string }
+      contactPhone: { type: string }
+      serviceName: { type: string }
+      packageName: { type: string }
+      grandTotalRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      collectedRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      outstandingRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      refundDueRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      hasRefundDue: { type: boolean }
+
+  BookingsPage:
+    type: object
+    required: [bookings, total, page, pageSize, pageCount]
+    additionalProperties: false
+    properties:
+      bookings:
+        type: array
+        description: Newest shoot first (start, then id, descending).
+        items: { $ref: '#/schemas/BookingListRow' }
+      total: { type: integer, minimum: 0, description: 'Every booking the filter matches, across all pages.' }
+      page: { type: integer, minimum: 1, description: The page answered; a page past the end answers the last one. }
+      pageSize: { type: integer, minimum: 1, maximum: 100 }
+      pageCount: { type: integer, minimum: 1 }
+
+  AdminPayment:
+    type: object
+    required: [id, kind, provider, ourRef, providerRef, method, amountRwf, status, failureReason, initiatedAt, settledAt, refundedAt, refundReference, note, canRecordRefund]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { $ref: 'common.yaml#/schemas/PaymentKind' }
+      provider: { type: string, examples: [mtn_momo_direct, flutterwave, cash] }
+      ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+      providerRef: { type: [string, 'null'] }
+      method: { type: [string, 'null'] }
+      amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      status: { $ref: 'common.yaml#/schemas/PaymentStatus' }
+      failureReason: { type: [string, 'null'] }
+      initiatedAt: { $ref: 'common.yaml#/schemas/Instant' }
+      settledAt: { type: [string, 'null'], format: date-time }
+      refundedAt: { type: [string, 'null'], format: date-time }
+      refundReference: { type: [string, 'null'] }
+      note: { type: [string, 'null'], description: What was typed with a cash payment. }
+      canRecordRefund: { type: boolean }
+
+  AdminBooking:
+    type: object
+    required: [id, reference, status, stage, locale, client, contact, service, package, schedule, details, addons, money, payments, lifecycle, access, delivery, messages, notes, actions]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+      status: { $ref: 'common.yaml#/schemas/BookingStatus' }
+      stage: { $ref: 'common.yaml#/schemas/BookingStage' }
+      locale: { type: string }
+      client:
+        type: object
+        description: The client record (one per email address), as it stands now.
+        required: [id, fullName, email, phone, anonymized]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          fullName: { type: string }
+          email: { type: string }
+          phone: { type: [string, 'null'] }
+          anonymized: { type: boolean }
+      contact:
+        type: object
+        description: The contact details this booking was made with (its own snapshot).
+        required: [name, email, phone]
+        additionalProperties: false
+        properties:
+          name: { type: string }
+          email: { type: string }
+          phone: { type: string }
+      service:
+        type: object
+        required: [id, name]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          name: { type: string }
+      package:
+        type: object
+        required: [id, name, priceRwf, durationMinutes, photoCount]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          name: { type: string }
+          priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          durationMinutes: { type: integer }
+          photoCount: { type: integer }
+      schedule:
+        type: object
+        required: [startsAt, endsAt, bufferEndsAt, holdExpiresAt, originalStartsAt, rescheduledAt]
+        additionalProperties: false
+        properties:
+          startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          bufferEndsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          holdExpiresAt: { type: [string, 'null'], format: date-time }
+          originalStartsAt: { type: [string, 'null'], format: date-time, description: Set on the first reschedule only. }
+          rescheduledAt: { type: [string, 'null'], format: date-time }
+      details:
+        type: object
+        required: [locationText, partySize, specialRequests, consentAt]
+        additionalProperties: false
+        properties:
+          locationText: { type: string }
+          partySize: { type: [integer, 'null'] }
+          specialRequests: { type: [string, 'null'] }
+          consentAt: { $ref: 'common.yaml#/schemas/Instant' }
+      addons:
+        type: array
+        items:
+          type: object
+          required: [id, name, unitPriceRwf, quantity, amountRwf, stage, canRemove]
+          additionalProperties: false
+          properties:
+            id: { $ref: 'common.yaml#/schemas/Uuid' }
+            name: { type: string }
+            unitPriceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+            quantity: { type: integer, minimum: 1 }
+            amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+            stage: { type: string, enum: [at_booking, post_shoot] }
+            canRemove: { type: boolean }
+      money:
+        type: object
+        required: [bookingFeeRate, bookingFeeRwf, totals]
+        additionalProperties: false
+        properties:
+          bookingFeeRate: { type: number }
+          bookingFeeRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          totals: { $ref: 'booking.yaml#/schemas/Totals' }
+      payments:
+        type: array
+        items: { $ref: '#/schemas/AdminPayment' }
+      lifecycle:
+        type: object
+        required: [confirmedAt, completedAt, cancelledAt, cancellationReason]
+        additionalProperties: false
+        properties:
+          confirmedAt: { type: [string, 'null'], format: date-time }
+          completedAt: { type: [string, 'null'], format: date-time }
+          cancelledAt: { type: [string, 'null'], format: date-time }
+          cancellationReason: { type: [string, 'null'] }
+      access:
+        type: object
+        description: The client's link. The token itself is never stored, so it cannot be shown.
+        required: [hasLink, expiresAt, lastUsedAt]
+        additionalProperties: false
+        properties:
+          hasLink: { type: boolean }
+          expiresAt: { type: [string, 'null'], format: date-time }
+          lastUsedAt: { type: [string, 'null'], format: date-time }
+      delivery:
+        type: object
+        required: [url, expiresOn, sentAt, note]
+        additionalProperties: false
+        properties:
+          url: { type: [string, 'null'], format: uri }
+          expiresOn: { type: [string, 'null'], format: date }
+          sentAt: { type: [string, 'null'], format: date-time }
+          note: { type: [string, 'null'] }
+      messages:
+        type: array
+        description: Every message queued for this booking, with its delivery state.
+        items:
+          type: object
+          required: [id, kind, template, recipient, status, attempts, lastError, createdAt, completedAt]
+          additionalProperties: false
+          properties:
+            id: { $ref: 'common.yaml#/schemas/Uuid' }
+            kind: { type: string }
+            template: { type: [string, 'null'] }
+            recipient: { type: [string, 'null'] }
+            status: { type: string }
+            attempts: { type: integer }
+            lastError: { type: [string, 'null'] }
+            createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+            completedAt: { type: [string, 'null'], format: date-time }
+      notes:
+        type: array
+        description: Notes to the client, newest first. Deleted notes are gone.
+        items:
+          type: object
+          required: [id, body, emailed, createdAt]
+          additionalProperties: false
+          properties:
+            id: { $ref: 'common.yaml#/schemas/Uuid' }
+            body: { type: string }
+            emailed: { type: boolean }
+            createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      actions:
+        type: object
+        description: What may be done to the booking now. The API checks again on every action.
+        required: [canReschedule, canCancel, canComplete, canMarkNoShow, canResendLink, canEditAddons, canRequestSessionFee, canEditDelivery, canSendDelivery]
+        additionalProperties: false
+        properties:
+          canReschedule: { type: boolean }
+          canCancel: { type: boolean }
+          canComplete: { type: boolean }
+          canMarkNoShow: { type: boolean }
+          canResendLink: { type: boolean }
+          canEditAddons: { type: boolean, description: 'Confirmed, and the shoot has begun.' }
+          canRequestSessionFee: { type: boolean }
+          canEditDelivery: { type: boolean, description: Completed. }
+          canSendDelivery: { type: boolean, description: 'Completed, with a link saved.' }
+
+  AdminBookingEnvelope:
+    type: object
+    required: [booking]
+    additionalProperties: false
+    properties:
+      booking: { $ref: '#/schemas/AdminBooking' }
+
+  AdminBookingConflict:
+    type: object
+    description: |
+      The action was refused. `error` says why; `booking` is the booking as it
+      now stands, so a screen acting on a stale view can show what is true.
+    required: [error, booking]
+    additionalProperties: false
+    properties:
+      error: { type: string, examples: [not_allowed] }
+      booking:
+        oneOf:
+          - type: 'null'
+          - $ref: '#/schemas/AdminBooking'

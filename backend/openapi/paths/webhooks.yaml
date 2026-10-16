@@ -1,0 +1,124 @@
+# Inbound payment-provider callbacks. Called by the providers, never by a
+# browser. Mounted ahead of the JSON parser so the raw bytes can be verified.
+# The body is read raw (any content type), capped at 64 kB.
+#
+# Every delivery is stored before it is interpreted and keyed on the provider's
+# own event id, so a repeat is a no-op and an event for an already-settled
+# payment is recorded and ignored. The answer is 200 whenever the delivery is on
+# record — applied, ignored, or refused as unsigned — so the provider stops
+# retrying; a 500 asks for the retry that processes it again. The body never
+# says which, so these carry no response schema.
+
+mtnMomo:
+  post:
+    operationId: mtnMomoWebhookPost
+    tags: [Webhooks]
+    summary: MTN MoMo callback
+    description: |
+      MTN signs nothing it sends, so the proof is in the URL: the path carries
+      our reference and `HMAC(our_ref)` keyed from `SESSION_SECRET`, and the
+      body's `externalId` must name the same payment. Only MTN is ever given
+      this URL. A body failing either check is stored and applied to nothing.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/OurRef
+      - name: signature
+        in: path
+        required: true
+        description: '`HMAC(our_ref)`, base64url.'
+        schema: { type: string }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: MTN's requesttopay status body.
+            properties:
+              externalId: { type: string }
+              status: { type: string, examples: [SUCCESSFUL, PENDING, FAILED] }
+              amount: { type: string }
+              financialTransactionId: { type: string }
+    responses:
+      '200':
+        $ref: '#/_responses/received'
+      '500':
+        $ref: '#/_responses/failed'
+  put:
+    operationId: mtnMomoWebhookPut
+    tags: [Webhooks]
+    summary: MTN MoMo callback (PUT)
+    description: Same as the POST callback; MTN may deliver either verb.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/OurRef
+      - name: signature
+        in: path
+        required: true
+        schema: { type: string }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              externalId: { type: string }
+              status: { type: string }
+              amount: { type: string }
+              financialTransactionId: { type: string }
+    responses:
+      '200':
+        $ref: '#/_responses/received'
+      '500':
+        $ref: '#/_responses/failed'
+
+flutterwave:
+  post:
+    operationId: flutterwaveWebhook
+    tags: [Webhooks]
+    summary: Flutterwave webhook
+    description: |
+      Verified by the `flutterwave-signature` header, an HMAC-SHA256 of the raw
+      body keyed by the dashboard's secret hash. A body whose signature does not
+      match is stored unverified and applied to nothing.
+    security: []
+    parameters:
+      - name: flutterwave-signature
+        in: header
+        required: true
+        description: Base64 HMAC-SHA256 of the raw body.
+        schema: { type: string }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: A Flutterwave charge event.
+            properties:
+              type: { type: string, examples: [charge.completed] }
+              data: { type: object }
+    responses:
+      '200':
+        $ref: '#/_responses/received'
+      '500':
+        $ref: '#/_responses/failed'
+
+_responses:
+  received:
+    description: The delivery is on record (applied, ignored, or refused as unsigned).
+    content:
+      application/json:
+        schema:
+          type: object
+          required: [received]
+          additionalProperties: false
+          properties:
+            received: { const: true }
+  failed:
+    description: Processing failed; the provider should retry.
+    content:
+      application/json:
+        schema: { $ref: ../components/common.yaml#/schemas/Error }
+        example: { error: internal_error }

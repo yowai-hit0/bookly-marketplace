@@ -1,0 +1,112 @@
+paymentMethods:
+  get:
+    operationId: getPaymentMethods
+    tags: [Checkout & payments]
+    summary: What the active provider collects
+    description: "The active provider and the methods its pay page may offer. `Cache-Control: no-store`. Anonymous."
+    security: []
+    responses:
+      '200':
+        description: The provider and its methods.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, methods]
+              additionalProperties: false
+              properties:
+                provider: { type: string, examples: [mtn_momo_direct] }
+                methods:
+                  type: array
+                  items: { $ref: ../components/common.yaml#/schemas/PaymentMethod }
+
+checkout:
+  get:
+    operationId: getCheckout
+    tags: [Checkout & payments]
+    summary: The checkout for a held booking
+    description: "What the pay page shows. Addressed by the booking reference and its checkout token; a wrong token is a 404, as an unknown reference is. `Cache-Control: no-store`."
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/Reference
+      - $ref: ../components/common.yaml#/parameters/CheckoutToken
+    responses:
+      '200':
+        description: The checkout.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/Checkout }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+checkoutPayments:
+  post:
+    operationId: startCheckoutPayment
+    tags: [Checkout & payments]
+    summary: Pay the booking fee
+    description: "Starts a booking-fee payment; the payer's phone is prompted. `Cache-Control: no-store`."
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/Reference
+      - $ref: ../components/common.yaml#/parameters/CheckoutToken
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/common.yaml#/schemas/PayRequest }
+    responses:
+      '201':
+        description: The attempt was accepted; poll its `ourRef`.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/PaymentStarted }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: |
+          Nothing to start: `already_paid`, `hold_expired`, `nothing_to_pay`, or
+          `payment_in_progress` (an attempt still waits — its `ourRef` is given).
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: ../components/common.yaml#/schemas/Error
+                - $ref: ../components/common.yaml#/schemas/PaymentInProgress
+            examples:
+              already_paid: { value: { error: already_paid } }
+              hold_expired: { value: { error: hold_expired } }
+              nothing_to_pay: { value: { error: nothing_to_pay } }
+              in_progress: { value: { error: payment_in_progress, payment: { ourRef: 00000000-0000-4000-8000-000000000000 } } }
+      '422':
+        description: A method not on offer, or an unusable phone number.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+      '502':
+        description: The provider refused the request or could not be reached.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/PaymentNotStarted }
+
+paymentStatus:
+  get:
+    operationId: getPaymentStatus
+    tags: [Checkout & payments]
+    summary: Where a payment stands
+    description: |
+      The confirmation page polls this while a Mobile Money payment settles —
+      often 30 seconds or more. Addressed by the random `our_ref` the pay page
+      was handed; shows no contact details. `Cache-Control: no-store`.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/OurRef
+    responses:
+      '200':
+        description: The payment and the booking it is for.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/PaymentStatusView }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound

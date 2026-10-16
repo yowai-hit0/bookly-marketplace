@@ -1,0 +1,1012 @@
+{
+  "common": {
+    "appName": "Bookly"
+  },
+  "home": {
+    "apiStatus": "API: {{status}}",
+    "checking": "checking…",
+    "reachable": "reachable",
+    "recheck": "Check again"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "body": "That page does not exist.",
+    "code": "404"
+  },
+  "services": {
+    "title": "Services",
+    "intro": "Choose a service to see its packages and prices.",
+    "loading": "Loading…",
+    "loadFailed": "Could not load services. Check your connection and try again.",
+    "loadServiceFailed": "Could not load this service. Check your connection and try again.",
+    "retry": "Try again",
+    "empty": "No services are available to book right now.",
+    "fromPrice": "From {{price}}",
+    "allServices": "All services",
+    "noPackages": "No packages are available for this service right now.",
+    "choosePackage": "Choose a package",
+    "chooseAddons": "Add-ons (optional)",
+    "photos_one": "{{count}} photo",
+    "photos_other": "{{count}} photos",
+    "duration": {
+      "minutes": "{{count}} min",
+      "hours_one": "{{count}} hour",
+      "hours_other": "{{count}} hours",
+      "hoursAndMinutes": "{{hours}} h {{minutes}} min"
+    },
+    "picker": {
+      "title": "Choose a date and time",
+      "choosePackageFirst": "Choose a package to see available times.",
+      "timezone": "All times are Kigali time (UTC+2).",
+      "previousMonth": "Previous month",
+      "nextMonth": "Next month",
+      "loading": "Loading available times…",
+      "loadFailed": "Could not load available times.",
+      "retry": "Try again",
+      "noTimesThisMonth": "No times are available in {{month}}. Try the next month.",
+      "weekdays": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
+      },
+      "dayAvailable_one": "{{date}}, {{count}} time available",
+      "dayAvailable_other": "{{date}}, {{count}} times available",
+      "dayUnavailable": "{{date}}, no times available",
+      "timesFor": "Start times on {{date}}",
+      "noTimesLeft": "No times are left on this day. Choose another date.",
+      "checking": "Checking that time is still free…",
+      "justTaken": "Sorry, that time was just taken. The calendar has been refreshed, so please choose another time.",
+      "checkFailed": "Could not confirm that time is still free. Check your connection and try again.",
+      "selected": "Selected: {{date}}, {{start}} to {{end}}, Kigali time",
+      "legendOpen": "Has open times",
+      "legendSelected": "Selected",
+      "kigaliTime": "All times in Kigali time"
+    },
+    "booking": {
+      "title": "Your details",
+      "intro": "We use these to arrange your shoot and to send your confirmation.",
+      "fields": {
+        "fullName": "Full name",
+        "email": "Email",
+        "phone": "Phone number",
+        "location": "Shoot location",
+        "partySize": "Number of people",
+        "specialRequests": "Special requests"
+      },
+      "hints": {
+        "phone": "Include your country code if your number is not Rwandan.",
+        "partySize": "Leave blank for a product shoot.",
+        "specialRequests": "Optional."
+      },
+      "invalid": {
+        "fullName": "Enter your full name.",
+        "email": "Enter a valid email address.",
+        "phone": "Enter a phone number we can reach you on.",
+        "location": "Tell us where the shoot will take place.",
+        "partySize": "Enter a whole number of people, at least 1, or leave it blank.",
+        "specialRequests": "Keep special requests under 2,000 characters.",
+        "consent": "Tick the box to agree before you book."
+      },
+      "consent": "I agree that Bookly may use these details to arrange and deliver my booking.",
+      "chooseTimeFirst": "Choose a date and time to continue.",
+      "submit": "Confirm booking",
+      "submitting": "Booking…",
+      "failed": "Your booking did not go through. Check your connection and try again.",
+      "catalogueChanged": "Something you chose is no longer available. Reload the page to see what is on offer now.",
+      "held": {
+        "title": "Your time is held",
+        "reference": "Booking reference",
+        "service": "Service",
+        "serviceValue": "{{service}}, {{package}}",
+        "when": "When",
+        "whenValue": "{{date}}, {{start}} to {{end}}, Kigali time",
+        "holdUntil": "We are holding this time for you until {{time}}, Kigali time. Pay the booking fee of {{fee}} before then to confirm your booking; after that, the time is released for others to book.",
+        "holdUntilUnknown": "We are holding this time for you for a short while. Pay the booking fee of {{fee}} to confirm your booking.",
+        "pay": "Pay the booking fee",
+        "heldUntil": "Held until"
+      }
+    },
+    "summary": {
+      "title": "Price summary",
+      "pickPackage": "Choose a package to see your total.",
+      "total": "Total",
+      "bookingFee": "Booking fee ({{percent}}%), paid now to secure your date",
+      "sessionFee": "Session fee, due after the shoot",
+      "nonRefundable": "The booking fee is non-refundable if you cancel."
+    },
+    "book": "Book"
+  },
+  "admin": {
+    "skipToContent": "Skip to content",
+    "signIn": {
+      "title": "Admin sign in",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Sign in",
+      "submitting": "Signing in…",
+      "invalid": "That email and password did not work.",
+      "failed": "Could not sign in. Check your connection and try again.",
+      "forgot": "Forgot your password?"
+    },
+    "resetPassword": {
+      "requestTitle": "Reset your password",
+      "requestBody": "Enter the email you sign in with. If it can sign in here, we will send you a link.",
+      "email": "Email",
+      "requestSubmit": "Send the link",
+      "requestSubmitting": "Sending…",
+      "requestSent": "If that address can sign in here, a reset link is on its way. Check the inbox, and the spam folder.",
+      "requestFailed": "Could not send the link. Check your connection and try again.",
+      "chooseTitle": "Choose a new password",
+      "chooseBody": "This link works once. After you save, sign in with the new password.",
+      "newPassword": "New password",
+      "confirmPassword": "Repeat the new password",
+      "passwordHint": "At least 12 characters. A short sentence you will remember beats a short scramble you will not.",
+      "chooseSubmit": "Save the password",
+      "chooseSubmitting": "Saving…",
+      "tooShort": "Use at least 12 characters.",
+      "mismatch": "Those two passwords are not the same.",
+      "invalidToken": "That link has expired or has already been used. Ask for a new one.",
+      "chooseFailed": "Could not save the password. Check your connection and try again.",
+      "doneTitle": "Password changed",
+      "doneBody": "You can sign in with the new password now.",
+      "backToSignIn": "Back to sign in"
+    },
+    "nav": {
+      "label": "Admin",
+      "calendar": "Calendar",
+      "catalogue": "Catalogue",
+      "signOut": "Sign out",
+      "bookings": "Bookings",
+      "availability": "Availability",
+      "settings": "Settings"
+    },
+    "theme": {
+      "label": "Theme",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "breadcrumb": {
+      "label": "Breadcrumb"
+    },
+    "dialog": {
+      "close": "Close"
+    },
+    "calendar": {
+      "title": "Calendar",
+      "timezoneNote": "All times are Kigali time (UTC+2).",
+      "views": {
+        "month": "Month",
+        "week": "Week",
+        "day": "Day"
+      },
+      "previous": "Previous",
+      "next": "Next",
+      "today": "Today",
+      "loading": "Loading calendar…",
+      "loadFailed": "Could not load the calendar.",
+      "retry": "Try again",
+      "allDay": "All day",
+      "conflict": "Conflicts with a block",
+      "status": {
+        "confirmed": "Confirmed",
+        "pending_payment": "Hold",
+        "completed": "Completed",
+        "no_show": "No-show",
+        "block": "Blocked"
+      },
+      "blockTime": "Block time",
+      "openBooking": "Open {{name}}'s booking"
+    },
+    "catalogue": {
+      "title": "Catalogue",
+      "intro": "What clients can book. Changes apply to new bookings only; existing bookings keep what they were sold.",
+      "loading": "Loading catalogue…",
+      "loadFailed": "Could not load the catalogue.",
+      "retry": "Try again",
+      "empty": "No services yet. Add the first one.",
+      "addService": "Add service",
+      "newService": "New service",
+      "editService": "Edit service",
+      "packages": "Packages",
+      "noPackages": "No packages yet.",
+      "addPackage": "Add package",
+      "newPackage": "New package",
+      "editPackage": "Edit package",
+      "addons": "Add-ons",
+      "noAddons": "No add-ons yet.",
+      "addAddon": "Add add-on",
+      "newAddon": "New add-on",
+      "editAddon": "Edit add-on",
+      "sharedAddons": "Add-ons for every service",
+      "sharedAddonsHint": "Offered alongside every service's own add-ons.",
+      "active": "Active",
+      "inactive": "Inactive",
+      "edit": "Edit",
+      "activate": "Activate",
+      "deactivate": "Deactivate",
+      "delete": "Delete",
+      "editNamed": "Edit {{name}}",
+      "activateNamed": "Activate {{name}}",
+      "deactivateNamed": "Deactivate {{name}}",
+      "deleteNamed": "Delete {{name}}",
+      "save": "Save",
+      "create": "Create",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "confirmDelete": "Delete {{name}}? This cannot be undone.",
+      "inUse": "That can't be deleted because bookings or packages still use it. Deactivate it instead.",
+      "actionFailed": "That change didn't save. Try again.",
+      "saveFailed": "Could not save. Try again.",
+      "feeDefault": "Default booking fee",
+      "feeOverride": "Booking fee {{percent}}%",
+      "order": "Order {{order}}",
+      "photos_one": "{{count}} photo",
+      "photos_other": "{{count}} photos",
+      "duration": "{{minutes}} min",
+      "durationWarning": "{{name}} lasts {{minutes}} min, longer than the longest open day ({{opens}}–{{closes}}, {{longest}} min). Clients will never find a slot for it.",
+      "durationWarningNoHours": "{{name}} is saved, but no day is open at all, so clients will never find a slot for it.",
+      "fields": {
+        "nameEn": "Name",
+        "slug": "URL slug",
+        "descriptionEn": "Description",
+        "coverImageUrl": "Cover image URL",
+        "bookingFeePercent": "Booking fee override (%)",
+        "sortOrder": "Display order",
+        "isActive": "Active (visible to clients)",
+        "priceRwf": "Price (RWF)",
+        "photoCount": "Photos",
+        "durationMinutes": "Duration (minutes)"
+      },
+      "hints": {
+        "slug": "Lowercase letters, numbers and hyphens, e.g. corporate-events.",
+        "coverImageUrl": "Paste an https link to an image hosted elsewhere.",
+        "bookingFeePercent": "Leave blank to use the global rate.",
+        "sortOrder": "Lower numbers show first.",
+        "priceRwf": "Whole RWF, digits only."
+      },
+      "invalid": {
+        "nameEn": "Enter a name, up to 200 characters.",
+        "slug": "Use lowercase letters, numbers and single hyphens.",
+        "slugTaken": "Another service already uses this slug.",
+        "descriptionEn": "Keep the description under 5,000 characters.",
+        "coverImageUrl": "Enter a full https:// link, or leave it blank.",
+        "bookingFeePercent": "Enter a percentage from 0 to 100, with one decimal place at most.",
+        "sortOrder": "Enter a whole number, 0 or more.",
+        "priceRwf": "Enter a whole number of RWF, 0 or more.",
+        "photoCount": "Enter a whole number, 0 or more.",
+        "durationMinutes": "Enter a whole number of minutes, at least 1."
+      }
+    },
+    "availability": {
+      "title": "Availability",
+      "intro": "When clients can book. Working hours set the weekly pattern; blocks take time back out of it.",
+      "loading": "Loading availability…",
+      "loadFailed": "Could not load availability.",
+      "retry": "Try again",
+      "actionFailed": "That change didn't save. Try again.",
+      "saveFailed": "Could not save. Try again.",
+      "saving": "Saving…",
+      "save": "Save",
+      "create": "Create",
+      "cancel": "Cancel",
+      "edit": "Edit",
+      "delete": "Delete",
+      "weekdays": {
+        "0": "Sunday",
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday"
+      },
+      "hours": {
+        "title": "Working hours",
+        "intro": "The weekly pattern, plus single dates that differ from it. A date overrides the weekday it falls on.",
+        "empty": "No working hours yet, so clients can never find a slot. Add at least one open day.",
+        "add": "Add hours",
+        "new": "New working hours",
+        "editTitle": "Edit working hours",
+        "everyDay": "Every {{day}}",
+        "window": "{{opens}} to {{closes}}",
+        "closed": "Closed",
+        "weeklyBadge": "Weekly",
+        "datedBadge": "One date",
+        "editNamed": "Edit the hours for {{name}}",
+        "deleteNamed": "Delete the hours for {{name}}",
+        "confirmDeleteWeekly": "Delete the hours for {{name}}? That closes it until you add hours again.",
+        "confirmDeleteDated": "Delete the override for {{name}}? That date goes back to the usual weekly hours.",
+        "exists": "That day already has hours. Edit the existing row instead."
+      },
+      "blocks": {
+        "title": "Blocks",
+        "intro": "Time taken out of your working hours: holidays, other commitments, anything clients must not book.",
+        "empty": "No blocks. Every open hour is bookable.",
+        "add": "Add block",
+        "new": "New block",
+        "editTitle": "Edit block",
+        "allDayOne": "{{date}}, all day",
+        "allDayRange": "{{from}} to {{to}}, all day",
+        "timeRange": "{{date}}, {{start}} to {{end}}",
+        "noReason": "No reason given",
+        "editNamed": "Edit the block on {{name}}",
+        "deleteNamed": "Delete the block on {{name}}",
+        "confirmDelete": "Delete the block on {{name}}? That time becomes bookable again.",
+        "overlapTitle_one": "This block covers a confirmed booking",
+        "overlapTitle_other": "This block covers {{count}} confirmed bookings",
+        "overlapBody": "Saving it does not cancel them. They stay booked, and the calendar marks them as conflicts.",
+        "overlapConfirm": "Block anyway",
+        "overlapCancel": "Leave it",
+        "overlapSaving": "Blocking…"
+      },
+      "fields": {
+        "kind": "Applies to",
+        "kindWeekday": "Every week",
+        "kindDate": "One date",
+        "weekday": "Day of the week",
+        "effectiveDate": "Date",
+        "isOpen": "Open for bookings on this day",
+        "opens": "Opens",
+        "closes": "Closes",
+        "note": "Note",
+        "mode": "Length",
+        "modeAllDay": "Whole days",
+        "modeTimeRange": "Part of a day",
+        "startDate": "First day",
+        "endDate": "Last day",
+        "date": "Date",
+        "startTime": "From",
+        "endTime": "To",
+        "reason": "Reason"
+      },
+      "hints": {
+        "note": "Only you see this.",
+        "reason": "Only you see this. Clients are told the time is unavailable, never why.",
+        "endDate": "The same day as the first for a single day.",
+        "isOpen": "Clear this to close the day without deleting the row."
+      },
+      "invalid": {
+        "weekday": "Choose a day of the week.",
+        "effectiveDate": "Enter a date as YYYY-MM-DD.",
+        "opens": "Enter a time as HH:MM, for example 09:00.",
+        "closes": "Enter a closing time later than the opening time.",
+        "note": "Keep the note under 500 characters.",
+        "startDate": "Enter a date as YYYY-MM-DD.",
+        "endDate": "The last day cannot be before the first.",
+        "date": "Enter a date as YYYY-MM-DD.",
+        "startTime": "Enter a time as HH:MM, for example 14:00.",
+        "endTime": "Enter an end time later than the start time.",
+        "reason": "Keep the reason under 500 characters."
+      }
+    },
+    "settings": {
+      "title": "Settings",
+      "intro": "How bookings are priced and paced. Changes apply to new bookings; anything already booked keeps the fee and buffer it was sold.",
+      "loading": "Loading settings…",
+      "loadFailed": "Could not load the settings.",
+      "retry": "Try again",
+      "save": "Save settings",
+      "saving": "Saving…",
+      "saved": "Settings saved.",
+      "saveFailed": "Could not save the settings. Try again.",
+      "fields": {
+        "bookingFeePercent": "Booking fee (%)",
+        "minLeadTimeMinutes": "Minimum notice (minutes)",
+        "holdMinutes": "Hold time (minutes)",
+        "bufferMinutes": "Buffer between shoots (minutes)",
+        "deliveryExpiryDays": "Photo link lasts (days)"
+      },
+      "hints": {
+        "bookingFeePercent": "The share of the total paid now to secure a date. A service can override it.",
+        "minLeadTimeMinutes": "How far ahead a client must book. 1440 is one day.",
+        "holdMinutes": "How long a slot is held while a client pays the booking fee.",
+        "bufferMinutes": "Packing-up time kept free after every shoot.",
+        "deliveryExpiryDays": "How long a photo link keeps working after you send it."
+      },
+      "invalid": {
+        "bookingFeePercent": "Enter a percentage from 0 to 100, with at most one decimal place.",
+        "minLeadTimeMinutes": "Enter a whole number of minutes, 0 or more.",
+        "holdMinutes": "Enter a whole number of minutes, 1 or more.",
+        "bufferMinutes": "Enter a whole number of minutes, 0 or more.",
+        "deliveryExpiryDays": "Enter a whole number of days, 1 or more."
+      }
+    },
+    "bookings": {
+      "title": "Bookings",
+      "loading": "Loading…",
+      "loadFailed": "We could not load the bookings. Check your connection and try again.",
+      "empty": "No bookings match these filters.",
+      "loadMore": "Load more",
+      "outstanding": "{{amount}} still to pay",
+      "refundDue": "{{amount}} to refund",
+      "filters": {
+        "label": "Filters",
+        "from": "From",
+        "to": "To",
+        "search": "Search",
+        "apply": "Search",
+        "clear": "Clear filters"
+      },
+      "columns": {
+        "when": "When",
+        "reference": "Reference",
+        "client": "Client",
+        "service": "Service",
+        "status": "Status",
+        "money": "Money"
+      },
+      "status": {
+        "pending_payment": "Waiting for payment",
+        "confirmed": "Confirmed",
+        "completed": "Completed",
+        "no_show": "No-show",
+        "expired": "Expired",
+        "cancelled_by_client": "Cancelled by client",
+        "cancelled_by_admin": "Cancelled by you"
+      },
+      "stage": {
+        "awaiting_payment": "Waiting for payment",
+        "confirmed": "Confirmed",
+        "in_progress": "In progress",
+        "needs_review": "Needs review",
+        "completed": "Completed",
+        "closed": "Closed",
+        "no_show": "No-show",
+        "expired": "Expired",
+        "cancelled_by_client": "Cancelled by client",
+        "cancelled_by_admin": "Cancelled by you"
+      },
+      "stageHelp": {
+        "awaiting_payment": "Held for the client while they pay the booking fee.",
+        "confirmed": "Booking fee paid, and the shoot is still ahead.",
+        "in_progress": "The shoot is happening now.",
+        "needs_review": "The shoot has ended. Mark it completed or no-show.",
+        "completed": "The shoot is done, and the photos have not been sent yet.",
+        "closed": "The photos email has been sent.",
+        "no_show": "You recorded that the client did not come.",
+        "expired": "The hold ran out before the booking fee was paid.",
+        "cancelled_by_client": "The client cancelled.",
+        "cancelled_by_admin": "You cancelled it."
+      },
+      "stageLegend": {
+        "label": "What the statuses mean",
+        "title": "What the statuses mean"
+      },
+      "statusFilter": {
+        "all": "Status: All",
+        "some": "Status: {{count}} selected",
+        "clear": "Show every status"
+      },
+      "stageAction": {
+        "awaiting_payment": "Nothing to do: it confirms itself when paid, or the hold runs out.",
+        "confirmed": "Get ready for the shoot. You can still move or cancel it.",
+        "in_progress": "Nothing to do until the shoot ends.",
+        "needs_review": "Add any add-ons, collect what is owed, then mark it completed or no-show.",
+        "completed": "Send the photos.",
+        "closed": "Nothing left to do.",
+        "no_show": "Nothing left to do.",
+        "expired": "Nothing to do: the time is free again.",
+        "cancelled_by_client": "Check the payments for anything flagged to refund.",
+        "cancelled_by_admin": "Send the refund, then record it on the booking."
+      },
+      "pager": {
+        "label": "Pages",
+        "previous": "Previous page",
+        "next": "Next page",
+        "page": "Page {{page}}",
+        "showing": "Showing {{from}}–{{to}} of {{total}}",
+        "showingNone": "Showing 0 of 0"
+      }
+    },
+    "booking": {
+      "back": "All bookings",
+      "loading": "Loading…",
+      "loadFailed": "We could not load this booking. Check your connection and try again.",
+      "missing": "This booking no longer exists",
+      "postShoot": "added after the shoot",
+      "sections": {
+        "shoot": "The shoot",
+        "client": "Client",
+        "money": "Money",
+        "payments": "Payments",
+        "actions": "Actions",
+        "messages": "Messages sent",
+        "delivery": "The photos"
+      },
+      "labels": {
+        "when": "When",
+        "service": "Service",
+        "location": "Location",
+        "people": "Number of people",
+        "requests": "Special requests",
+        "originally": "Originally booked for",
+        "movedAt": "Last moved",
+        "cancellationReason": "Reason given",
+        "name": "Name",
+        "email": "Email",
+        "phone": "Phone",
+        "link": "Booking link",
+        "total": "Total",
+        "collected": "Collected",
+        "outstanding": "Still to pay",
+        "refundDue": "To refund"
+      },
+      "linkLive": "Live until {{date}}",
+      "linkNone": "Not issued yet",
+      "noPayments": "No payments yet.",
+      "noMessages": "Nothing sent yet.",
+      "messageTo": "to {{recipient}}",
+      "paymentKinds": {
+        "booking_fee": "Booking fee",
+        "session_fee": "Session fee"
+      },
+      "paymentStatus": {
+        "initiated": "Started",
+        "pending": "Waiting for the payer",
+        "succeeded": "Paid",
+        "failed": "Failed",
+        "refund_due": "Refund due",
+        "refunded": "Refunded"
+      },
+      "paymentRefs": "{{provider}} · our ref {{ourRef}} · their ref {{providerRef}}",
+      "refundReference": "refund {{reference}}",
+      "templates": {
+        "booking_confirmation": "Booking confirmation",
+        "admin_new_booking": "New booking alert",
+        "session_fee_request": "Session fee request",
+        "payment_receipt": "Payment receipt",
+        "photo_delivery": "Photo delivery",
+        "cancellation": "Cancellation notice",
+        "reschedule": "New time notice",
+        "access_link_resend": "New booking link",
+        "admin_alert": "Alert to you",
+        "gcal_create": "Add to Google Calendar",
+        "gcal_update": "Update in Google Calendar",
+        "gcal_delete": "Remove from Google Calendar"
+      },
+      "messageStatus": {
+        "pending": "Queued",
+        "processing": "Sending",
+        "done": "Sent",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
+      "reschedule": {
+        "newStart": "New start (Kigali time)",
+        "move": "Move booking",
+        "note": "The client keeps their reference, link and payments, and is emailed the new time."
+      },
+      "cancel": {
+        "start": "Cancel this booking",
+        "warning": "Cancelling releases the time and tells the client. Everything they have paid is flagged for you to refund in full.",
+        "reason": "Reason (shown to the client)",
+        "confirm": "Cancel and refund",
+        "keep": "Keep the booking"
+      },
+      "complete": "Mark completed",
+      "noShow": "Mark no-show",
+      "resendLink": "Send a new booking link",
+      "resendNote": "A new link replaces the old one, which stops working straight away.",
+      "refund": {
+        "reference": "Refund reference",
+        "record": "Record {{amount}} refunded",
+        "note": "The system moves no money. Send the refund yourself, then record it here."
+      },
+      "errors": {
+        "failed": "That did not work. Try again.",
+        "slot_taken": "That time is already taken. Choose another.",
+        "not_allowed": "That is not possible for this booking any more. The booking below is up to date.",
+        "unchanged": "That is the time the booking already has.",
+        "not_refundable": "This payment is not flagged for a refund.",
+        "not_found": "This booking no longer exists.",
+        "invalid_request": "Check what you entered and try again.",
+        "validation_failed": "Check what you entered and try again.",
+        "already_paid": "The client has already paid for this. Refund it rather than removing it.",
+        "nothing_to_pay": "There is nothing left to pay on this booking.",
+        "in_progress": "The client is paying right now. Wait for that to finish.",
+        "too_large": "That would make the booking worth more than the system can hold.",
+        "no_link": "Save a link to the photos first.",
+        "balance_due": "The client still owes money on this booking. It completes by itself once it is paid in full.",
+        "over_outstanding": "That is more than the client owes. Enter the amount you were paid, up to what is still owed."
+      },
+      "addons": {
+        "title": "Add-ons from the shoot",
+        "addon": "Add-on",
+        "choose": "Choose an add-on…",
+        "quantity": "Quantity",
+        "add": "Add to the booking",
+        "remove": "Remove",
+        "loading": "Loading the add-ons…",
+        "none": "No add-ons are on sale for this service.",
+        "note": "Adding one raises what the client owes. Ask for it with the session fee below.",
+        "open": "Add an add-on",
+        "loadFailed": "We could not load the add-ons. Check your connection and try again.",
+        "added": "Added. The client now owes {{amount}}. Once every add-on is in, ask for it with the session fee.",
+        "toSessionFee": "Go to Request session fee"
+      },
+      "sessionFee": {
+        "request": "Request {{amount}} session fee",
+        "note": "Emails the client the amount and a fresh link to pay it. The amount is fixed when you ask, so add every add-on first."
+      },
+      "notes": {
+        "title": "Notes to the client",
+        "intro": "The client sees these on their booking page, from \"your photographer\".",
+        "none": "No notes yet.",
+        "label": "New note",
+        "count": "{{count}} of 1000",
+        "email": "Also email it to the client",
+        "add": "Add the note",
+        "emailed": "Emailed",
+        "pageOnly": "On the page only",
+        "delete": "Delete",
+        "deleteConfirm": "Delete this note? It disappears from the client's page. An email already sent stays sent.",
+        "deleteYes": "Delete the note",
+        "keep": "Keep it"
+      },
+      "delivery": {
+        "url": "Link to the photos",
+        "expires": "Link expires",
+        "expiresHint": "Left blank, the client gets 90 days from today.",
+        "note": "A line for the client (optional)",
+        "note_hint": "Saving only stores the link. The client hears nothing until you send it.",
+        "save": "Save the link",
+        "send": "Send the photos",
+        "sendAgain": "Send again",
+        "sent": "Last sent",
+        "unsent": "Nothing has been sent to the client yet.",
+        "opensWhenCompleted": "Photo delivery opens once you mark this booking completed.",
+        "confirmTitle": "Send the photo link to:",
+        "recipient": "Email address",
+        "recipientHint": "Change it only if the client asked. A different address is used for this email only; the booking keeps {{email}}.",
+        "recipientInvalid": "Enter a valid email address.",
+        "confirmSend": "Send now",
+        "addLink": "Add the photo link",
+        "changeLink": "Change the link",
+        "back": "Back",
+        "opensWhenPaid": "Photo delivery opens once this booking is completed: by itself when it is paid in full, or when you mark it completed."
+      },
+      "completeOwed": "Mark completed opens once nothing is owed. {{amount}} is still to pay. Paid in full, the booking completes by itself.",
+      "cash": {
+        "open": "Record cash payment",
+        "title": "Record a cash payment",
+        "amount": "Amount received (RWF)",
+        "amountHint": "Whole francs, from 1 up to {{amount}}, which is what is still owed.",
+        "note": "Note (optional)",
+        "explain": "The client is not emailed. Any payment link already sent for this money stops asking for it. Paid in full after the shoot, the booking completes by itself.",
+        "submit": "Record the payment",
+        "label": "Cash",
+        "refs": "cash · our ref {{ourRef}}",
+        "replaced": "Replaced by cash"
+      }
+    }
+  },
+  "checkout": {
+    "loading": "Loading your booking…",
+    "loadFailed": "We could not load your booking. Check your connection and try again.",
+    "retry": "Try again",
+    "invalidLink": {
+      "title": "This payment link is not valid",
+      "body": "Check that you opened the whole link. If your booking has ended, you are welcome to book again."
+    },
+    "title": "Pay the booking fee",
+    "summary": {
+      "reference": "Booking reference",
+      "service": "Service",
+      "serviceValue": "{{service}}, {{package}}",
+      "when": "When",
+      "whenValue": "{{date}}, {{start}} to {{end}}, Kigali time",
+      "fee": "Booking fee"
+    },
+    "holdUntil": "We are holding this time for you until {{time}}, Kigali time.",
+    "nonRefundable": "The booking fee is non-refundable if you cancel.",
+    "methods": {
+      "legend": "How would you like to pay?",
+      "momo_mtn": "MTN MoMo",
+      "momo_airtel": "Airtel Money",
+      "card": "Card"
+    },
+    "phone": {
+      "label": "Mobile Money number",
+      "hint": "We will send a payment request to this phone. Approve it with your Mobile Money PIN.",
+      "invalid": "Enter the phone number of your Mobile Money account."
+    },
+    "pay": "Pay {{amount}}",
+    "paying": "Sending the request…",
+    "waiting": {
+      "text": "A payment request is already waiting on your phone.",
+      "link": "Follow that payment"
+    },
+    "errors": {
+      "rejected": "Mobile Money did not accept the request. Check that the number has a Mobile Money account, then try again.",
+      "unavailable": "We could not reach Mobile Money just now. Please try again in a moment.",
+      "failed": "The payment did not start. Check your connection and try again.",
+      "noMethods": "Online payment is not available right now. Please try again later."
+    },
+    "paid": {
+      "title": "This booking is already paid",
+      "body": "Your confirmation email, with a link to your booking, is on its way."
+    },
+    "expired": {
+      "title": "Your hold on this time has ended",
+      "body": "The time was released because the booking fee was not paid in time. You are welcome to book again.",
+      "link": "Choose a time"
+    },
+    "closed": {
+      "title": "This booking cannot be paid online",
+      "body": "Please contact the photographer about this booking."
+    },
+    "progress": {
+      "pendingTitle": "Approve the payment on your phone",
+      "pendingBody": "We have sent a request for {{amount}} to your phone. Enter your Mobile Money PIN to approve it.",
+      "pendingWait": "Mobile Money can take a minute to confirm. This page updates by itself.",
+      "pendingLeave": "If you close this page, we will still email your confirmation as soon as the payment arrives.",
+      "stillWaiting": "We have not heard back yet. If you approved the payment, your confirmation email will arrive once it settles.",
+      "checkAgain": "Check again",
+      "connectionTrouble": "We are having trouble checking on the payment. We will keep trying.",
+      "confirmedTitle": "Your booking is confirmed",
+      "confirmedBody": "Thank you. Your confirmation email, with a link to your booking, is on its way.",
+      "receivedTitle": "Payment received",
+      "receivedBody": "Thank you. Your payment of {{amount}} has arrived.",
+      "failedTitle": "The payment did not go through",
+      "failedDeclined": "The payment was declined, or was not approved in time.",
+      "failedUnavailable": "We could not reach Mobile Money to start the payment.",
+      "tryAgain": "Try again",
+      "refundTitle": "Your payment arrived after your hold ended",
+      "refundBody": "The time was booked by someone else before your payment arrived. The photographer has been told and will refund your {{amount}}.",
+      "duplicateTitle": "Your booking was already paid",
+      "duplicateBody": "This second payment of {{amount}} was not needed. The photographer has been told and will refund it.",
+      "couldNotCheck": "We could not check on your payment. If you approved it, your confirmation email will arrive once it settles.",
+      "refundOtherTitle": "This payment is due a refund",
+      "refundOtherBody": "The photographer has been told and will refund your {{amount}}."
+    }
+  },
+  "booking": {
+    "loading": "Loading your booking…",
+    "loadFailed": "We could not load your booking. Check your connection and try again.",
+    "retry": "Try again",
+    "invalidLink": {
+      "title": "This link is not valid",
+      "body": "Check that you opened the whole link from your email. If it has been replaced, use the most recent email we sent you.",
+      "getNewLink": "Get a new link by email"
+    },
+    "notices": {
+      "label": "Updates about your booking",
+      "dismiss": "Dismiss",
+      "reschedule": "Your session was moved to {{date}}, {{start}} to {{end}} (Kigali time).",
+      "sessionFeeRequest": "The photographer asked you to pay {{amount}}.",
+      "paymentReceipt": "We received your payment of {{amount}}. Thank you.",
+      "photoDelivery": "Your photos are ready. We emailed you the link, and it is on this page too.",
+      "cancelledByPhotographer": "The photographer cancelled this booking.",
+      "balanceDue": "{{amount}} is still to pay.",
+      "payNow": "Pay now",
+      "fromPhotographer": "From your photographer:"
+    },
+    "contact": {
+      "title": "Your email",
+      "current": "We write to {{email}} about this booking.",
+      "change": "Change email",
+      "newEmail": "New email",
+      "hint": "We will send a link to the new address. Nothing changes until you use it.",
+      "invalid": "Enter a valid email address.",
+      "save": "Send the link",
+      "saving": "Sending…",
+      "keep": "Keep this email",
+      "failed": "We could not send that. Check your connection and try again.",
+      "rateLimited": "You have asked to change the email three times today. Try again tomorrow.",
+      "unchanged": "That is already the email we write to.",
+      "sent": "Check {{email}} for our link to confirm the change. Until then we keep writing to {{current}}.",
+      "pending": "Waiting for you to confirm {{email}} from its inbox. Until then we keep writing to {{current}}."
+    },
+    "title": "Your booking",
+    "status": {
+      "pending_payment": "Waiting for payment",
+      "confirmed": "Confirmed",
+      "completed": "Completed",
+      "no_show": "Recorded as missed",
+      "expired": "Expired",
+      "cancelled_by_client": "Cancelled by you",
+      "cancelled_by_admin": "Cancelled by the photographer"
+    },
+    "labels": {
+      "reference": "Booking reference",
+      "service": "Service",
+      "when": "When",
+      "location": "Location",
+      "people": "Number of people",
+      "photos": "Photos",
+      "requests": "Special requests",
+      "total": "Total",
+      "paid": "Paid",
+      "outstanding": "Still to pay",
+      "refundDue": "Refund due to you"
+    },
+    "serviceValue": "{{service}}, {{package}}",
+    "whenValue": "{{date}}, {{start}} to {{end}}, Kigali time",
+    "photos_other": "{{count}} photos",
+    "sessionFee": {
+      "title": "Pay the rest",
+      "intro": "{{amount}} is still to pay for this shoot.",
+      "pay": "Pay {{amount}}"
+    },
+    "delivery": {
+      "title": "Your photos",
+      "open": "Open your photos",
+      "expires": "This link works until {{date}}.",
+      "expired": "This link has expired. Contact the photographer for a new one."
+    },
+    "cancel": {
+      "title": "Need to cancel?",
+      "start": "Cancel this booking",
+      "warning": "If you cancel, your booking fee of {{fee}} is not refunded, and the time is released for someone else to book.",
+      "confirm": "Yes, cancel my booking",
+      "keep": "Keep my booking",
+      "cancelling": "Cancelling…",
+      "failed": "We could not cancel your booking. Check your connection and try again.",
+      "notCancellable": "This booking can no longer be cancelled. Contact the photographer if you need to change it."
+    },
+    "cancelled": {
+      "title": "This booking is cancelled",
+      "refund": "You are owed {{amount}} back. The photographer will contact you to arrange it."
+    },
+    "photos_one": "{{count}} photo",
+    "stage": {
+      "awaiting_payment": "Waiting for payment",
+      "confirmed": "Confirmed",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "closed": "Closed",
+      "no_show": "Recorded as missed",
+      "expired": "Expired",
+      "cancelled_by_client": "Cancelled by you",
+      "cancelled_by_admin": "Cancelled by the photographer"
+    },
+    "stageHelp": {
+      "awaiting_payment": "Your time is held while you pay the booking fee.",
+      "confirmed": "Your booking fee is paid and your time is booked.",
+      "in_progress": "Your shoot is happening now.",
+      "completed": "The shoot is done, and the photographer is preparing your photos.",
+      "closed": "Your photos have been sent to your email.",
+      "no_show": "The photographer recorded that the shoot did not take place.",
+      "expired": "The hold ran out before the booking fee was paid.",
+      "cancelled_by_client": "You cancelled this booking.",
+      "cancelled_by_admin": "The photographer cancelled this booking."
+    },
+    "stageLegend": {
+      "label": "What the statuses mean",
+      "title": "What the statuses mean"
+    }
+  },
+  "emailConfirm": {
+    "title": "Confirm your new email",
+    "intro": "Press the button to use this address for your booking from now on.",
+    "confirm": "Confirm this email",
+    "confirming": "Confirming…",
+    "done": "Done. We will write to your new address from now on.",
+    "failed": "We could not confirm that. Check your connection and try again.",
+    "invalid": {
+      "title": "This confirmation link is not valid",
+      "body": "It may have expired, been used already, or been replaced by a newer request. You can ask again from your booking page."
+    }
+  },
+  "myBooking": {
+    "title": "Find your booking",
+    "intro": "Enter the email you booked with. We will email you a new link to each of your current bookings.",
+    "email": "Email",
+    "hint": "Any link we sent you before stops working once the new one is sent.",
+    "invalid": "Enter a valid email address.",
+    "submit": "Email me my links",
+    "sending": "Sending…",
+    "failed": "We could not send that. Check your connection and try again.",
+    "sent": {
+      "title": "Check your inbox",
+      "body": "If we found a current booking for that address, we have emailed you a link. It can take a few minutes, so check your spam folder too.",
+      "again": "Use a different address"
+    }
+  },
+  "shell": {
+    "skipToContent": "Skip to content",
+    "nav": {
+      "label": "Main",
+      "bookNow": "Book now",
+      "adminLogin": "Admin login",
+      "myBooking": "My booking"
+    },
+    "footer": {
+      "label": "Footer",
+      "home": "Home",
+      "services": "Browse services",
+      "note": "Booking and payment for photography sessions in Kigali.",
+      "book": "Book",
+      "about": "About"
+    },
+    "theme": {
+      "system": "Theme: System",
+      "light": "Theme: Light",
+      "dark": "Theme: Dark"
+    },
+    "contact": {
+      "label": "Contact",
+      "phone": "Phone",
+      "whatsapp": "WhatsApp",
+      "email": "Email",
+      "questions": "Questions?"
+    }
+  },
+  "landing": {
+    "hero": {
+      "title": "Book a photographer, and know the price before you do.",
+      "body": "Pick a service and a package, choose a time that is actually free, and hold it with a booking fee. The rest is paid on the day.",
+      "cta": "Book now",
+      "aside": "You see the full price, and what is due now, before you pay anything.",
+      "eyebrow": "Photographer · Kigali, Rwanda",
+      "need": "What do you need?",
+      "factFree": "Only free times are shown",
+      "factMomo": "Pay with MTN MoMo",
+      "mockup": {
+        "timezone": "Kigali time",
+        "service": "Photo shoot",
+        "held": "Your date is held"
+      }
+    },
+    "preview": {
+      "title": "What you can book",
+      "more": "Browse services",
+      "eyebrow": "01 — Services"
+    },
+    "how": {
+      "title": "How booking works",
+      "step1": {
+        "title": "Choose a service",
+        "body": "Each service has packages, and add-ons you can take or leave. Every price is listed."
+      },
+      "step2": {
+        "title": "Pick a time",
+        "body": "You only see times that are free. Picking one holds it while you pay."
+      },
+      "step3": {
+        "title": "Pay the booking fee",
+        "body": "A share of the total, paid by Mobile Money, confirms the booking. The rest is due on the day."
+      },
+      "step4": {
+        "title": "Get your link",
+        "body": "We email you a private link to your booking. It is where you check the details, pay the balance and find your photos."
+      },
+      "eyebrow": "02 — How booking works"
+    },
+    "trust": {
+      "title": "What you can count on",
+      "price": {
+        "title": "The price is the price",
+        "body": "The total, the amount due now and the amount due later are all shown before you pay. Nothing is added afterwards."
+      },
+      "hold": {
+        "title": "Your time is held",
+        "body": "The slot is taken off the calendar while your payment goes through, so nobody books it out from under you."
+      },
+      "fee": {
+        "title": "The booking fee is not refunded",
+        "body": "If you cancel, the booking fee stays with the photographer and the time is released. We say so here, and again before you pay."
+      },
+      "link": {
+        "title": "One private link, yours",
+        "body": "Your booking lives on a link only you are emailed. You can check it, pay the balance or cancel from there."
+      },
+      "eyebrow": "03 — Good to know"
+    },
+    "closing": {
+      "title": "Ready when you are.",
+      "cta": "Book now"
+    },
+    "booked": {
+      "eyebrow": "Already booked?",
+      "title": "Find your booking any time.",
+      "body": "Lost the email? Enter the address you booked with and we will send you a fresh link to your booking page.",
+      "cta": "Find my booking"
+    }
+  }
+}

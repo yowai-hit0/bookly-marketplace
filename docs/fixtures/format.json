@@ -1,0 +1,77 @@
+{
+  "$comment": "Asserted by BOTH test suites (backend/src/format.test.ts and frontend/src/lib/format.test.ts). The two projects hold their own copy of the formatters by design (plan.md, Stack decisions); this file is what stops the copies from drifting. Editing an expectation here fails a test in both projects until both copies agree.",
+  "timeZone": "Africa/Kigali",
+  "currency": "RWF",
+  "formatDateTime": [
+    {
+      "case": "spec §6.5 — UTC instant rendered in Kigali, UTC+2",
+      "input": "2026-07-01T06:00:00Z",
+      "expected": "1 Jul 2026, 08:00"
+    },
+    {
+      "case": "two-digit day, evening",
+      "input": "2026-01-15T21:30:00Z",
+      "expected": "15 Jan 2026, 23:30"
+    },
+    {
+      "case": "the +02:00 shift rolls the date, and the year, forward",
+      "input": "2026-12-31T22:00:00Z",
+      "expected": "1 Jan 2027, 00:00"
+    },
+    {
+      "case": "no DST — January and July share one offset",
+      "input": "2026-01-01T07:00:00Z",
+      "expected": "1 Jan 2026, 09:00"
+    },
+    {
+      "case": "no DST — the July twin of the case above",
+      "input": "2026-07-01T07:00:00Z",
+      "expected": "1 Jul 2026, 09:00"
+    },
+    {
+      "case": "closing time, 17:00 Kigali (working_hours closes_minute 1020)",
+      "input": "2026-03-14T15:00:00Z",
+      "expected": "14 Mar 2026, 17:00"
+    }
+  ],
+  "formatTime": [
+    { "case": "spec §6.5 — a UTC instant as a Kigali clock time", "input": "2026-07-01T06:00:00Z", "expected": "08:00" },
+    { "case": "a half-hour slot start, 09:30 Kigali", "input": "2026-10-07T07:30:00Z", "expected": "09:30" },
+    { "case": "late evening", "input": "2026-01-15T21:30:00Z", "expected": "23:30" },
+    { "case": "midnight is 00:00, never 24:00", "input": "2026-12-31T22:00:00Z", "expected": "00:00" },
+    { "case": "closing time, 17:00 Kigali", "input": "2026-03-14T15:00:00Z", "expected": "17:00" }
+  ],
+  "formatDate": [
+    { "case": "a Kigali calendar date, with its weekday", "input": "2026-07-01", "expected": "Wednesday, 1 July 2026" },
+    { "case": "a two-digit day", "input": "2026-10-07", "expected": "Wednesday, 7 October 2026" },
+    { "case": "a new year", "input": "2027-01-01", "expected": "Friday, 1 January 2027" },
+    { "case": "a leap day", "input": "2028-02-29", "expected": "Tuesday, 29 February 2028" }
+  ],
+  "formatDateRejects": [
+    { "case": "a day the calendar does not have", "input": "2026-02-30" },
+    { "case": "a thirteenth month", "input": "2026-13-01" },
+    { "case": "an instant is not a calendar date", "input": "2026-10-07T00:00:00Z" },
+    { "case": "prose is not a date", "input": "7 October 2026" }
+  ],
+  "formatMonth": [
+    { "case": "a month", "input": "2026-10", "expected": "October 2026" },
+    { "case": "January", "input": "2027-01", "expected": "January 2027" },
+    { "case": "February", "input": "2026-02", "expected": "February 2026" }
+  ],
+  "formatMonthRejects": [
+    { "case": "a thirteenth month", "input": "2026-13" },
+    { "case": "month zero", "input": "2026-00" },
+    { "case": "an unpadded month", "input": "2026-1" },
+    { "case": "prose is not a month", "input": "October 2026" }
+  ],
+  "formatMoney": [
+    { "case": "zero", "input": 0, "expected": "0 RWF" },
+    { "case": "below the grouping threshold", "input": 500, "expected": "500 RWF" },
+    { "case": "a package price", "input": 45000, "expected": "45,000 RWF" },
+    { "case": "two grouping separators", "input": 1000000, "expected": "1,000,000 RWF" }
+  ],
+  "formatMoneyRejects": [
+    { "case": "money is whole RWF only — no minor unit exists", "input": 45000.5 },
+    { "case": "a rounding artefact must not render as 0 RWF", "input": 0.1 }
+  ]
+}

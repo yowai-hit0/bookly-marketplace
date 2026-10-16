@@ -1,0 +1,179 @@
+openapi: 3.1.0
+info:
+  title: Bookly API
+  version: 1.0.0
+  summary: Booking, payment and admin API for a photographer's booking site in Kigali.
+  description: |
+    The API behind the Bookly booking site. It serves three kinds of caller:
+
+    - **The public**: anonymous visitors browsing services, checking availability,
+      booking a slot and paying its booking fee.
+    - **A booking's client**: no account; every client request carries a
+      **capability token** in its path, emailed when the booking is confirmed.
+    - **The admin** (the photographer): an `Authorization: Bearer` JWT from
+      `POST /api/admin/auth/login`.
+
+    Read [the API conventions](/api/conventions) first: error shapes, the
+    400-versus-422 rule, time zones and money are the same on every operation.
+
+    This file is written by hand. A backend test (`src/openapi.test.ts`) fails
+    when a route exists without an operation here, or the other way round, and
+    validates real responses against these schemas.
+servers:
+  - url: https://api.bookly.example
+    description: Production
+  - url: http://localhost:4000
+    description: Local development
+# Admin operations inherit this; public, client and auth operations set
+# `security: []` to opt out.
+security:
+  - adminBearer: []
+tags:
+  - name: Health
+  - name: Catalogue & availability
+    description: Anonymous browsing and pricing.
+  - name: Bookings
+    description: Creating a booking and holding its slot.
+  - name: Checkout & payments
+    description: Paying the booking fee while the hold lasts, and watching a payment settle.
+  - name: Client booking
+    description: A client's own booking, addressed by its access token.
+  - name: Booking links
+    description: '"Email me my links": a fresh link for every current booking on an address.'
+  - name: Email confirmations
+    description: Confirming a booking's change of contact email from the new address.
+  - name: Admin auth
+    description: Login and password reset for the one admin account.
+  - name: Admin availability
+    description: Working hours and blocked time.
+  - name: Admin settings
+    description: The five operating values.
+  - name: Admin calendar
+  - name: Admin bookings
+    description: The bookings list, one booking, and everything done to it.
+  - name: Admin payments
+  - name: Admin catalogue
+    description: Services, packages and add-ons.
+  - name: Webhooks
+    description: Inbound payment-provider callbacks. Called by providers, never by browsers.
+paths:
+  # --- Public ---------------------------------------------------------------
+  /api/health:
+    $ref: paths/public.yaml#/health
+  /api/services:
+    $ref: paths/public.yaml#/services
+  /api/services/{slug}:
+    $ref: paths/public.yaml#/service
+  /api/quote:
+    $ref: paths/public.yaml#/quote
+  /api/availability:
+    $ref: paths/public.yaml#/availability
+  /api/bookings:
+    $ref: paths/public.yaml#/bookings
+  /api/booking-links:
+    $ref: paths/public.yaml#/bookingLinks
+  /api/email-confirmations/{token}:
+    $ref: paths/public.yaml#/emailConfirmation
+  # --- Checkout -------------------------------------------------------------
+  /api/payment-methods:
+    $ref: paths/checkout.yaml#/paymentMethods
+  /api/checkout/{reference}/{token}:
+    $ref: paths/checkout.yaml#/checkout
+  /api/checkout/{reference}/{token}/payments:
+    $ref: paths/checkout.yaml#/checkoutPayments
+  /api/payments/{ourRef}:
+    $ref: paths/checkout.yaml#/paymentStatus
+  # --- Client booking -------------------------------------------------------
+  /api/booking/{token}:
+    $ref: paths/client.yaml#/booking
+  /api/booking/{token}/cancel:
+    $ref: paths/client.yaml#/cancel
+  /api/booking/{token}/email:
+    $ref: paths/client.yaml#/email
+  /api/booking/{token}/payments:
+    $ref: paths/client.yaml#/payments
+  # --- Admin auth -----------------------------------------------------------
+  /api/admin/auth/login:
+    $ref: paths/admin-auth.yaml#/login
+  /api/admin/auth/password-reset/request:
+    $ref: paths/admin-auth.yaml#/resetRequest
+  /api/admin/auth/password-reset/confirm:
+    $ref: paths/admin-auth.yaml#/resetConfirm
+  /api/admin/me:
+    $ref: paths/admin-auth.yaml#/me
+  # --- Admin availability, settings, calendar -------------------------------
+  /api/admin/working-hours:
+    $ref: paths/admin-availability.yaml#/workingHours
+  /api/admin/working-hours/{id}:
+    $ref: paths/admin-availability.yaml#/workingHoursItem
+  /api/admin/blocks:
+    $ref: paths/admin-availability.yaml#/blocks
+  /api/admin/blocks/{id}:
+    $ref: paths/admin-availability.yaml#/blocksItem
+  /api/admin/settings:
+    $ref: paths/admin-availability.yaml#/settings
+  /api/admin/calendar:
+    $ref: paths/admin-availability.yaml#/calendar
+  # --- Admin bookings -------------------------------------------------------
+  /api/admin/bookings:
+    $ref: paths/admin-bookings.yaml#/list
+  /api/admin/bookings/{id}:
+    $ref: paths/admin-bookings.yaml#/detail
+  /api/admin/bookings/{id}/reschedule:
+    $ref: paths/admin-bookings.yaml#/reschedule
+  /api/admin/bookings/{id}/cancel:
+    $ref: paths/admin-bookings.yaml#/cancel
+  /api/admin/bookings/{id}/complete:
+    $ref: paths/admin-bookings.yaml#/complete
+  /api/admin/bookings/{id}/no-show:
+    $ref: paths/admin-bookings.yaml#/noShow
+  /api/admin/bookings/{id}/resend-link:
+    $ref: paths/admin-bookings.yaml#/resendLink
+  /api/admin/bookings/{id}/addons:
+    $ref: paths/admin-bookings.yaml#/addons
+  /api/admin/bookings/{id}/addons/{addonId}:
+    $ref: paths/admin-bookings.yaml#/addonItem
+  /api/admin/bookings/{id}/session-fee:
+    $ref: paths/admin-bookings.yaml#/sessionFee
+  /api/admin/bookings/{id}/payments/cash:
+    $ref: paths/admin-bookings.yaml#/cash
+  /api/admin/bookings/{id}/delivery:
+    $ref: paths/admin-bookings.yaml#/delivery
+  /api/admin/bookings/{id}/delivery/send:
+    $ref: paths/admin-bookings.yaml#/deliverySend
+  /api/admin/bookings/{id}/notes:
+    $ref: paths/admin-bookings.yaml#/notes
+  /api/admin/bookings/{id}/notes/{noteId}:
+    $ref: paths/admin-bookings.yaml#/noteItem
+  /api/admin/payments/{id}/refund:
+    $ref: paths/admin-bookings.yaml#/refund
+  # --- Admin catalogue ------------------------------------------------------
+  /api/admin/catalogue:
+    $ref: paths/admin-catalogue.yaml#/catalogue
+  /api/admin/services:
+    $ref: paths/admin-catalogue.yaml#/services
+  /api/admin/services/{id}:
+    $ref: paths/admin-catalogue.yaml#/serviceItem
+  /api/admin/packages:
+    $ref: paths/admin-catalogue.yaml#/packages
+  /api/admin/packages/{id}:
+    $ref: paths/admin-catalogue.yaml#/packageItem
+  /api/admin/addons:
+    $ref: paths/admin-catalogue.yaml#/addons
+  /api/admin/addons/{id}:
+    $ref: paths/admin-catalogue.yaml#/addonItem
+  # --- Webhooks -------------------------------------------------------------
+  /api/webhooks/mtn-momo/{ourRef}/{signature}:
+    $ref: paths/webhooks.yaml#/mtnMomo
+  /api/webhooks/flutterwave:
+    $ref: paths/webhooks.yaml#/flutterwave
+components:
+  securitySchemes:
+    adminBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 JWT from `POST /api/admin/auth/login`, valid 8 hours. Sent as
+        `Authorization: Bearer <token>`; never a cookie. Changing the admin
+        password revokes every token already issued.

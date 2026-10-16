@@ -1,0 +1,223 @@
+{
+  "common": {
+    "appName": "Bookly"
+  },
+  "email": {
+    "common": {
+      "footer": "{{appName}}, Kigali. All times are Kigali time (UTC+2).",
+      "linkFallback": "If the button does not work, copy this link into your browser:",
+      "greeting": "Hello {{name}},",
+      "whenValue": "{{date}}, {{start}} to {{end}} (Kigali time)",
+      "atValue": "{{dateTime}} (Kigali time)",
+      "serviceValue": "{{service}}, {{package}}",
+      "viewBooking": "View your booking",
+      "nonRefundable": "The booking fee is non-refundable if you cancel.",
+      "labels": {
+        "reference": "Booking reference",
+        "service": "Service",
+        "when": "When",
+        "location": "Location",
+        "client": "Client",
+        "email": "Email",
+        "phone": "Phone",
+        "people": "People",
+        "requests": "Special requests",
+        "total": "Total",
+        "paid": "Paid",
+        "outstanding": "Still to pay",
+        "amount": "Amount",
+        "paymentFor": "Payment for",
+        "paidAt": "Paid on",
+        "paymentReference": "Payment reference",
+        "provider": "Paid through"
+      },
+      "paymentKinds": {
+        "booking_fee": "booking fee",
+        "session_fee": "session fee"
+      },
+      "providers": {
+        "mtn_momo_direct": "MTN MoMo",
+        "flutterwave": "Flutterwave",
+        "cash": "Cash"
+      },
+      "notGiven": "Not given"
+    },
+    "bookingConfirmation": {
+      "subject": "Booking confirmed: {{service}} on {{date}} ({{reference}})",
+      "preheader": "Your date is secured. Your booking reference is {{reference}}.",
+      "heading": "Your booking is confirmed",
+      "intro": "Thank you for your booking. We have received your booking fee and your date is secured.",
+      "outstanding": "The remaining {{amount}} is due after the shoot. We will send you a link to pay it.",
+      "paidInFull": "Your booking is paid in full.",
+      "linkNote": "Keep this email. The link above is how you view or cancel your booking. Anyone with the link can open it, so please do not share it."
+    },
+    "adminNewBooking": {
+      "subject": "New booking: {{client}}, {{service}} on {{date}}",
+      "preheader": "{{reference}}: booking fee of {{paid}} received.",
+      "heading": "New booking",
+      "intro": "{{client}} has booked and paid the booking fee. The booking is confirmed.",
+      "openCalendar": "Open the day in your calendar"
+    },
+    "sessionFeeRequest": {
+      "subject": "Session fee due for your booking {{reference}}",
+      "preheader": "The remaining {{amount}} for your shoot is now due.",
+      "heading": "Your session fee is due",
+      "intro": "Thank you for your shoot on {{date}}. The remaining session fee is now due.",
+      "amountDue": "Amount due",
+      "pay": "Pay the session fee",
+      "afterPaying": "We will email you a receipt once your payment has arrived."
+    },
+    "paymentReceipt": {
+      "subject": "Payment received: {{amount}} for {{reference}}",
+      "preheader": "Thank you. We have received {{amount}}.",
+      "heading": "Thank you, your payment has arrived",
+      "intro": "This email is your receipt for the {{kind}} of {{amount}}.",
+      "paidInFull": "Your booking is now paid in full.",
+      "sameLink": "Your booking link has not changed: the one in your confirmation email still opens this booking.",
+      "overpaid": "This is {{amount}} more than your booking comes to. We will refund the difference to you."
+    },
+    "photoDelivery": {
+      "subject": "Your photos are ready ({{reference}})",
+      "preheader": "Download your photos by {{date}}.",
+      "heading": "Your photos are ready",
+      "intro": "Your photos from your {{service}} shoot are ready to download.",
+      "note": "A note from your photographer: {{note}}",
+      "download": "Download your photos",
+      "expiry": "The download link works until the end of {{date}} (Kigali time). Please save your photos before then: after that date the link will no longer work."
+    },
+    "cancellation": {
+      "subject": "Booking cancelled: {{reference}}",
+      "preheader": "Your booking for {{date}} has been cancelled.",
+      "heading": "Your booking has been cancelled",
+      "byClient": "As you asked, we have cancelled your booking for {{service}} on {{date}}.",
+      "byAdmin": "We are sorry: we have had to cancel your booking for {{service}} on {{date}}.",
+      "reason": "Reason: {{reason}}",
+      "feeKept": "As stated when you booked, the booking fee of {{amount}} is non-refundable.",
+      "refundDue": "We owe you a refund of {{amount}}. We will contact you to arrange it.",
+      "rebook": "You are welcome to book again at any time."
+    },
+    "reschedule": {
+      "subject": "Your booking {{reference}} has moved to {{date}}",
+      "preheader": "New time: {{when}}.",
+      "heading": "Your booking has a new time",
+      "intro": "Your booking for {{service}} has been moved. Everything else about it stays the same.",
+      "previous": "Was",
+      "current": "Now",
+      "sameLink": "Your booking link has not changed: the one in your confirmation email still opens this booking."
+    },
+    "accessLinkResend": {
+      "subject": "Your booking link ({{reference}})",
+      "preheader": "A new link to your booking.",
+      "heading": "Here is your booking link",
+      "intro": "Here is a new link to your booking for {{service}} on {{date}}.",
+      "oldLinks": "Any link we sent you before no longer works. Keep this email, and please do not share the link."
+    },
+    "clientNote": {
+      "subject": "A message about your booking ({{reference}})",
+      "preheader": "Your photographer wrote to you.",
+      "heading": "A message from your photographer",
+      "alsoOnPage": "You will also find this message on your booking page."
+    },
+    "emailChangeConfirm": {
+      "subject": "Confirm your new email ({{reference}})",
+      "preheader": "One click to use this address for your booking.",
+      "heading": "Confirm your new email",
+      "intro": "You asked to use {{email}} for your booking. Confirm it, and we will write to this address from now on.",
+      "button": "Confirm this email",
+      "expiry": "This link works for 24 hours. Until you confirm, we keep writing to the address we had.",
+      "notYou": "If you did not ask for this, ignore this email: nothing changes unless the button is used."
+    },
+    "emailChangedNotice": {
+      "subject": "Your booking email was changed ({{reference}})",
+      "preheader": "We will now write to a different address.",
+      "heading": "Your booking email was changed",
+      "intro": "The email for your booking is now {{email}}. This is the last message about it we will send to this address.",
+      "notYou": "If you did not make this change, reply to this email straight away so the photographer can put it back."
+    },
+    "bookingLinks": {
+      "subject": "Your booking links",
+      "preheader": "New links to your bookings.",
+      "heading": "Here are your booking links",
+      "intro": "You asked for the links to your bookings. Each button below opens one of them.",
+      "open": "Open booking {{reference}}",
+      "oldLinks": "Any link we sent you before no longer works. Keep this email, and please do not share the links.",
+      "notYou": "If you did not ask for this, you can ignore this email: your bookings have not changed, only their links."
+    },
+    "adminAlert": {
+      "paymentReceived": {
+        "subject": "Payment received: {{amount}} from {{client}} ({{reference}})",
+        "preheader": "{{client}} paid the {{kind}}.",
+        "heading": "Payment received",
+        "intro": "{{client}} has paid the {{kind}} of {{amount}}.",
+        "openCalendar": "Open the day in your calendar"
+      },
+      "retriesExhausted": {
+        "subject": "A message could not be sent",
+        "preheader_one": "The system gave up after {{count}} attempt.",
+        "preheader_other": "The system gave up after {{count}} attempts.",
+        "heading": "A message could not be sent",
+        "intro_one": "After {{count}} attempt, the system gave up sending the message below. It will not try again.",
+        "intro_other": "After {{count}} attempts, the system gave up sending the message below. It will not try again.",
+        "message": "Message",
+        "lastError": "Last error",
+        "advice": "If it was for a client, you may want to contact them directly.",
+        "messages": {
+          "email": "An email",
+          "booking_confirmation": "Booking confirmation to the client",
+          "admin_new_booking": "New booking alert to you",
+          "session_fee_request": "Session fee request to the client",
+          "payment_receipt": "Payment receipt to the client",
+          "photo_delivery": "Photo delivery to the client",
+          "cancellation": "Cancellation notice to the client",
+          "reschedule": "Reschedule notice to the client",
+          "access_link_resend": "New booking link to the client",
+          "booking_links": "Booking links the client asked for",
+          "email_change_confirm": "Confirmation link to a new client email",
+          "email_changed_notice": "Notice to an old client email",
+          "client_note": "Your message to the client",
+          "admin_alert": "Alert to you",
+          "gcal_create": "Adding the booking to your Google Calendar",
+          "gcal_update": "Updating the booking in your Google Calendar",
+          "gcal_delete": "Removing the booking from your Google Calendar"
+        }
+      },
+      "loginLockout": {
+        "subject": "Admin sign-in locked after {{count}} failed attempts",
+        "preheader": "Sign-in is locked until {{until}} (Kigali time).",
+        "heading": "Admin sign-in is locked",
+        "intro": "The wrong password was entered for the admin account {{count}} times, so sign-in is locked until {{until}} (Kigali time).",
+        "ifNotYou": "If this was not you, someone may be trying to guess your password. Once the lock ends, consider resetting your password.",
+        "signIn": "Go to the sign-in page"
+      },
+      "passwordReset": {
+        "subject": "Reset your admin password",
+        "preheader": "The link works once, until {{until}} (Kigali time).",
+        "heading": "Reset your admin password",
+        "intro": "Someone asked to reset the password for the admin account. The link below works once, until {{until}} (Kigali time).",
+        "button": "Choose a new password",
+        "ignore": "If you did not ask for this, ignore this email: your password stays as it is."
+      },
+      "refundDue": {
+        "subject": "Refund due: {{amount}} to {{client}} ({{reference}})",
+        "preheader": "The system does not move money: this refund is yours to make.",
+        "heading": "A refund is due",
+        "reasons": {
+          "admin_cancelled": "You cancelled this booking, so the client is owed a full refund.",
+          "late_payment_slot_taken": "The client's payment arrived after their hold had expired and the time had been booked by someone else.",
+          "duplicate_payment": "The client paid the booking fee twice. The booking stands on the first payment; this one is owed back.",
+          "session_fee_after_client_cancel": "The client cancelled after paying the session fee, which is refunded.",
+          "overpayment": "This booking has been paid more than it is worth, so the difference is owed back."
+        },
+        "howTo": "The system does not move money. Refund the client through {{provider}}, then record the refund on the booking.",
+        "howToCash": "The system does not move money. This was paid in cash: give it back to the client, then record the refund on the booking."
+      },
+      "bookingCancelled": {
+        "subject": "Booking cancelled: {{client}}, {{date}} ({{reference}})",
+        "preheader": "The time is free again.",
+        "heading": "A client cancelled their booking",
+        "intro": "{{client}} cancelled their booking for {{service}} on {{when}}. The time is free again.",
+        "feeKept": "Their booking fee of {{amount}} is non-refundable and has been kept."
+      }
+    }
+  }
+}

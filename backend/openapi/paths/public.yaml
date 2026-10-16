@@ -1,0 +1,238 @@
+health:
+  get:
+    operationId: getHealth
+    tags: [Health]
+    summary: Liveness check
+    security: []
+    responses:
+      '200':
+        description: The API is up.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ok]
+              additionalProperties: false
+              properties:
+                ok: { const: true }
+
+services:
+  get:
+    operationId: listServices
+    tags: [Catalogue & availability]
+    summary: List active services
+    description: Active services, each with their active packages and the add-ons they offer. Anonymous.
+    security: []
+    responses:
+      '200':
+        description: The public catalogue.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [services]
+              additionalProperties: false
+              properties:
+                services:
+                  type: array
+                  items: { $ref: ../components/catalogue.yaml#/schemas/PublicService }
+
+service:
+  get:
+    operationId: getService
+    tags: [Catalogue & availability]
+    summary: One service by slug
+    security: []
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema: { type: string }
+    responses:
+      '200':
+        description: The service, plus the booking-fee rate that applies to it.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service]
+              additionalProperties: false
+              properties:
+                service: { $ref: ../components/catalogue.yaml#/schemas/PublicServiceDetail }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+quote:
+  post:
+    operationId: createQuote
+    tags: [Catalogue & availability]
+    summary: Price a basket
+    description: The API's authority over money. The price is always computed from the catalogue, never from the body.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/catalogue.yaml#/schemas/QuoteRequest }
+    responses:
+      '200':
+        description: The quote.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quote]
+              additionalProperties: false
+              properties:
+                quote: { $ref: ../components/catalogue.yaml#/schemas/Quote }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '422':
+        description: A package or add-on the public cannot book; names the field.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+availability:
+  get:
+    operationId: getAvailability
+    tags: [Catalogue & availability]
+    summary: Bookable starts for a package in a month
+    description: "Every Kigali date of the month with the slot starts a visitor may book for this package right now. `Cache-Control: no-store`. Anonymous."
+    security: []
+    parameters:
+      - name: packageId
+        in: query
+        required: true
+        schema: { $ref: ../components/common.yaml#/schemas/Uuid }
+      - name: month
+        in: query
+        required: true
+        description: '`YYYY-MM`.'
+        schema:
+          type: string
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+    responses:
+      '200':
+        description: The month's availability.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/AvailabilityDays }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '422':
+        description: An unbookable package, or a month the engine cannot compute.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+bookings:
+  post:
+    operationId: createBooking
+    tags: [Bookings]
+    summary: Create a booking and hold its slot
+    description: |
+      Turns a chosen slot and a filled form into a `pending_payment` booking
+      holding its slot for the hold window. Anonymous. The returned
+      `checkoutToken` opens the booking's checkout.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/booking.yaml#/schemas/BookingRequest }
+    responses:
+      '201':
+        description: The booking is held.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/BookingCreated }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '409':
+        description: The slot was claimed between the availability check and the insert.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: slot_taken }
+      '422':
+        description: Something named cannot be booked, or the start is not currently offered.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+      '429':
+        description: |
+          `too_many_holds`: the email already holds three unpaid slots, or
+          `rate_limited` (with `Retry-After`): too many requests from this IP or
+          email in the window.
+        headers:
+          Retry-After:
+            schema: { type: integer, minimum: 1 }
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            examples:
+              too_many_holds: { value: { error: too_many_holds } }
+              rate_limited: { value: { error: rate_limited } }
+
+bookingLinks:
+  post:
+    operationId: emailBookingLinks
+    tags: [Booking links]
+    summary: Email a client their booking links
+    description: |
+      Sends one email with a fresh link for every current booking on the
+      address. The response is always `202` — a match, no match, or too many
+      requests are indistinguishable, so the endpoint cannot be used to learn
+      who has booked. Rate-limited per address and per IP.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/booking.yaml#/schemas/EmailRequest }
+    responses:
+      '202':
+        description: Accepted. Whatever was found happens by email, to the address on the bookings.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sent]
+              additionalProperties: false
+              properties:
+                sent: { const: true }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '422':
+        description: Not an email address.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+emailConfirmation:
+  post:
+    operationId: confirmEmailChange
+    tags: [Email confirmations]
+    summary: Confirm a change of contact email
+    description: |
+      Follows the link sent to the **new** address when a client asked to change
+      their booking's email. A POST, not a GET, so a mail scanner opening the
+      link cannot trigger the change. Unknown, expired, replaced and already-used
+      tokens are all a 404.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/AccessToken
+    responses:
+      '200':
+        description: The booking now writes to the new address.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmed]
+              additionalProperties: false
+              properties:
+                confirmed: { const: true }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound

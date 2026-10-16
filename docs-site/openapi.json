@@ -1,0 +1,6565 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Bookly API",
+    "version": "1.0.0",
+    "summary": "Booking, payment and admin API for a photographer's booking site in Kigali.",
+    "description": "The API behind the Bookly booking site. It serves three kinds of caller:\n\n- **The public**: anonymous visitors browsing services, checking availability,\n  booking a slot and paying its booking fee.\n- **A booking's client**: no account; every client request carries a\n  **capability token** in its path, emailed when the booking is confirmed.\n- **The admin** (the photographer): an `Authorization: Bearer` JWT from\n  `POST /api/admin/auth/login`.\n\nRead [the API conventions](/api/conventions) first: error shapes, the\n400-versus-422 rule, time zones and money are the same on every operation.\n\nThis file is written by hand. A backend test (`src/openapi.test.ts`) fails\nwhen a route exists without an operation here, or the other way round, and\nvalidates real responses against these schemas.\n"
+  },
+  "servers": [
+    {
+      "url": "https://api.bookly.example",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:4000",
+      "description": "Local development"
+    }
+  ],
+  "security": [
+    {
+      "adminBearer": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Catalogue & availability",
+      "description": "Anonymous browsing and pricing."
+    },
+    {
+      "name": "Bookings",
+      "description": "Creating a booking and holding its slot."
+    },
+    {
+      "name": "Checkout & payments",
+      "description": "Paying the booking fee while the hold lasts, and watching a payment settle."
+    },
+    {
+      "name": "Client booking",
+      "description": "A client's own booking, addressed by its access token."
+    },
+    {
+      "name": "Booking links",
+      "description": "\"Email me my links\": a fresh link for every current booking on an address."
+    },
+    {
+      "name": "Email confirmations",
+      "description": "Confirming a booking's change of contact email from the new address."
+    },
+    {
+      "name": "Admin auth",
+      "description": "Login and password reset for the one admin account."
+    },
+    {
+      "name": "Admin availability",
+      "description": "Working hours and blocked time."
+    },
+    {
+      "name": "Admin settings",
+      "description": "The five operating values."
+    },
+    {
+      "name": "Admin calendar"
+    },
+    {
+      "name": "Admin bookings",
+      "description": "The bookings list, one booking, and everything done to it."
+    },
+    {
+      "name": "Admin payments"
+    },
+    {
+      "name": "Admin catalogue",
+      "description": "Services, packages and add-ons."
+    },
+    {
+      "name": "Webhooks",
+      "description": "Inbound payment-provider callbacks. Called by providers, never by browsers."
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": [
+          "Health"
+        ],
+        "summary": "Liveness check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The API is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/services": {
+      "get": {
+        "operationId": "listServices",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "List active services",
+        "description": "Active services, each with their active packages and the add-ons they offer. Anonymous.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The public catalogue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "services"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "services": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PublicService"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/services/{slug}": {
+      "get": {
+        "operationId": "getService",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "One service by slug",
+        "security": [],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The service, plus the booking-fee rate that applies to it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "service"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "service": {
+                      "$ref": "#/components/schemas/PublicServiceDetail"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/quote": {
+      "post": {
+        "operationId": "createQuote",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "Price a basket",
+        "description": "The API's authority over money. The price is always computed from the catalogue, never from the body.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The quote.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "quote"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "quote": {
+                      "$ref": "#/components/schemas/Quote"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "description": "A package or add-on the public cannot book; names the field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/availability": {
+      "get": {
+        "operationId": "getAvailability",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "Bookable starts for a package in a month",
+        "description": "Every Kigali date of the month with the slot starts a visitor may book for this package right now. `Cache-Control: no-store`. Anonymous.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "description": "`YYYY-MM`.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The month's availability.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvailabilityDays"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "description": "An unbookable package, or a month the engine cannot compute.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bookings": {
+      "post": {
+        "operationId": "createBooking",
+        "tags": [
+          "Bookings"
+        ],
+        "summary": "Create a booking and hold its slot",
+        "description": "Turns a chosen slot and a filled form into a `pending_payment` booking\nholding its slot for the hold window. Anonymous. The returned\n`checkoutToken` opens the booking's checkout.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The booking is held.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "The slot was claimed between the availability check and the insert.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "slot_taken"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Something named cannot be booked, or the start is not currently offered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`too_many_holds`: the email already holds three unpaid slots, or\n`rate_limited` (with `Retry-After`): too many requests from this IP or\nemail in the window.\n",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "too_many_holds": {
+                    "value": {
+                      "error": "too_many_holds"
+                    }
+                  },
+                  "rate_limited": {
+                    "value": {
+                      "error": "rate_limited"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/booking-links": {
+      "post": {
+        "operationId": "emailBookingLinks",
+        "tags": [
+          "Booking links"
+        ],
+        "summary": "Email a client their booking links",
+        "description": "Sends one email with a fresh link for every current booking on the\naddress. The response is always `202` — a match, no match, or too many\nrequests are indistinguishable, so the endpoint cannot be used to learn\nwho has booked. Rate-limited per address and per IP.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted. Whatever was found happens by email, to the address on the bookings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sent"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "sent": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "description": "Not an email address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/email-confirmations/{token}": {
+      "post": {
+        "operationId": "confirmEmailChange",
+        "tags": [
+          "Email confirmations"
+        ],
+        "summary": "Confirm a change of contact email",
+        "description": "Follows the link sent to the **new** address when a client asked to change\ntheir booking's email. A POST, not a GET, so a mail scanner opening the\nlink cannot trigger the change. Unknown, expired, replaced and already-used\ntokens are all a 404.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccessToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The booking now writes to the new address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "confirmed"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "confirmed": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/payment-methods": {
+      "get": {
+        "operationId": "getPaymentMethods",
+        "tags": [
+          "Checkout & payments"
+        ],
+        "summary": "What the active provider collects",
+        "description": "The active provider and the methods its pay page may offer. `Cache-Control: no-store`. Anonymous.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The provider and its methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "provider",
+                    "methods"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "examples": [
+                        "mtn_momo_direct"
+                      ]
+                    },
+                    "methods": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentMethod"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checkout/{reference}/{token}": {
+      "get": {
+        "operationId": "getCheckout",
+        "tags": [
+          "Checkout & payments"
+        ],
+        "summary": "The checkout for a held booking",
+        "description": "What the pay page shows. Addressed by the booking reference and its checkout token; a wrong token is a 404, as an unknown reference is. `Cache-Control: no-store`.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Reference"
+          },
+          {
+            "$ref": "#/components/parameters/CheckoutToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checkout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Checkout"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/checkout/{reference}/{token}/payments": {
+      "post": {
+        "operationId": "startCheckoutPayment",
+        "tags": [
+          "Checkout & payments"
+        ],
+        "summary": "Pay the booking fee",
+        "description": "Starts a booking-fee payment; the payer's phone is prompted. `Cache-Control: no-store`.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Reference"
+          },
+          {
+            "$ref": "#/components/parameters/CheckoutToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The attempt was accepted; poll its `ourRef`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentStarted"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Nothing to start: `already_paid`, `hold_expired`, `nothing_to_pay`, or\n`payment_in_progress` (an attempt still waits — its `ourRef` is given).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PaymentInProgress"
+                    }
+                  ]
+                },
+                "examples": {
+                  "already_paid": {
+                    "value": {
+                      "error": "already_paid"
+                    }
+                  },
+                  "hold_expired": {
+                    "value": {
+                      "error": "hold_expired"
+                    }
+                  },
+                  "nothing_to_pay": {
+                    "value": {
+                      "error": "nothing_to_pay"
+                    }
+                  },
+                  "in_progress": {
+                    "value": {
+                      "error": "payment_in_progress",
+                      "payment": {
+                        "ourRef": "00000000-0000-4000-8000-000000000000"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A method not on offer, or an unusable phone number.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "The provider refused the request or could not be reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentNotStarted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/payments/{ourRef}": {
+      "get": {
+        "operationId": "getPaymentStatus",
+        "tags": [
+          "Checkout & payments"
+        ],
+        "summary": "Where a payment stands",
+        "description": "The confirmation page polls this while a Mobile Money payment settles —\noften 30 seconds or more. Addressed by the random `our_ref` the pay page\nwas handed; shows no contact details. `Cache-Control: no-store`.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OurRef"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The payment and the booking it is for.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentStatusView"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/booking/{token}": {
+      "get": {
+        "operationId": "getClientBooking",
+        "tags": [
+          "Client booking"
+        ],
+        "summary": "View my booking",
+        "description": "The booking the token addresses, and records the token's use. Any token that does not resolve is a 404.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccessToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The booking.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientBookingEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/booking/{token}/cancel": {
+      "post": {
+        "operationId": "cancelClientBooking",
+        "tags": [
+          "Client booking"
+        ],
+        "summary": "Cancel my booking",
+        "description": "Cancellable up to the shoot, and only on a confirmed booking. The booking fee is not refunded (it is non-refundable on a client cancellation).",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccessToken"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientBookingEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Already cancelled, or the shoot has passed. Carries the booking as it stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientBookingConflict"
+                },
+                "example": {
+                  "error": "not_cancellable",
+                  "booking": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/booking/{token}/email": {
+      "post": {
+        "operationId": "requestClientEmailChange",
+        "tags": [
+          "Client booking"
+        ],
+        "summary": "Change my contact email",
+        "description": "Stores the new address as pending and emails a confirmation link to it;\nnothing changes until that link is followed, so a link-holder who is not\nthe client cannot redirect the booking's email without also owning the new\ninbox. At most three requests a day per booking.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccessToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "It is the address the booking already has; nothing to do.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientBookingEnvelope"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "A confirmation link is on its way to the new address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientBookingEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "A booking that no longer stands has no email to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientBookingConflict"
+                },
+                "example": {
+                  "error": "not_allowed",
+                  "booking": null
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not an email address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`too_many_requests`: more than three requests today for this booking,\nor `rate_limited` (with `Retry-After`): too many from this IP.\n",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "too_many_requests": {
+                    "value": {
+                      "error": "too_many_requests"
+                    }
+                  },
+                  "rate_limited": {
+                    "value": {
+                      "error": "rate_limited"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/booking/{token}/payments": {
+      "post": {
+        "operationId": "startClientSessionFeePayment",
+        "tags": [
+          "Client booking"
+        ],
+        "summary": "Pay my session fee",
+        "description": "Starts a session-fee payment for what the booking owes. Only mounted when\na payment provider is configured. The amount is computed server-side from\nthe booking, never sent by the client.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AccessToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The attempt was accepted; poll its `ourRef`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentStarted"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Nothing owed, or an attempt already waiting (`payment_in_progress`, with its `ourRef`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ClientBookingConflict"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PaymentInProgress"
+                    }
+                  ]
+                },
+                "examples": {
+                  "nothing_to_pay": {
+                    "value": {
+                      "error": "nothing_to_pay",
+                      "booking": null
+                    }
+                  },
+                  "in_progress": {
+                    "value": {
+                      "error": "payment_in_progress",
+                      "payment": {
+                        "ourRef": "00000000-0000-4000-8000-000000000000"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A method not on offer, or an unusable phone number.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "The provider refused the request or could not be reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentNotStarted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/auth/login": {
+      "post": {
+        "operationId": "adminLogin",
+        "tags": [
+          "Admin auth"
+        ],
+        "summary": "Log in",
+        "description": "Email and password for the one admin account. Returns a bearer JWT valid\n8 hours. Unknown email, wrong password and a locked account are one\nanswer — `401 invalid_credentials` — so none is disclosed; repeated\nfailures lock the account and email the photographer. `Cache-Control: no-store`.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Invalid credentials (or the account is locked — not disclosed which).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "invalid_credentials"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/admin/auth/password-reset/request": {
+      "post": {
+        "operationId": "requestPasswordReset",
+        "tags": [
+          "Admin auth"
+        ],
+        "summary": "Request a password reset",
+        "description": "If the address is the admin's, a single-use, time-limited reset link is\nemailed. The answer is always `202`, whether or not it is, so the endpoint\ndoes not reveal the admin's address.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 320
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (sent only if the address is the admin's).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/admin/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "confirmPasswordReset",
+        "tags": [
+          "Admin auth"
+        ],
+        "summary": "Set a new password from a reset link",
+        "description": "Consumes the emailed token and sets the new password, which revokes every token already issued. The token works once.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "newPassword"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 1024
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The password is changed."
+          },
+          "400": {
+            "description": "A malformed body, or an invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_request": {
+                    "value": {
+                      "error": "invalid_request"
+                    }
+                  },
+                  "invalid_token": {
+                    "value": {
+                      "error": "invalid_or_expired_token"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/me": {
+      "get": {
+        "operationId": "getAdminMe",
+        "tags": [
+          "Admin auth"
+        ],
+        "summary": "The signed-in admin",
+        "responses": {
+          "200": {
+            "description": "The admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/admin/working-hours": {
+      "get": {
+        "operationId": "listWorkingHours",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "List working hours",
+        "responses": {
+          "200": {
+            "description": "Weekly rules and dated overrides.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workingHours"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "workingHours": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WorkingHours"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWorkingHours",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "Add a weekly rule or dated override",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkingHoursWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workingHours"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "workingHours": {
+                      "$ref": "#/components/schemas/WorkingHours"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "A rule already exists for that weekday or date.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "working_hours_exists"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An open day whose window does not open before it closes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/working-hours/{id}": {
+      "put": {
+        "operationId": "replaceWorkingHours",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "Replace a working-hours row",
+        "description": "Replaces the whole row, so a rule can move between a weekday and a date.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkingHoursWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workingHours"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "workingHours": {
+                      "$ref": "#/components/schemas/WorkingHours"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "A rule already exists for the target weekday or date.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "working_hours_exists"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An open day whose window does not open before it closes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWorkingHours",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "Delete a working-hours row",
+        "description": "Deleting a weekday rule closes that weekday; deleting an override restores the weekly rule for its date.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/admin/blocks": {
+      "get": {
+        "operationId": "listBlocks",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "List blocks",
+        "responses": {
+          "200": {
+            "description": "Blocked time, with reasons (admin-only).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "blocks"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Block"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createBlock",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "Block time",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "block"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "block": {
+                      "$ref": "#/components/schemas/Block"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The range covers confirmed bookings; resend with `confirm: true` to save it anyway.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockConflict"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A range whose end is not after its start.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/blocks/{id}": {
+      "put": {
+        "operationId": "updateBlock",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "Change a block",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "block"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "block": {
+                      "$ref": "#/components/schemas/Block"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The range covers confirmed bookings; resend with `confirm: true`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockConflict"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A range whose end is not after its start.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteBlock",
+        "tags": [
+          "Admin availability"
+        ],
+        "summary": "Delete a block",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/admin/settings": {
+      "get": {
+        "operationId": "getSettings",
+        "tags": [
+          "Admin settings"
+        ],
+        "summary": "The five operating values",
+        "responses": {
+          "200": {
+            "description": "Settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateSettings",
+        "tags": [
+          "Admin settings"
+        ],
+        "summary": "Change settings",
+        "description": "Any subset of the five. Each is range-checked here, so a value out of range is a 422 rather than a database error.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings as they now stand.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "A value outside its range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/calendar": {
+      "get": {
+        "operationId": "getCalendar",
+        "tags": [
+          "Admin calendar"
+        ],
+        "summary": "Bookings, holds and blocks for a range",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/KigaliDate"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "description": "Inclusive. At most 62 days after `from`.",
+            "schema": {
+              "$ref": "#/components/schemas/KigaliDate"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The calendar.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "`to` before `from`, or a range over 62 days.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings": {
+      "get": {
+        "operationId": "listBookings",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "List bookings",
+        "description": "Filtered by stage, status and shoot date, searched by reference, name, email or phone, and paged by number with a total.",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "query",
+            "description": "Repeatable. Display stages (see `BookingStage`).",
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/BookingStage"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BookingStage"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Repeatable. Kept for links made before stages existed.",
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/BookingStatus"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BookingStatus"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/KigaliDate"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/KigaliDate"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based. Past the end, the last page is answered.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of bookings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookingsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}": {
+      "get": {
+        "operationId": "getBooking",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "One booking",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/reschedule": {
+      "post": {
+        "operationId": "rescheduleBooking",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Reschedule a booking",
+        "description": "Keeps the booking, its reference, token and payments; moves the slot and its buffer to a free slot.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "startsAt"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "startsAt": {
+                    "$ref": "#/components/schemas/OffsetInstant"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The slot is taken, or the booking cannot be rescheduled. Carries the booking.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingConflict"
+                },
+                "examples": {
+                  "slot_taken": {
+                    "value": {
+                      "error": "slot_taken",
+                      "booking": null
+                    }
+                  },
+                  "not_allowed": {
+                    "value": {
+                      "error": "not_allowed",
+                      "booking": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A start the engine does not offer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/cancel": {
+      "post": {
+        "operationId": "cancelBooking",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Cancel a booking",
+        "description": "Releases the slot and marks the booking fee `refund_due` for a full refund. An optional reason is shown to the client.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/complete": {
+      "post": {
+        "operationId": "completeBooking",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Mark a booking completed",
+        "description": "Completing means paid. A booking that still owes money is a 409 `balance_due`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Not in a state that can be completed, or money is still owed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingConflict"
+                },
+                "examples": {
+                  "not_allowed": {
+                    "value": {
+                      "error": "not_allowed",
+                      "booking": null
+                    }
+                  },
+                  "balance_due": {
+                    "value": {
+                      "error": "balance_due",
+                      "booking": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/no-show": {
+      "post": {
+        "operationId": "markNoShow",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Mark a no-show",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/resend-link": {
+      "post": {
+        "operationId": "resendAccessLink",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Resend the client's access link",
+        "description": "Issues a fresh token and invalidates the old one, then emails the new link.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/addons": {
+      "post": {
+        "operationId": "addPostShootAddon",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Add a post-shoot add-on",
+        "description": "Adds a catalogue add-on to a booking whose shoot has begun. The price is read from the catalogue, never sent.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "addonId"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "addonId": {
+                    "$ref": "#/components/schemas/Uuid"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99,
+                    "default": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "422": {
+            "description": "An add-on the booking cannot take.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/addons/{addonId}": {
+      "delete": {
+        "operationId": "removePostShootAddon",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Remove a post-shoot add-on",
+        "description": "Removes an add-on still removable (post-shoot, not yet paid for).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          },
+          {
+            "name": "addonId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The add-on cannot be removed (not post-shoot, or already paid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingConflict"
+                },
+                "examples": {
+                  "not_allowed": {
+                    "value": {
+                      "error": "not_allowed",
+                      "booking": null
+                    }
+                  },
+                  "already_paid": {
+                    "value": {
+                      "error": "already_paid",
+                      "booking": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/session-fee": {
+      "post": {
+        "operationId": "requestSessionFee",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Ask the client for the session fee",
+        "description": "Opens a session-fee request for what the booking owes and emails the\nclient. Only mounted when a payment provider is configured; without one\nthe route is a 404.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Not in a state to ask, nothing to ask for, or an attempt already in progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingConflict"
+                },
+                "examples": {
+                  "not_allowed": {
+                    "value": {
+                      "error": "not_allowed",
+                      "booking": null
+                    }
+                  },
+                  "nothing_to_pay": {
+                    "value": {
+                      "error": "nothing_to_pay",
+                      "booking": null
+                    }
+                  },
+                  "in_progress": {
+                    "value": {
+                      "error": "in_progress",
+                      "booking": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/payments/cash": {
+      "post": {
+        "operationId": "recordCashPayment",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Record a cash payment",
+        "description": "Records cash the photographer was handed, up to what is owed. Refused\nwhile an online payment may be in flight; it voids an open online request\nso the same money cannot be taken twice, and emails nobody.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "amountRwf"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "amountRwf": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Not payable, nothing owed, more than is owed, or an online attempt in flight.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingConflict"
+                },
+                "examples": {
+                  "not_allowed": {
+                    "value": {
+                      "error": "not_allowed",
+                      "booking": null
+                    }
+                  },
+                  "nothing_to_pay": {
+                    "value": {
+                      "error": "nothing_to_pay",
+                      "booking": null
+                    }
+                  },
+                  "over_outstanding": {
+                    "value": {
+                      "error": "over_outstanding",
+                      "booking": null
+                    }
+                  },
+                  "in_progress": {
+                    "value": {
+                      "error": "in_progress",
+                      "booking": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A malformed amount.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/delivery": {
+      "put": {
+        "operationId": "saveDelivery",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Save the photo-delivery link",
+        "description": "Sets the external photo link and its expiry on a completed booking. The link must be https.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 2000,
+                    "description": "Must be https."
+                  },
+                  "expiresOn": {
+                    "$ref": "#/components/schemas/KigaliDate",
+                    "description": "Defaults to today plus the delivery-expiry setting."
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "422": {
+            "description": "A non-https or malformed link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/delivery/send": {
+      "post": {
+        "operationId": "sendDelivery",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Send the photos",
+        "description": "Emails the saved delivery link, optionally to another address for this one email. The booking's own contact email is not changed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "recipient": {
+                    "type": "string",
+                    "maxLength": 254,
+                    "description": "A one-off address; a mistyped one is a 422."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Not deliverable, or no link saved to send.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingConflict"
+                },
+                "examples": {
+                  "not_allowed": {
+                    "value": {
+                      "error": "not_allowed",
+                      "booking": null
+                    }
+                  },
+                  "no_link": {
+                    "value": {
+                      "error": "no_link",
+                      "booking": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A mistyped recipient address.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/notes": {
+      "post": {
+        "operationId": "addNote",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Add a note to the client",
+        "description": "A plain-text note, emailed to the client unless `email` is false.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "email": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/conflict"
+          },
+          "422": {
+            "description": "An empty or over-long note.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/bookings/{id}/notes/{noteId}": {
+      "delete": {
+        "operationId": "deleteNote",
+        "tags": [
+          "Admin bookings"
+        ],
+        "summary": "Delete a note",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          },
+          {
+            "name": "noteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/booking"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/admin/payments/{id}/refund": {
+      "post": {
+        "operationId": "recordRefund",
+        "tags": [
+          "Admin payments"
+        ],
+        "summary": "Record a refund",
+        "description": "Records that the photographer refunded a payment by hand (the system\nnever moves money). Needs the MoMo or bank reference it was sent with.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reference"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "refundedAt": {
+                    "$ref": "#/components/schemas/OffsetInstant"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The booking the payment belongs to, as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The payment is not in a state that can be refunded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminBookingConflict"
+                },
+                "example": {
+                  "error": "not_refundable",
+                  "booking": null
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A malformed reference or timestamp.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/catalogue": {
+      "get": {
+        "operationId": "getCatalogue",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "The whole catalogue",
+        "description": "Every service (active or not) with its packages and own add-ons, and the add-ons offered on every service.",
+        "responses": {
+          "200": {
+            "description": "The catalogue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCatalogue"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/admin/services": {
+      "post": {
+        "operationId": "createService",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Create a service",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/service"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/slugTaken"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalid"
+          }
+        }
+      }
+    },
+    "/api/admin/services/{id}": {
+      "patch": {
+        "operationId": "updateService",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Update a service",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/service"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/slugTaken"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalid"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteService",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Delete a service",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/inUse"
+          }
+        }
+      }
+    },
+    "/api/admin/packages": {
+      "post": {
+        "operationId": "createPackage",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Create a package",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackageWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/package"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "A value out of range, or a `serviceId` naming no service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/packages/{id}": {
+      "patch": {
+        "operationId": "updatePackage",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Update a package",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackageWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/package"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalid"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deletePackage",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Delete a package",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/inUse"
+          }
+        }
+      }
+    },
+    "/api/admin/addons": {
+      "post": {
+        "operationId": "createAddon",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Create an add-on",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddonWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/addon"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "A value out of range, or a `serviceId` naming no service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/addons/{id}": {
+      "patch": {
+        "operationId": "updateAddon",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Update an add-on",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddonWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/addon"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/invalid"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAddon",
+        "tags": [
+          "Admin catalogue"
+        ],
+        "summary": "Delete an add-on",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/inUse"
+          }
+        }
+      }
+    },
+    "/api/webhooks/mtn-momo/{ourRef}/{signature}": {
+      "post": {
+        "operationId": "mtnMomoWebhookPost",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "MTN MoMo callback",
+        "description": "MTN signs nothing it sends, so the proof is in the URL: the path carries\nour reference and `HMAC(our_ref)` keyed from `SESSION_SECRET`, and the\nbody's `externalId` must name the same payment. Only MTN is ever given\nthis URL. A body failing either check is stored and applied to nothing.\n",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OurRef"
+          },
+          {
+            "name": "signature",
+            "in": "path",
+            "required": true,
+            "description": "`HMAC(our_ref)`, base64url.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "MTN's requesttopay status body.",
+                "properties": {
+                  "externalId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "examples": [
+                      "SUCCESSFUL",
+                      "PENDING",
+                      "FAILED"
+                    ]
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "financialTransactionId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/received"
+          },
+          "500": {
+            "$ref": "#/components/responses/failed"
+          }
+        }
+      },
+      "put": {
+        "operationId": "mtnMomoWebhookPut",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "MTN MoMo callback (PUT)",
+        "description": "Same as the POST callback; MTN may deliver either verb.",
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OurRef"
+          },
+          {
+            "name": "signature",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "externalId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "financialTransactionId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/received"
+          },
+          "500": {
+            "$ref": "#/components/responses/failed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/flutterwave": {
+      "post": {
+        "operationId": "flutterwaveWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Flutterwave webhook",
+        "description": "Verified by the `flutterwave-signature` header, an HMAC-SHA256 of the raw\nbody keyed by the dashboard's secret hash. A body whose signature does not\nmatch is stored unverified and applied to nothing.\n",
+        "security": [],
+        "parameters": [
+          {
+            "name": "flutterwave-signature",
+            "in": "header",
+            "required": true,
+            "description": "Base64 HMAC-SHA256 of the raw body.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "A Flutterwave charge event.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "examples": [
+                      "charge.completed"
+                    ]
+                  },
+                  "data": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/received"
+          },
+          "500": {
+            "$ref": "#/components/responses/failed"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "adminBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "HS256 JWT from `POST /api/admin/auth/login`, valid 8 hours. Sent as\n`Authorization: Bearer <token>`; never a cookie. Changing the admin\npassword revokes every token already issued.\n"
+      }
+    },
+    "schemas": {
+      "Uuid": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "Rwf": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Whole Rwandan francs. Money is never a float."
+      },
+      "PublicPackage": {
+        "type": "object",
+        "required": [
+          "id",
+          "nameEn",
+          "descriptionEn",
+          "priceRwf",
+          "photoCount",
+          "durationMinutes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priceRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "photoCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "PublicAddon": {
+        "type": "object",
+        "required": [
+          "id",
+          "nameEn",
+          "priceRwf"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "priceRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          }
+        }
+      },
+      "PublicService": {
+        "type": "object",
+        "description": "An active service with its active packages, and the active add-ons it\noffers: its own first, then those offered on every service, each in\ndisplay order.\n",
+        "required": [
+          "id",
+          "slug",
+          "nameEn",
+          "descriptionEn",
+          "coverImageUrl",
+          "packages",
+          "addons"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "slug": {
+            "type": "string",
+            "examples": [
+              "portraits"
+            ]
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicPackage"
+            }
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicAddon"
+            }
+          }
+        }
+      },
+      "PublicServiceFields": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicPackage"
+            }
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicAddon"
+            }
+          }
+        }
+      },
+      "PublicServiceDetail": {
+        "description": "A service plus the booking-fee rate that applies to it, so a page can show a live quote.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PublicServiceFields"
+          }
+        ],
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "nameEn",
+          "descriptionEn",
+          "coverImageUrl",
+          "packages",
+          "addons",
+          "bookingFeeRate"
+        ],
+        "unevaluatedProperties": false,
+        "properties": {
+          "bookingFeeRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "The service's own override if set, else the global rate."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "description": "Every error body. `error` is a stable, machine-readable code.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "examples": [
+              "not_found"
+            ]
+          }
+        }
+      },
+      "QuoteRequest": {
+        "type": "object",
+        "required": [
+          "packageId"
+        ],
+        "description": "What to price. Any other key (a `totalRwf`, a `bookingFeeRwf`) is stripped\nunread: the price always comes from the catalogue.\n",
+        "properties": {
+          "packageId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "addonIds": {
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Uuid"
+            },
+            "default": []
+          }
+        }
+      },
+      "Quote": {
+        "type": "object",
+        "description": "The API's price for a basket. Only the booking fee is rounded (half-up, to\na whole franc); the session fee is the remainder, so the two always add\nup to the total.\n",
+        "required": [
+          "totalRwf",
+          "bookingFeeRwf",
+          "sessionFeeRwf",
+          "service",
+          "package",
+          "addons",
+          "bookingFeeRate"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "totalRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "bookingFeeRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "Paid now to hold the slot. Not refundable if the client cancels."
+          },
+          "sessionFeeRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "Due after the shoot."
+          },
+          "bookingFeeRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "service": {
+            "type": "object",
+            "required": [
+              "id",
+              "slug",
+              "nameEn"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "nameEn": {
+                "type": "string"
+              }
+            }
+          },
+          "package": {
+            "type": "object",
+            "required": [
+              "id",
+              "nameEn",
+              "priceRwf"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "nameEn": {
+                "type": "string"
+              },
+              "priceRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              }
+            }
+          },
+          "addons": {
+            "type": "array",
+            "description": "In the order the service page lists them, whatever order they were selected in.",
+            "items": {
+              "$ref": "#/components/schemas/PublicAddon"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "description": "A well-formed request breaking a rule (422). `fields` names the offending\nfields so a form can mark them; values are never echoed back.\n",
+        "required": [
+          "error",
+          "fields"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "validation_failed"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "email",
+                "startsAt"
+              ]
+            ]
+          }
+        }
+      },
+      "KigaliDate": {
+        "type": "string",
+        "format": "date",
+        "description": "A calendar date in Africa/Kigali (UTC+2, no DST), `YYYY-MM-DD`. Years 0000–0099 are refused."
+      },
+      "Instant": {
+        "type": "string",
+        "format": "date-time",
+        "description": "An ISO-8601 instant, always UTC in responses (`2026-10-14T07:00:00.000Z`)."
+      },
+      "AvailabilityDays": {
+        "type": "object",
+        "required": [
+          "days"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "type": "array",
+            "description": "Every Kigali date of the month, in order, each with the starts still bookable for this package right now.",
+            "items": {
+              "type": "object",
+              "required": [
+                "date",
+                "starts"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "date": {
+                  "$ref": "#/components/schemas/KigaliDate"
+                },
+                "starts": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Instant"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "OffsetInstant": {
+        "type": "string",
+        "format": "date-time",
+        "description": "An ISO-8601 instant **with an explicit offset** (`2026-10-14T09:00:00+02:00`\nor `…Z`). A bare local time is refused: it would be read in the server's zone.\n"
+      },
+      "BookingRequest": {
+        "type": "object",
+        "required": [
+          "packageId",
+          "startsAt",
+          "fullName",
+          "email",
+          "phone",
+          "location",
+          "consent"
+        ],
+        "description": "Only ids and the form's text are read. Prices, statuses and any other key\nare stripped unread: every amount comes from the catalogue.\n",
+        "properties": {
+          "packageId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "addonIds": {
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/Uuid"
+            },
+            "default": []
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/OffsetInstant",
+            "description": "Must be one of the `starts` that `GET /api/availability` offers this package right now; anything else is a 422 naming `startsAt`."
+          },
+          "fullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "description": "Stored lowercased. A mistyped address is a 422, not a 400."
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 40,
+            "examples": [
+              "+250788123456"
+            ]
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "partySize": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000,
+            "default": null
+          },
+          "specialRequests": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000,
+            "default": null
+          },
+          "consent": {
+            "type": "boolean",
+            "description": "Must be `true`. Recorded as `consent_at` (Law N° 058/2021). Omitted or false is a 422 naming `consent`."
+          }
+        }
+      },
+      "BookingReference": {
+        "type": "string",
+        "pattern": "^BKY-\\d{4}-[0-9A-HJKMNP-TV-Z]{5}$",
+        "description": "The booking's quotable reference: `BKY-`, the Kigali year and month it\nwas **made**, and five Crockford base-32 characters. Not a secret.\n",
+        "examples": [
+          "BKY-2610-7MAR5"
+        ]
+      },
+      "BookingCreated": {
+        "type": "object",
+        "required": [
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "booking": {
+            "type": "object",
+            "required": [
+              "reference",
+              "status",
+              "startsAt",
+              "endsAt",
+              "holdExpiresAt",
+              "serviceName",
+              "packageName",
+              "packagePriceRwf",
+              "addons",
+              "totalRwf",
+              "bookingFeeRate",
+              "bookingFeeRwf",
+              "sessionFeeRwf"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/BookingReference"
+              },
+              "status": {
+                "const": "pending_payment"
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "endsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "holdExpiresAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "When the slot is released if the booking fee has not been paid (the `holdMinutes` setting, 30 by default)."
+              },
+              "serviceName": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "packagePriceRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "addons": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "priceRwf"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "priceRwf": {
+                      "$ref": "#/components/schemas/Rwf"
+                    }
+                  }
+                }
+              },
+              "totalRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "bookingFeeRate": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "bookingFeeRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "sessionFeeRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "checkoutToken": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{43}$",
+                "description": "Opens this booking's checkout: the site's `/checkout/<reference>/<checkoutToken>`.\nPresent whenever payments are configured.\n"
+              }
+            }
+          }
+        }
+      },
+      "EmailRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "A mistyped address is a 422."
+          }
+        }
+      },
+      "PaymentMethod": {
+        "type": "string",
+        "enum": [
+          "momo_mtn",
+          "momo_airtel",
+          "card"
+        ]
+      },
+      "Checkout": {
+        "type": "object",
+        "required": [
+          "checkout"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "checkout": {
+            "type": "object",
+            "required": [
+              "reference",
+              "serviceName",
+              "packageName",
+              "startsAt",
+              "endsAt",
+              "holdExpiresAt",
+              "bookingFeeRwf",
+              "state",
+              "waitingPayment"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/BookingReference"
+              },
+              "serviceName": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "endsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "holdExpiresAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "bookingFeeRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "payable",
+                  "paid",
+                  "expired",
+                  "closed"
+                ],
+                "description": "`payable` while the hold is live and the fee unpaid; `paid` once a\nbooking fee has succeeded; `expired` when the hold lapsed unpaid;\n`closed` for anything else (cancelled, or nothing to pay).\n"
+              },
+              "waitingPayment": {
+                "description": "An attempt still waiting on the payer, if any; poll `GET /api/payments/{ourRef}`.",
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "ourRef"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "ourRef": {
+                        "$ref": "#/components/schemas/Uuid"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "PayRequest": {
+        "type": "object",
+        "required": [
+          "method",
+          "phone"
+        ],
+        "properties": {
+          "method": {
+            "description": "One of the active provider's methods (`GET /api/payment-methods`). Anything else is a 422.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              }
+            ]
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "The number to prompt. Rwandan numbers may be local (`0788…`) or international (`+250788…`); an unusable number is a 422.",
+            "examples": [
+              "+250788123456"
+            ]
+          }
+        }
+      },
+      "PaymentStarted": {
+        "type": "object",
+        "required": [
+          "payment"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payment": {
+            "type": "object",
+            "required": [
+              "ourRef",
+              "status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "ourRef": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "status": {
+                "const": "pending"
+              }
+            }
+          }
+        }
+      },
+      "PaymentInProgress": {
+        "type": "object",
+        "description": "An earlier attempt is still waiting on the payer's phone. Poll its `ourRef` instead.",
+        "required": [
+          "error",
+          "payment"
+        ],
+        "properties": {
+          "error": {
+            "const": "payment_in_progress"
+          },
+          "payment": {
+            "type": "object",
+            "required": [
+              "ourRef"
+            ],
+            "properties": {
+              "ourRef": {
+                "$ref": "#/components/schemas/Uuid"
+              }
+            }
+          }
+        }
+      },
+      "PaymentNotStarted": {
+        "type": "object",
+        "description": "The provider refused the request (`rejected`: an unknown or unusable\nnumber) or could not be reached in time (`unavailable`). The attempt is\nrecorded as `failed`; the payer may try again.\n",
+        "required": [
+          "error",
+          "reason",
+          "payment"
+        ],
+        "properties": {
+          "error": {
+            "const": "payment_not_started"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "rejected",
+              "unavailable"
+            ]
+          },
+          "payment": {
+            "type": "object",
+            "required": [
+              "ourRef",
+              "status"
+            ],
+            "properties": {
+              "ourRef": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "status": {
+                "const": "failed"
+              }
+            }
+          }
+        }
+      },
+      "PaymentStatus": {
+        "type": "string",
+        "enum": [
+          "initiated",
+          "pending",
+          "succeeded",
+          "failed",
+          "refund_due",
+          "refunded"
+        ]
+      },
+      "BookingStatus": {
+        "type": "string",
+        "enum": [
+          "pending_payment",
+          "confirmed",
+          "completed",
+          "no_show",
+          "expired",
+          "cancelled_by_client",
+          "cancelled_by_admin"
+        ]
+      },
+      "PaymentStatusView": {
+        "type": "object",
+        "required": [
+          "payment",
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payment": {
+            "type": "object",
+            "required": [
+              "status",
+              "amountRwf",
+              "failure"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "$ref": "#/components/schemas/PaymentStatus"
+              },
+              "amountRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "failure": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "declined",
+                  "unavailable",
+                  null
+                ],
+                "description": "Only for a `failed` payment. `unavailable` means the provider could not be reached; `declined` is everything else."
+              }
+            }
+          },
+          "booking": {
+            "type": "object",
+            "required": [
+              "reference",
+              "status",
+              "serviceName",
+              "packageName",
+              "startsAt",
+              "endsAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/BookingReference"
+              },
+              "status": {
+                "$ref": "#/components/schemas/BookingStatus"
+              },
+              "serviceName": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "endsAt": {
+                "$ref": "#/components/schemas/Instant"
+              }
+            }
+          }
+        }
+      },
+      "BookingStage": {
+        "type": "string",
+        "description": "The display stage derived from status and time (`booking/stage.ts`).\n`needs_review` is admin-only: a client never sees it.\n",
+        "enum": [
+          "awaiting_payment",
+          "confirmed",
+          "in_progress",
+          "needs_review",
+          "completed",
+          "closed",
+          "no_show",
+          "expired",
+          "cancelled_by_client",
+          "cancelled_by_admin"
+        ]
+      },
+      "Totals": {
+        "type": "object",
+        "description": "Every amount a booking shows comes from these (`booking/totals.ts`).\nA cancelled, expired or no-show booking owes nothing.\n",
+        "required": [
+          "quotedTotalRwf",
+          "grandTotalRwf",
+          "collectedRwf",
+          "refundDueRwf",
+          "outstandingRwf"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "quotedTotalRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "Package plus add-ons chosen at booking."
+          },
+          "grandTotalRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "The quoted total plus post-shoot add-ons."
+          },
+          "collectedRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "Succeeded payments."
+          },
+          "refundDueRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "Money owed back and not yet recorded as refunded."
+          },
+          "outstandingRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "Still to pay; never below nought."
+          }
+        }
+      },
+      "PaymentKind": {
+        "type": "string",
+        "enum": [
+          "booking_fee",
+          "session_fee"
+        ]
+      },
+      "ClientNotice": {
+        "type": "object",
+        "description": "Something that happened to the booking since, newest first.",
+        "required": [
+          "id",
+          "at",
+          "kind",
+          "data"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "reschedule",
+              "session_fee_request",
+              "payment_receipt",
+              "photo_delivery",
+              "cancelled_by_photographer",
+              "balance_due",
+              "note"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "description": "Depends on `kind`: `reschedule` → `startsAt`, `endsAt`, `previousStartsAt`,\n`previousEndsAt`; `session_fee_request`, `payment_receipt`, `balance_due` →\n`amountRwf`; `note` → `body`; otherwise empty.\n"
+          }
+        }
+      },
+      "ClientBooking": {
+        "type": "object",
+        "description": "A booking as its own client sees it. Neither the booking's id nor the\ntoken that reached it appears anywhere in it, and the contact email is\nmasked (`a•••••@example.com`).\n",
+        "required": [
+          "reference",
+          "status",
+          "stage",
+          "clientName",
+          "maskedEmail",
+          "pendingMaskedEmail",
+          "startsAt",
+          "endsAt",
+          "serviceName",
+          "packageName",
+          "packagePriceRwf",
+          "packagePhotoCount",
+          "packageDurationMinutes",
+          "locationText",
+          "partySize",
+          "specialRequests",
+          "addons",
+          "totals",
+          "bookingFeeRwf",
+          "payments",
+          "canCancel",
+          "cancellationReason",
+          "cancelledAt",
+          "sessionFee",
+          "delivery",
+          "notices"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reference": {
+            "$ref": "#/components/schemas/BookingReference"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BookingStatus"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/BookingStage",
+            "description": "Never `needs_review` for a client."
+          },
+          "clientName": {
+            "type": "string"
+          },
+          "maskedEmail": {
+            "type": "string",
+            "examples": [
+              "a•••••@example.com"
+            ]
+          },
+          "pendingMaskedEmail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A requested change of email not yet confirmed from the new address, masked; null once its link lapses."
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "endsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "serviceName": {
+            "type": "string"
+          },
+          "packageName": {
+            "type": "string"
+          },
+          "packagePriceRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "packagePhotoCount": {
+            "type": "integer"
+          },
+          "packageDurationMinutes": {
+            "type": "integer"
+          },
+          "locationText": {
+            "type": "string"
+          },
+          "partySize": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "specialRequests": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "priceRwf",
+                "stage"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "priceRwf": {
+                  "$ref": "#/components/schemas/Rwf"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "at_booking",
+                    "post_shoot"
+                  ]
+                }
+              }
+            }
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Totals"
+          },
+          "bookingFeeRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "payments": {
+            "type": "array",
+            "description": "Only money that moved or is owed back; abandoned attempts are left out.",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "status",
+                "amountRwf",
+                "settledAt"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "$ref": "#/components/schemas/PaymentKind"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "succeeded",
+                    "refund_due",
+                    "refunded"
+                  ]
+                },
+                "amountRwf": {
+                  "$ref": "#/components/schemas/Rwf"
+                },
+                "settledAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "canCancel": {
+            "type": "boolean",
+            "description": "True only for a `confirmed` booking whose shoot is still ahead."
+          },
+          "cancellationReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cancelledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "sessionFee": {
+            "description": "Present while a confirmed or completed booking still owes money.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "outstandingRwf",
+                  "waitingPayment"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "outstandingRwf": {
+                    "$ref": "#/components/schemas/Rwf"
+                  },
+                  "waitingPayment": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "ourRef"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "ourRef": {
+                            "$ref": "#/components/schemas/Uuid"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "delivery": {
+            "description": "Present once the photographer has sent the photos. `url` is null after the link expires (end of `expiresOn`, Kigali time).",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "url",
+                  "expiresOn",
+                  "expired",
+                  "note"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri"
+                  },
+                  "expiresOn": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date"
+                  },
+                  "expired": {
+                    "type": "boolean"
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "notices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientNotice"
+            }
+          }
+        }
+      },
+      "ClientBookingEnvelope": {
+        "type": "object",
+        "required": [
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "booking": {
+            "$ref": "#/components/schemas/ClientBooking"
+          }
+        }
+      },
+      "ClientBookingConflict": {
+        "type": "object",
+        "description": "The refusal, with the booking as it now stands.",
+        "required": [
+          "error",
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "booking": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ClientBooking"
+              }
+            ]
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 320
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "PublicAdmin": {
+        "type": "object",
+        "description": "The only shape of the admin that leaves the API. No hash, reset or lockout state.",
+        "required": [
+          "id",
+          "email",
+          "lastLoginAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "lastLoginAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "required": [
+          "admin",
+          "token",
+          "tokenType",
+          "expiresAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/PublicAdmin"
+          },
+          "token": {
+            "type": "string",
+            "description": "Send as `Authorization: Bearer <token>`. Keep it in memory or `sessionStorage`, never `localStorage`."
+          },
+          "tokenType": {
+            "const": "Bearer"
+          },
+          "expiresAt": {
+            "$ref": "#/components/schemas/Instant"
+          }
+        }
+      },
+      "AdminEnvelope": {
+        "type": "object",
+        "required": [
+          "admin"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/PublicAdmin"
+          }
+        }
+      },
+      "WorkingHours": {
+        "type": "object",
+        "description": "A weekly rule (`weekday` set) or a one-date override (`effectiveDate` set), never both.",
+        "required": [
+          "id",
+          "weekday",
+          "effectiveDate",
+          "opensMinute",
+          "closesMinute",
+          "isOpen",
+          "note"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "weekday": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 6,
+            "description": "0 is Sunday."
+          },
+          "effectiveDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "opensMinute": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Minutes after Kigali midnight (540 is 09:00)."
+          },
+          "closesMinute": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "isOpen": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "WorkingHoursWrite": {
+        "description": "Exactly one of `weekday` and `effectiveDate`: both or neither is a 400.\nAn open day needs `opensMinute` before `closesMinute` (else 422). One rule\nper weekday and one override per date: a duplicate is 409 `working_hours_exists`.\n",
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "Weekly rule",
+            "required": [
+              "weekday"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "weekday": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 6
+              },
+              "opensMinute": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1440,
+                "default": null
+              },
+              "closesMinute": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1440,
+                "default": null
+              },
+              "isOpen": {
+                "type": "boolean",
+                "default": true
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 500,
+                "default": null
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "Dated override",
+            "required": [
+              "effectiveDate"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "effectiveDate": {
+                "$ref": "#/components/schemas/KigaliDate"
+              },
+              "opensMinute": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1440,
+                "default": null
+              },
+              "closesMinute": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1440,
+                "default": null
+              },
+              "isOpen": {
+                "type": "boolean",
+                "default": true
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 500,
+                "default": null
+              }
+            }
+          }
+        ]
+      },
+      "Block": {
+        "type": "object",
+        "required": [
+          "id",
+          "startsAt",
+          "endsAt",
+          "isAllDay",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "endsAt": {
+            "$ref": "#/components/schemas/Instant",
+            "description": "Exclusive. A whole-day block ends at the Kigali midnight after its last day."
+          },
+          "isAllDay": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Private to the admin. No public endpoint ever returns it."
+          }
+        }
+      },
+      "BlockWrite": {
+        "description": "Whole days as inclusive Kigali dates, or a time range as instants with an\noffset. Overlapping a `confirmed` booking is a 409 naming it unless\n`confirm: true` is sent; the booking is never cancelled by a block.\n",
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "Whole days",
+            "required": [
+              "isAllDay",
+              "startDate",
+              "endDate"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "isAllDay": {
+                "const": true
+              },
+              "startDate": {
+                "$ref": "#/components/schemas/KigaliDate"
+              },
+              "endDate": {
+                "$ref": "#/components/schemas/KigaliDate",
+                "description": "Inclusive; not before `startDate`."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 500,
+                "default": null
+              },
+              "confirm": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "Time range",
+            "required": [
+              "isAllDay",
+              "startsAt",
+              "endsAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "isAllDay": {
+                "const": false
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/OffsetInstant"
+              },
+              "endsAt": {
+                "$ref": "#/components/schemas/OffsetInstant",
+                "description": "After `startsAt`."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 500,
+                "default": null
+              },
+              "confirm": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        ]
+      },
+      "BlockConflict": {
+        "type": "object",
+        "description": "The block would cover confirmed bookings. Resend with `confirm: true` to save it anyway.",
+        "required": [
+          "error",
+          "bookings"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "block_overlaps_confirmed_bookings"
+          },
+          "bookings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "reference",
+                "contactName",
+                "startsAt",
+                "endsAt"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/Uuid"
+                },
+                "reference": {
+                  "$ref": "#/components/schemas/BookingReference"
+                },
+                "contactName": {
+                  "type": "string"
+                },
+                "startsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "endsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Settings": {
+        "type": "object",
+        "required": [
+          "bookingFeeRate",
+          "minLeadTimeMinutes",
+          "holdMinutes",
+          "bufferMinutes",
+          "deliveryExpiryDays"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "bookingFeeRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Share of the total paid up front (0.4 seeded). At most three decimal places."
+          },
+          "minLeadTimeMinutes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minimum notice before a bookable start (120 seeded)."
+          },
+          "holdMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How long an unpaid booking holds its slot (30 seeded)."
+          },
+          "bufferMinutes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Gap reserved after every shoot (30 seeded)."
+          },
+          "deliveryExpiryDays": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Default photo-link lifetime (90 seeded)."
+          }
+        }
+      },
+      "SettingsEnvelope": {
+        "type": "object",
+        "required": [
+          "settings"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/Settings"
+          }
+        }
+      },
+      "SettingsPatch": {
+        "type": "object",
+        "description": "Any subset of the five values. An unknown key is a 400, so a misspelt field never silently saves nothing.",
+        "additionalProperties": false,
+        "properties": {
+          "bookingFeeRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "minLeadTimeMinutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "holdMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "bufferMinutes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "deliveryExpiryDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        }
+      },
+      "Calendar": {
+        "type": "object",
+        "required": [
+          "bookings",
+          "blocks"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "bookings": {
+            "type": "array",
+            "description": "What occupies time. `pending_payment` appears only while its hold is live; cancelled and expired bookings are left out.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "reference",
+                "status",
+                "startsAt",
+                "endsAt",
+                "contactName",
+                "serviceName",
+                "packageName",
+                "conflictsWithBlock"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/Uuid"
+                },
+                "reference": {
+                  "$ref": "#/components/schemas/BookingReference"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending_payment",
+                    "confirmed",
+                    "completed",
+                    "no_show"
+                  ]
+                },
+                "startsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "endsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "contactName": {
+                  "type": "string"
+                },
+                "serviceName": {
+                  "type": "string"
+                },
+                "packageName": {
+                  "type": "string"
+                },
+                "conflictsWithBlock": {
+                  "type": "boolean",
+                  "description": "The session overlaps a block that was saved over it anyway."
+                }
+              }
+            }
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "startsAt",
+                "endsAt",
+                "isAllDay",
+                "reason"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/Uuid"
+                },
+                "startsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "endsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "isAllDay": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "BookingListRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "reference",
+          "status",
+          "stage",
+          "startsAt",
+          "endsAt",
+          "contactName",
+          "contactEmail",
+          "contactPhone",
+          "serviceName",
+          "packageName",
+          "grandTotalRwf",
+          "collectedRwf",
+          "outstandingRwf",
+          "refundDueRwf",
+          "hasRefundDue"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "reference": {
+            "$ref": "#/components/schemas/BookingReference"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BookingStatus"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/BookingStage"
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "endsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "contactName": {
+            "type": "string"
+          },
+          "contactEmail": {
+            "type": "string"
+          },
+          "contactPhone": {
+            "type": "string"
+          },
+          "serviceName": {
+            "type": "string"
+          },
+          "packageName": {
+            "type": "string"
+          },
+          "grandTotalRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "collectedRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "outstandingRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "refundDueRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "hasRefundDue": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BookingsPage": {
+        "type": "object",
+        "required": [
+          "bookings",
+          "total",
+          "page",
+          "pageSize",
+          "pageCount"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "bookings": {
+            "type": "array",
+            "description": "Newest shoot first (start, then id, descending).",
+            "items": {
+              "$ref": "#/components/schemas/BookingListRow"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every booking the filter matches, across all pages."
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The page answered; a page past the end answers the last one."
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "pageCount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "AdminPayment": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "provider",
+          "ourRef",
+          "providerRef",
+          "method",
+          "amountRwf",
+          "status",
+          "failureReason",
+          "initiatedAt",
+          "settledAt",
+          "refundedAt",
+          "refundReference",
+          "note",
+          "canRecordRefund"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PaymentKind"
+          },
+          "provider": {
+            "type": "string",
+            "examples": [
+              "mtn_momo_direct",
+              "flutterwave",
+              "cash"
+            ]
+          },
+          "ourRef": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "providerRef": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amountRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "failureReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "initiatedAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "settledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "refundedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "refundReference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What was typed with a cash payment."
+          },
+          "canRecordRefund": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminBooking": {
+        "type": "object",
+        "required": [
+          "id",
+          "reference",
+          "status",
+          "stage",
+          "locale",
+          "client",
+          "contact",
+          "service",
+          "package",
+          "schedule",
+          "details",
+          "addons",
+          "money",
+          "payments",
+          "lifecycle",
+          "access",
+          "delivery",
+          "messages",
+          "notes",
+          "actions"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "reference": {
+            "$ref": "#/components/schemas/BookingReference"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BookingStatus"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/BookingStage"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "client": {
+            "type": "object",
+            "description": "The client record (one per email address), as it stands now.",
+            "required": [
+              "id",
+              "fullName",
+              "email",
+              "phone",
+              "anonymized"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "fullName": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "anonymized": {
+                "type": "boolean"
+              }
+            }
+          },
+          "contact": {
+            "type": "object",
+            "description": "The contact details this booking was made with (its own snapshot).",
+            "required": [
+              "name",
+              "email",
+              "phone"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "phone": {
+                "type": "string"
+              }
+            }
+          },
+          "service": {
+            "type": "object",
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "package": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "priceRwf",
+              "durationMinutes",
+              "photoCount"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "priceRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "durationMinutes": {
+                "type": "integer"
+              },
+              "photoCount": {
+                "type": "integer"
+              }
+            }
+          },
+          "schedule": {
+            "type": "object",
+            "required": [
+              "startsAt",
+              "endsAt",
+              "bufferEndsAt",
+              "holdExpiresAt",
+              "originalStartsAt",
+              "rescheduledAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "endsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "bufferEndsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "holdExpiresAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "originalStartsAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "Set on the first reschedule only."
+              },
+              "rescheduledAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "details": {
+            "type": "object",
+            "required": [
+              "locationText",
+              "partySize",
+              "specialRequests",
+              "consentAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "locationText": {
+                "type": "string"
+              },
+              "partySize": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "specialRequests": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "consentAt": {
+                "$ref": "#/components/schemas/Instant"
+              }
+            }
+          },
+          "addons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "unitPriceRwf",
+                "quantity",
+                "amountRwf",
+                "stage",
+                "canRemove"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/Uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "unitPriceRwf": {
+                  "$ref": "#/components/schemas/Rwf"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "amountRwf": {
+                  "$ref": "#/components/schemas/Rwf"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "at_booking",
+                    "post_shoot"
+                  ]
+                },
+                "canRemove": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "money": {
+            "type": "object",
+            "required": [
+              "bookingFeeRate",
+              "bookingFeeRwf",
+              "totals"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "bookingFeeRate": {
+                "type": "number"
+              },
+              "bookingFeeRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "totals": {
+                "$ref": "#/components/schemas/Totals"
+              }
+            }
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminPayment"
+            }
+          },
+          "lifecycle": {
+            "type": "object",
+            "required": [
+              "confirmedAt",
+              "completedAt",
+              "cancelledAt",
+              "cancellationReason"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "confirmedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "completedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "cancelledAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "cancellationReason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "access": {
+            "type": "object",
+            "description": "The client's link. The token itself is never stored, so it cannot be shown.",
+            "required": [
+              "hasLink",
+              "expiresAt",
+              "lastUsedAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "hasLink": {
+                "type": "boolean"
+              },
+              "expiresAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "lastUsedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "delivery": {
+            "type": "object",
+            "required": [
+              "url",
+              "expiresOn",
+              "sentAt",
+              "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uri"
+              },
+              "expiresOn": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date"
+              },
+              "sentAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "messages": {
+            "type": "array",
+            "description": "Every message queued for this booking, with its delivery state.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "kind",
+                "template",
+                "recipient",
+                "status",
+                "attempts",
+                "lastError",
+                "createdAt",
+                "completedAt"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/Uuid"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "template": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "recipient": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "string"
+                },
+                "attempts": {
+                  "type": "integer"
+                },
+                "lastError": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "completedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "notes": {
+            "type": "array",
+            "description": "Notes to the client, newest first. Deleted notes are gone.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "body",
+                "emailed",
+                "createdAt"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "$ref": "#/components/schemas/Uuid"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "emailed": {
+                  "type": "boolean"
+                },
+                "createdAt": {
+                  "$ref": "#/components/schemas/Instant"
+                }
+              }
+            }
+          },
+          "actions": {
+            "type": "object",
+            "description": "What may be done to the booking now. The API checks again on every action.",
+            "required": [
+              "canReschedule",
+              "canCancel",
+              "canComplete",
+              "canMarkNoShow",
+              "canResendLink",
+              "canEditAddons",
+              "canRequestSessionFee",
+              "canEditDelivery",
+              "canSendDelivery"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "canReschedule": {
+                "type": "boolean"
+              },
+              "canCancel": {
+                "type": "boolean"
+              },
+              "canComplete": {
+                "type": "boolean"
+              },
+              "canMarkNoShow": {
+                "type": "boolean"
+              },
+              "canResendLink": {
+                "type": "boolean"
+              },
+              "canEditAddons": {
+                "type": "boolean",
+                "description": "Confirmed, and the shoot has begun."
+              },
+              "canRequestSessionFee": {
+                "type": "boolean"
+              },
+              "canEditDelivery": {
+                "type": "boolean",
+                "description": "Completed."
+              },
+              "canSendDelivery": {
+                "type": "boolean",
+                "description": "Completed, with a link saved."
+              }
+            }
+          }
+        }
+      },
+      "AdminBookingEnvelope": {
+        "type": "object",
+        "required": [
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "booking": {
+            "$ref": "#/components/schemas/AdminBooking"
+          }
+        }
+      },
+      "AdminBookingConflict": {
+        "type": "object",
+        "description": "The action was refused. `error` says why; `booking` is the booking as it\nnow stands, so a screen acting on a stale view can show what is true.\n",
+        "required": [
+          "error",
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string",
+            "examples": [
+              "not_allowed"
+            ]
+          },
+          "booking": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AdminBooking"
+              }
+            ]
+          }
+        }
+      },
+      "AdminServiceFields": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "nameFr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "descriptionFr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "bookingFeeRateOverride": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Null means the global booking-fee rate applies."
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          }
+        }
+      },
+      "AdminPackage": {
+        "type": "object",
+        "required": [
+          "id",
+          "serviceId",
+          "nameEn",
+          "nameFr",
+          "descriptionEn",
+          "descriptionFr",
+          "priceRwf",
+          "photoCount",
+          "durationMinutes",
+          "isActive",
+          "sortOrder"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "serviceId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "nameFr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "descriptionFr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priceRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "photoCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          }
+        }
+      },
+      "AdminAddon": {
+        "type": "object",
+        "required": [
+          "id",
+          "serviceId",
+          "nameEn",
+          "nameFr",
+          "priceRwf",
+          "isActive",
+          "sortOrder"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "serviceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Null means offered on every service."
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "nameFr": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priceRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer"
+          }
+        }
+      },
+      "AdminCatalogue": {
+        "type": "object",
+        "required": [
+          "services",
+          "sharedAddons"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "services": {
+            "type": "array",
+            "description": "Every service, active or not, with all its packages and its own add-ons.",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/AdminServiceFields"
+                }
+              ],
+              "type": "object",
+              "required": [
+                "id",
+                "slug",
+                "nameEn",
+                "nameFr",
+                "descriptionEn",
+                "descriptionFr",
+                "coverImageUrl",
+                "bookingFeeRateOverride",
+                "isActive",
+                "sortOrder",
+                "packages",
+                "addons"
+              ],
+              "unevaluatedProperties": false,
+              "properties": {
+                "packages": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminPackage"
+                  }
+                },
+                "addons": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminAddon"
+                  }
+                }
+              }
+            }
+          },
+          "sharedAddons": {
+            "type": "array",
+            "description": "Add-ons offered on every service (`serviceId` null).",
+            "items": {
+              "$ref": "#/components/schemas/AdminAddon"
+            }
+          }
+        }
+      },
+      "ServiceWrite": {
+        "type": "object",
+        "description": "Create requires `slug` and `nameEn`; an update sends any subset. Blank\noptional text is stored as null. Unknown keys are a 400.\n",
+        "additionalProperties": false,
+        "properties": {
+          "slug": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "description": "Lowercase words joined by single hyphens. Unique; a taken slug is 409 `slug_taken`."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "nameFr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 5000
+          },
+          "descriptionFr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 5000
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "A pasted link to an image hosted elsewhere. Must be `https:`; `http:` is a 422."
+          },
+          "bookingFeeRateOverride": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "At most three decimal places. Null uses the global rate."
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AdminService": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AdminServiceFields"
+          }
+        ],
+        "required": [
+          "id",
+          "slug",
+          "nameEn",
+          "nameFr",
+          "descriptionEn",
+          "descriptionFr",
+          "coverImageUrl",
+          "bookingFeeRateOverride",
+          "isActive",
+          "sortOrder"
+        ],
+        "unevaluatedProperties": false
+      },
+      "PackageWrite": {
+        "type": "object",
+        "description": "Create requires `serviceId`, `nameEn`, `priceRwf`, `photoCount` and `durationMinutes`; `serviceId` cannot be changed later.",
+        "additionalProperties": false,
+        "properties": {
+          "serviceId": {
+            "$ref": "#/components/schemas/Uuid",
+            "description": "Create only. A service that does not exist is a 422 naming `serviceId`."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "nameFr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 5000
+          },
+          "descriptionFr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 5000
+          },
+          "priceRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "photoCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "durationMinutes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PackageSaved": {
+        "type": "object",
+        "description": "The saved package, and a warning when it is longer than every open day\n(spec §6.8): saving is allowed, but no client will ever see a slot for it.\n",
+        "required": [
+          "package",
+          "warning"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "package": {
+            "$ref": "#/components/schemas/AdminPackage"
+          },
+          "warning": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "code",
+                  "longestWindow"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "const": "duration_exceeds_longest_window"
+                  },
+                  "longestWindow": {
+                    "description": "The longest open window, in minutes after Kigali midnight; null with no open day at all.",
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "opensMinute",
+                          "closesMinute"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "opensMinute": {
+                            "type": "integer"
+                          },
+                          "closesMinute": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "AddonWrite": {
+        "type": "object",
+        "description": "Create requires `serviceId` (null for every service), `nameEn` and `priceRwf`; `serviceId` cannot be changed later.",
+        "additionalProperties": false,
+        "properties": {
+          "serviceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Create only."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "nameFr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "priceRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "responses": {
+      "NotFound": {
+        "description": "Nothing there. For a capability token this is also the answer for an\nexpired, superseded or malformed token: never 403, which would confirm\nthat a booking exists.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "not_found"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Not the shape of a request: invalid JSON, a wrong type, an unknown or\nmissing key, a malformed id or date.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "invalid_request"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests from this address (or, for bookings, this email) in the\nwindow. Nothing was done. `Retry-After` gives the seconds to wait.\n",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "rate_limited"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid admin token. The `WWW-Authenticate` header says which: `Bearer\nrealm=\"bookly-admin\"` for no token, `…, error=\"invalid_token\"` for a\nrefused one (expired, tampered, or issued before a password change).\n",
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "unauthenticated"
+            }
+          }
+        }
+      },
+      "booking": {
+        "description": "The booking as it now stands.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AdminBookingEnvelope"
+            }
+          }
+        }
+      },
+      "conflict": {
+        "description": "The action was refused; the booking as it stands is included.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AdminBookingConflict"
+            },
+            "example": {
+              "error": "not_allowed",
+              "booking": null
+            }
+          }
+        }
+      },
+      "service": {
+        "description": "The service.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "service"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "service": {
+                  "$ref": "#/components/schemas/AdminService"
+                }
+              }
+            }
+          }
+        }
+      },
+      "slugTaken": {
+        "description": "The slug is already in use.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "slug_taken"
+            }
+          }
+        }
+      },
+      "invalid": {
+        "description": "A well-formed value outside its rules.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          }
+        }
+      },
+      "inUse": {
+        "description": "A booking or another row still references this; it was not deleted.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "in_use"
+            }
+          }
+        }
+      },
+      "package": {
+        "description": "The package, with a warning when it is longer than every open day.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PackageSaved"
+            }
+          }
+        }
+      },
+      "addon": {
+        "description": "The add-on.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "addon"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "addon": {
+                  "$ref": "#/components/schemas/AdminAddon"
+                }
+              }
+            }
+          }
+        }
+      },
+      "received": {
+        "description": "The delivery is on record (applied, ignored, or refused as unsigned).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "received"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "received": {
+                  "const": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "failed": {
+        "description": "Processing failed; the provider should retry.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "internal_error"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "AccessToken": {
+        "name": "token",
+        "in": "path",
+        "required": true,
+        "description": "The booking's **access token**, from its confirmation email or a resend:\n256 random bits, base64url. It is the client's whole identity, so treat\nthe URL as a secret. Unknown, expired (365 days) and superseded tokens\nare all a 404.\n",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,256}$"
+        }
+      },
+      "Reference": {
+        "name": "reference",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/BookingReference"
+        }
+      },
+      "CheckoutToken": {
+        "name": "token",
+        "in": "path",
+        "required": true,
+        "description": "The checkout token returned when the booking was created: an HMAC of the\nreference, 43 base64url characters. Good only for paying the booking fee\nwhile the hold lasts.\n",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        }
+      },
+      "OurRef": {
+        "name": "ourRef",
+        "in": "path",
+        "required": true,
+        "description": "Our id for one payment attempt, returned when it was started.",
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        }
+      },
+      "RowId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/Uuid"
+        }
+      }
+    }
+  }
+}

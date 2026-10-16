@@ -1,0 +1,249 @@
+# Services, packages and add-ons. All require the admin bearer token. Edits are
+# partial and never touch an existing booking (bookings carry their own
+# snapshots). A delete is allowed only for a row nothing references (else 409).
+
+catalogue:
+  get:
+    operationId: getCatalogue
+    tags: [Admin catalogue]
+    summary: The whole catalogue
+    description: Every service (active or not) with its packages and own add-ons, and the add-ons offered on every service.
+    responses:
+      '200':
+        description: The catalogue.
+        content:
+          application/json:
+            schema: { $ref: ../components/catalogue.yaml#/schemas/AdminCatalogue }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+services:
+  post:
+    operationId: createService
+    tags: [Admin catalogue]
+    summary: Create a service
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/catalogue.yaml#/schemas/ServiceWrite }
+    responses:
+      '201':
+        $ref: '#/_responses/service'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '409':
+        $ref: '#/_responses/slugTaken'
+      '422':
+        $ref: '#/_responses/invalid'
+
+serviceItem:
+  patch:
+    operationId: updateService
+    tags: [Admin catalogue]
+    summary: Update a service
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/catalogue.yaml#/schemas/ServiceWrite }
+    responses:
+      '200':
+        $ref: '#/_responses/service'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/slugTaken'
+      '422':
+        $ref: '#/_responses/invalid'
+  delete:
+    operationId: deleteService
+    tags: [Admin catalogue]
+    summary: Delete a service
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '204':
+        description: Deleted.
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/inUse'
+
+packages:
+  post:
+    operationId: createPackage
+    tags: [Admin catalogue]
+    summary: Create a package
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/catalogue.yaml#/schemas/PackageWrite }
+    responses:
+      '201':
+        $ref: '#/_responses/package'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        description: A value out of range, or a `serviceId` naming no service.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+packageItem:
+  patch:
+    operationId: updatePackage
+    tags: [Admin catalogue]
+    summary: Update a package
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/catalogue.yaml#/schemas/PackageWrite }
+    responses:
+      '200':
+        $ref: '#/_responses/package'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '422':
+        $ref: '#/_responses/invalid'
+  delete:
+    operationId: deletePackage
+    tags: [Admin catalogue]
+    summary: Delete a package
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '204':
+        description: Deleted.
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/inUse'
+
+addons:
+  post:
+    operationId: createAddon
+    tags: [Admin catalogue]
+    summary: Create an add-on
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/catalogue.yaml#/schemas/AddonWrite }
+    responses:
+      '201':
+        $ref: '#/_responses/addon'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        description: A value out of range, or a `serviceId` naming no service.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+addonItem:
+  patch:
+    operationId: updateAddon
+    tags: [Admin catalogue]
+    summary: Update an add-on
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/catalogue.yaml#/schemas/AddonWrite }
+    responses:
+      '200':
+        $ref: '#/_responses/addon'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '422':
+        $ref: '#/_responses/invalid'
+  delete:
+    operationId: deleteAddon
+    tags: [Admin catalogue]
+    summary: Delete an add-on
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '204':
+        description: Deleted.
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/inUse'
+
+_responses:
+  service:
+    description: The service.
+    content:
+      application/json:
+        schema:
+          type: object
+          required: [service]
+          additionalProperties: false
+          properties:
+            service: { $ref: ../components/catalogue.yaml#/schemas/AdminService }
+  package:
+    description: The package, with a warning when it is longer than every open day.
+    content:
+      application/json:
+        schema: { $ref: ../components/catalogue.yaml#/schemas/PackageSaved }
+  addon:
+    description: The add-on.
+    content:
+      application/json:
+        schema:
+          type: object
+          required: [addon]
+          additionalProperties: false
+          properties:
+            addon: { $ref: ../components/catalogue.yaml#/schemas/AdminAddon }
+  slugTaken:
+    description: The slug is already in use.
+    content:
+      application/json:
+        schema: { $ref: ../components/common.yaml#/schemas/Error }
+        example: { error: slug_taken }
+  inUse:
+    description: A booking or another row still references this; it was not deleted.
+    content:
+      application/json:
+        schema: { $ref: ../components/common.yaml#/schemas/Error }
+        example: { error: in_use }
+  invalid:
+    description: A well-formed value outside its rules.
+    content:
+      application/json:
+        schema: { $ref: ../components/common.yaml#/schemas/ValidationError }

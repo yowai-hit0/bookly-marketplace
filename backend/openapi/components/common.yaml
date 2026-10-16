@@ -1,0 +1,261 @@
+# Shared schemas, responses and parameters. Referenced from the path files as
+# `../components/common.yaml#/<group>/<Name>`.
+
+schemas:
+  Error:
+    type: object
+    description: Every error body. `error` is a stable, machine-readable code.
+    required: [error]
+    properties:
+      error:
+        type: string
+        examples: [not_found]
+
+  ValidationError:
+    type: object
+    description: |
+      A well-formed request breaking a rule (422). `fields` names the offending
+      fields so a form can mark them; values are never echoed back.
+    required: [error, fields]
+    additionalProperties: false
+    properties:
+      error:
+        const: validation_failed
+      fields:
+        type: array
+        items:
+          type: string
+        examples: [[email, startsAt]]
+
+  Instant:
+    type: string
+    format: date-time
+    description: An ISO-8601 instant, always UTC in responses (`2026-10-14T07:00:00.000Z`).
+
+  OffsetInstant:
+    type: string
+    format: date-time
+    description: |
+      An ISO-8601 instant **with an explicit offset** (`2026-10-14T09:00:00+02:00`
+      or `…Z`). A bare local time is refused: it would be read in the server's zone.
+
+  KigaliDate:
+    type: string
+    format: date
+    description: A calendar date in Africa/Kigali (UTC+2, no DST), `YYYY-MM-DD`. Years 0000–0099 are refused.
+
+  Rwf:
+    type: integer
+    minimum: 0
+    description: Whole Rwandan francs. Money is never a float.
+
+  Uuid:
+    type: string
+    format: uuid
+
+  BookingReference:
+    type: string
+    pattern: '^BKY-\d{4}-[0-9A-HJKMNP-TV-Z]{5}$'
+    description: |
+      The booking's quotable reference: `BKY-`, the Kigali year and month it
+      was **made**, and five Crockford base-32 characters. Not a secret.
+    examples: [BKY-2610-7MAR5]
+
+  BookingStatus:
+    type: string
+    enum: [pending_payment, confirmed, completed, no_show, expired, cancelled_by_client, cancelled_by_admin]
+
+  BookingStage:
+    type: string
+    description: |
+      The display stage derived from status and time (`booking/stage.ts`).
+      `needs_review` is admin-only: a client never sees it.
+    enum: [awaiting_payment, confirmed, in_progress, needs_review, completed, closed, no_show, expired, cancelled_by_client, cancelled_by_admin]
+
+  PaymentStatus:
+    type: string
+    enum: [initiated, pending, succeeded, failed, refund_due, refunded]
+
+  PaymentKind:
+    type: string
+    enum: [booking_fee, session_fee]
+
+  PaymentMethod:
+    type: string
+    enum: [momo_mtn, momo_airtel, card]
+
+  PaymentStarted:
+    type: object
+    required: [payment]
+    additionalProperties: false
+    properties:
+      payment:
+        type: object
+        required: [ourRef, status]
+        additionalProperties: false
+        properties:
+          ourRef:
+            $ref: '#/schemas/Uuid'
+          status:
+            const: pending
+
+  PaymentInProgress:
+    type: object
+    description: An earlier attempt is still waiting on the payer's phone. Poll its `ourRef` instead.
+    required: [error, payment]
+    properties:
+      error:
+        const: payment_in_progress
+      payment:
+        type: object
+        required: [ourRef]
+        properties:
+          ourRef:
+            $ref: '#/schemas/Uuid'
+
+  PaymentNotStarted:
+    type: object
+    description: |
+      The provider refused the request (`rejected`: an unknown or unusable
+      number) or could not be reached in time (`unavailable`). The attempt is
+      recorded as `failed`; the payer may try again.
+    required: [error, reason, payment]
+    properties:
+      error:
+        const: payment_not_started
+      reason:
+        type: string
+        enum: [rejected, unavailable]
+      payment:
+        type: object
+        required: [ourRef, status]
+        properties:
+          ourRef:
+            $ref: '#/schemas/Uuid'
+          status:
+            const: failed
+
+  PayRequest:
+    type: object
+    required: [method, phone]
+    properties:
+      method:
+        description: One of the active provider's methods (`GET /api/payment-methods`). Anything else is a 422.
+        allOf:
+          - $ref: '#/schemas/PaymentMethod'
+      phone:
+        type: string
+        maxLength: 40
+        description: The number to prompt. Rwandan numbers may be local (`0788…`) or international (`+250788…`); an unusable number is a 422.
+        examples: ['+250788123456']
+
+responses:
+  BadRequest:
+    description: |
+      Not the shape of a request: invalid JSON, a wrong type, an unknown or
+      missing key, a malformed id or date.
+    content:
+      application/json:
+        schema:
+          $ref: '#/schemas/Error'
+        example:
+          error: invalid_request
+
+  ValidationFailed:
+    description: Well-formed, but a value breaks a rule. Names the fields.
+    content:
+      application/json:
+        schema:
+          $ref: '#/schemas/ValidationError'
+
+  NotFound:
+    description: |
+      Nothing there. For a capability token this is also the answer for an
+      expired, superseded or malformed token: never 403, which would confirm
+      that a booking exists.
+    content:
+      application/json:
+        schema:
+          $ref: '#/schemas/Error'
+        example:
+          error: not_found
+
+  RateLimited:
+    description: |
+      Too many requests from this address (or, for bookings, this email) in the
+      window. Nothing was done. `Retry-After` gives the seconds to wait.
+    headers:
+      Retry-After:
+        schema:
+          type: integer
+          minimum: 1
+    content:
+      application/json:
+        schema:
+          $ref: '#/schemas/Error'
+        example:
+          error: rate_limited
+
+  Unauthorized:
+    description: |
+      No valid admin token. The `WWW-Authenticate` header says which: `Bearer
+      realm="bookly-admin"` for no token, `…, error="invalid_token"` for a
+      refused one (expired, tampered, or issued before a password change).
+    headers:
+      WWW-Authenticate:
+        schema:
+          type: string
+    content:
+      application/json:
+        schema:
+          $ref: '#/schemas/Error'
+        example:
+          error: unauthenticated
+
+parameters:
+  AccessToken:
+    name: token
+    in: path
+    required: true
+    description: |
+      The booking's **access token**, from its confirmation email or a resend:
+      256 random bits, base64url. It is the client's whole identity, so treat
+      the URL as a secret. Unknown, expired (365 days) and superseded tokens
+      are all a 404.
+    schema:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{16,256}$'
+
+  CheckoutToken:
+    name: token
+    in: path
+    required: true
+    description: |
+      The checkout token returned when the booking was created: an HMAC of the
+      reference, 43 base64url characters. Good only for paying the booking fee
+      while the hold lasts.
+    schema:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{43}$'
+
+  Reference:
+    name: reference
+    in: path
+    required: true
+    schema:
+      $ref: '#/schemas/BookingReference'
+
+  OurRef:
+    name: ourRef
+    in: path
+    required: true
+    description: Our id for one payment attempt, returned when it was started.
+    schema:
+      $ref: '#/schemas/Uuid'
+
+  RowId:
+    name: id
+    in: path
+    required: true
+    schema:
+      $ref: '#/schemas/Uuid'

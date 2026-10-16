@@ -1,0 +1,154 @@
+{
+  "$comment": "Asserted by BOTH test suites against their own quoteBasket() (backend/src/catalogue/quote.ts and frontend/src/lib/quote.ts). The browser's copy prices the live total a visitor sees; the API's copy is the authority and prices the same basket again from the catalogue (plan.md Task 11). The rule is data-model_v2.md §9.5 and §6.2: total = package + add-ons; booking fee = round(total × rate), half-up, whole RWF; session fee = total − booking fee, so rounding never loses a franc. Every expectation was computed in exact integer arithmetic, not floating point — the three 'float trap' cases are baskets where Math.round(total × rate) is a franc short.",
+  "quotes": [
+    {
+      "case": "plan.md Task 11 — a 40,000 package plus a 10,000 add-on at the default 40%",
+      "packagePriceRwf": 40000,
+      "addonPricesRwf": [10000],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 50000, "bookingFeeRwf": 20000, "sessionFeeRwf": 30000 }
+    },
+    {
+      "case": "plan.md Task 11 — the same 50,000 basket on a service overriding the rate to 0.300",
+      "packagePriceRwf": 40000,
+      "addonPricesRwf": [10000],
+      "bookingFeeRate": 0.3,
+      "expected": { "totalRwf": 50000, "bookingFeeRwf": 15000, "sessionFeeRwf": 35000 }
+    },
+    {
+      "case": "a package with no add-ons",
+      "packagePriceRwf": 45000,
+      "addonPricesRwf": [],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 45000, "bookingFeeRwf": 18000, "sessionFeeRwf": 27000 }
+    },
+    {
+      "case": "several add-ons are summed",
+      "packagePriceRwf": 150000,
+      "addonPricesRwf": [25000, 15000, 5000],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 195000, "bookingFeeRwf": 78000, "sessionFeeRwf": 117000 }
+    },
+    {
+      "case": "an override typed as 37.5% — an exact half rounds up",
+      "packagePriceRwf": 80000,
+      "addonPricesRwf": [12500],
+      "bookingFeeRate": 0.375,
+      "expected": { "totalRwf": 92500, "bookingFeeRwf": 34688, "sessionFeeRwf": 57812 }
+    },
+    {
+      "case": "half-up: 12,001.5 rounds up",
+      "packagePriceRwf": 40005,
+      "addonPricesRwf": [],
+      "bookingFeeRate": 0.3,
+      "expected": { "totalRwf": 40005, "bookingFeeRwf": 12002, "sessionFeeRwf": 28003 }
+    },
+    {
+      "case": "below the half rounds down",
+      "packagePriceRwf": 40001,
+      "addonPricesRwf": [],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 40001, "bookingFeeRwf": 16000, "sessionFeeRwf": 24001 }
+    },
+    {
+      "case": "half-up, not half-to-even: 22,502.5 is 22,503, where banker's rounding gives 22,502",
+      "packagePriceRwf": 45005,
+      "addonPricesRwf": [],
+      "bookingFeeRate": 0.5,
+      "expected": { "totalRwf": 45005, "bookingFeeRwf": 22503, "sessionFeeRwf": 22502 }
+    },
+    {
+      "case": "float trap — 1,500 × 0.285 is 427.49999… in floating point; exact half-up is 428",
+      "packagePriceRwf": 1500,
+      "addonPricesRwf": [],
+      "bookingFeeRate": 0.285,
+      "expected": { "totalRwf": 1500, "bookingFeeRwf": 428, "sessionFeeRwf": 1072 }
+    },
+    {
+      "case": "float trap — 5,500 × 0.175 is 962.49999… in floating point; exact half-up is 963",
+      "packagePriceRwf": 5000,
+      "addonPricesRwf": [500],
+      "bookingFeeRate": 0.175,
+      "expected": { "totalRwf": 5500, "bookingFeeRwf": 963, "sessionFeeRwf": 4537 }
+    },
+    {
+      "case": "float trap — 1,500 × 0.565 is 847.49999… in floating point; exact half-up is 848",
+      "packagePriceRwf": 1000,
+      "addonPricesRwf": [500],
+      "bookingFeeRate": 0.565,
+      "expected": { "totalRwf": 1500, "bookingFeeRwf": 848, "sessionFeeRwf": 652 }
+    },
+    {
+      "case": "a 0% rate: nothing now, the whole total after the shoot",
+      "packagePriceRwf": 60000,
+      "addonPricesRwf": [5000],
+      "bookingFeeRate": 0,
+      "expected": { "totalRwf": 65000, "bookingFeeRwf": 0, "sessionFeeRwf": 65000 }
+    },
+    {
+      "case": "a 100% rate: the whole total now, nothing after the shoot",
+      "packagePriceRwf": 60000,
+      "addonPricesRwf": [5000],
+      "bookingFeeRate": 1,
+      "expected": { "totalRwf": 65000, "bookingFeeRwf": 65000, "sessionFeeRwf": 0 }
+    },
+    {
+      "case": "a free package with a paid add-on",
+      "packagePriceRwf": 0,
+      "addonPricesRwf": [10000],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 10000, "bookingFeeRwf": 4000, "sessionFeeRwf": 6000 }
+    },
+    {
+      "case": "an entirely free basket",
+      "packagePriceRwf": 0,
+      "addonPricesRwf": [],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 0, "bookingFeeRwf": 0, "sessionFeeRwf": 0 }
+    },
+    {
+      "case": "a free add-on changes nothing",
+      "packagePriceRwf": 40000,
+      "addonPricesRwf": [0],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 40000, "bookingFeeRwf": 16000, "sessionFeeRwf": 24000 }
+    },
+    {
+      "case": "two add-ons with the same price both count — prices are not deduplicated",
+      "packagePriceRwf": 40000,
+      "addonPricesRwf": [10000, 10000],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 60000, "bookingFeeRwf": 24000, "sessionFeeRwf": 36000 }
+    },
+    {
+      "case": "the smallest rate step, 0.001, still rounds half-up",
+      "packagePriceRwf": 1500,
+      "addonPricesRwf": [],
+      "bookingFeeRate": 0.001,
+      "expected": { "totalRwf": 1500, "bookingFeeRwf": 2, "sessionFeeRwf": 1498 }
+    },
+    {
+      "case": "ten add-ons",
+      "packagePriceRwf": 100000,
+      "addonPricesRwf": [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 155000, "bookingFeeRwf": 62000, "sessionFeeRwf": 93000 }
+    },
+    {
+      "case": "a large wedding basket",
+      "packagePriceRwf": 2500000,
+      "addonPricesRwf": [350000, 150000, 75000],
+      "bookingFeeRate": 0.4,
+      "expected": { "totalRwf": 3075000, "bookingFeeRwf": 1230000, "sessionFeeRwf": 1845000 }
+    }
+  ],
+  "rejects": [
+    { "case": "a package price is whole RWF only", "packagePriceRwf": 40000.5, "addonPricesRwf": [], "bookingFeeRate": 0.4 },
+    { "case": "an add-on price is whole RWF only", "packagePriceRwf": 40000, "addonPricesRwf": [9999.99], "bookingFeeRate": 0.4 },
+    { "case": "a negative package price", "packagePriceRwf": -1, "addonPricesRwf": [], "bookingFeeRate": 0.4 },
+    { "case": "a negative add-on price", "packagePriceRwf": 40000, "addonPricesRwf": [-500], "bookingFeeRate": 0.4 },
+    { "case": "a rate above 1", "packagePriceRwf": 40000, "addonPricesRwf": [], "bookingFeeRate": 1.001 },
+    { "case": "a negative rate", "packagePriceRwf": 40000, "addonPricesRwf": [], "bookingFeeRate": -0.1 },
+    { "case": "a fourth decimal place, which numeric(4,3) cannot hold", "packagePriceRwf": 40000, "addonPricesRwf": [], "bookingFeeRate": 0.4005 }
+  ]
+}

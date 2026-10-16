@@ -1,0 +1,301 @@
+# Catalogue schemas: what the public sees (`catalogue/public.ts`) and what the
+# admin edits (`routes/admin-catalogue.ts`).
+
+schemas:
+  PublicPackage:
+    type: object
+    required: [id, nameEn, descriptionEn, priceRwf, photoCount, durationMinutes]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      nameEn: { type: string }
+      descriptionEn: { type: [string, 'null'] }
+      priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      photoCount: { type: integer, minimum: 0 }
+      durationMinutes: { type: integer, minimum: 1 }
+
+  PublicAddon:
+    type: object
+    required: [id, nameEn, priceRwf]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      nameEn: { type: string }
+      priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+
+  PublicService:
+    type: object
+    description: |
+      An active service with its active packages, and the active add-ons it
+      offers: its own first, then those offered on every service, each in
+      display order.
+    required: [id, slug, nameEn, descriptionEn, coverImageUrl, packages, addons]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      slug: { type: string, examples: [portraits] }
+      nameEn: { type: string }
+      descriptionEn: { type: [string, 'null'] }
+      coverImageUrl: { type: [string, 'null'], format: uri }
+      packages:
+        type: array
+        items: { $ref: '#/schemas/PublicPackage' }
+      addons:
+        type: array
+        items: { $ref: '#/schemas/PublicAddon' }
+
+  PublicServiceDetail:
+    description: A service plus the booking-fee rate that applies to it, so a page can show a live quote.
+    allOf:
+      - $ref: '#/schemas/PublicServiceFields'
+    type: object
+    required: [id, slug, nameEn, descriptionEn, coverImageUrl, packages, addons, bookingFeeRate]
+    unevaluatedProperties: false
+    properties:
+      bookingFeeRate:
+        type: number
+        minimum: 0
+        maximum: 1
+        description: The service's own override if set, else the global rate.
+
+  # PublicService without `additionalProperties: false`, so the detail can extend it.
+  PublicServiceFields:
+    type: object
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      slug: { type: string }
+      nameEn: { type: string }
+      descriptionEn: { type: [string, 'null'] }
+      coverImageUrl: { type: [string, 'null'], format: uri }
+      packages:
+        type: array
+        items: { $ref: '#/schemas/PublicPackage' }
+      addons:
+        type: array
+        items: { $ref: '#/schemas/PublicAddon' }
+
+  QuoteRequest:
+    type: object
+    required: [packageId]
+    description: |
+      What to price. Any other key (a `totalRwf`, a `bookingFeeRwf`) is stripped
+      unread: the price always comes from the catalogue.
+    properties:
+      packageId: { $ref: 'common.yaml#/schemas/Uuid' }
+      addonIds:
+        type: array
+        maxItems: 50
+        uniqueItems: true
+        items: { $ref: 'common.yaml#/schemas/Uuid' }
+        default: []
+
+  Quote:
+    type: object
+    description: |
+      The API's price for a basket. Only the booking fee is rounded (half-up, to
+      a whole franc); the session fee is the remainder, so the two always add
+      up to the total.
+    required: [totalRwf, bookingFeeRwf, sessionFeeRwf, service, package, addons, bookingFeeRate]
+    additionalProperties: false
+    properties:
+      totalRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      bookingFeeRwf:
+        $ref: 'common.yaml#/schemas/Rwf'
+        description: Paid now to hold the slot. Not refundable if the client cancels.
+      sessionFeeRwf:
+        $ref: 'common.yaml#/schemas/Rwf'
+        description: Due after the shoot.
+      bookingFeeRate: { type: number, minimum: 0, maximum: 1 }
+      service:
+        type: object
+        required: [id, slug, nameEn]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          slug: { type: string }
+          nameEn: { type: string }
+      package:
+        type: object
+        required: [id, nameEn, priceRwf]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          nameEn: { type: string }
+          priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      addons:
+        type: array
+        description: In the order the service page lists them, whatever order they were selected in.
+        items: { $ref: '#/schemas/PublicAddon' }
+
+  # --- Admin ---------------------------------------------------------------
+
+  AdminService:
+    allOf:
+      - $ref: '#/schemas/AdminServiceFields'
+    required: [id, slug, nameEn, nameFr, descriptionEn, descriptionFr, coverImageUrl, bookingFeeRateOverride, isActive, sortOrder]
+    unevaluatedProperties: false
+
+  # AdminService without the closing keyword, so the catalogue entry can extend it.
+  AdminServiceFields:
+    type: object
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      slug: { type: string }
+      nameEn: { type: string }
+      nameFr: { type: [string, 'null'] }
+      descriptionEn: { type: [string, 'null'] }
+      descriptionFr: { type: [string, 'null'] }
+      coverImageUrl: { type: [string, 'null'], format: uri }
+      bookingFeeRateOverride:
+        type: [number, 'null']
+        description: Null means the global booking-fee rate applies.
+      isActive: { type: boolean }
+      sortOrder: { type: integer }
+
+  AdminPackage:
+    type: object
+    required: [id, serviceId, nameEn, nameFr, descriptionEn, descriptionFr, priceRwf, photoCount, durationMinutes, isActive, sortOrder]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      serviceId: { $ref: 'common.yaml#/schemas/Uuid' }
+      nameEn: { type: string }
+      nameFr: { type: [string, 'null'] }
+      descriptionEn: { type: [string, 'null'] }
+      descriptionFr: { type: [string, 'null'] }
+      priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      photoCount: { type: integer, minimum: 0 }
+      durationMinutes: { type: integer, minimum: 1 }
+      isActive: { type: boolean }
+      sortOrder: { type: integer }
+
+  AdminAddon:
+    type: object
+    required: [id, serviceId, nameEn, nameFr, priceRwf, isActive, sortOrder]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      serviceId:
+        type: [string, 'null']
+        format: uuid
+        description: Null means offered on every service.
+      nameEn: { type: string }
+      nameFr: { type: [string, 'null'] }
+      priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      isActive: { type: boolean }
+      sortOrder: { type: integer }
+
+  AdminCatalogue:
+    type: object
+    required: [services, sharedAddons]
+    additionalProperties: false
+    properties:
+      services:
+        type: array
+        description: Every service, active or not, with all its packages and its own add-ons.
+        items:
+          allOf:
+            - $ref: '#/schemas/AdminServiceFields'
+          type: object
+          required: [id, slug, nameEn, nameFr, descriptionEn, descriptionFr, coverImageUrl, bookingFeeRateOverride, isActive, sortOrder, packages, addons]
+          unevaluatedProperties: false
+          properties:
+            packages:
+              type: array
+              items: { $ref: '#/schemas/AdminPackage' }
+            addons:
+              type: array
+              items: { $ref: '#/schemas/AdminAddon' }
+      sharedAddons:
+        type: array
+        description: Add-ons offered on every service (`serviceId` null).
+        items: { $ref: '#/schemas/AdminAddon' }
+
+  PackageSaved:
+    type: object
+    description: |
+      The saved package, and a warning when it is longer than every open day
+      (spec §6.8): saving is allowed, but no client will ever see a slot for it.
+    required: [package, warning]
+    additionalProperties: false
+    properties:
+      package: { $ref: '#/schemas/AdminPackage' }
+      warning:
+        oneOf:
+          - type: 'null'
+          - type: object
+            required: [code, longestWindow]
+            additionalProperties: false
+            properties:
+              code: { const: duration_exceeds_longest_window }
+              longestWindow:
+                description: The longest open window, in minutes after Kigali midnight; null with no open day at all.
+                oneOf:
+                  - type: 'null'
+                  - type: object
+                    required: [opensMinute, closesMinute]
+                    additionalProperties: false
+                    properties:
+                      opensMinute: { type: integer }
+                      closesMinute: { type: integer }
+
+  ServiceWrite:
+    type: object
+    description: |
+      Create requires `slug` and `nameEn`; an update sends any subset. Blank
+      optional text is stored as null. Unknown keys are a 400.
+    additionalProperties: false
+    properties:
+      slug:
+        type: string
+        maxLength: 100
+        pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        description: Lowercase words joined by single hyphens. Unique; a taken slug is 409 `slug_taken`.
+      nameEn: { type: string, minLength: 1, maxLength: 200 }
+      nameFr: { type: [string, 'null'], maxLength: 200 }
+      descriptionEn: { type: [string, 'null'], maxLength: 5000 }
+      descriptionFr: { type: [string, 'null'], maxLength: 5000 }
+      coverImageUrl:
+        type: [string, 'null']
+        format: uri
+        description: A pasted link to an image hosted elsewhere. Must be `https:`; `http:` is a 422.
+      bookingFeeRateOverride:
+        type: [number, 'null']
+        minimum: 0
+        maximum: 1
+        description: At most three decimal places. Null uses the global rate.
+      isActive: { type: boolean }
+      sortOrder: { type: integer, minimum: 0 }
+
+  PackageWrite:
+    type: object
+    description: Create requires `serviceId`, `nameEn`, `priceRwf`, `photoCount` and `durationMinutes`; `serviceId` cannot be changed later.
+    additionalProperties: false
+    properties:
+      serviceId:
+        $ref: 'common.yaml#/schemas/Uuid'
+        description: Create only. A service that does not exist is a 422 naming `serviceId`.
+      nameEn: { type: string, minLength: 1, maxLength: 200 }
+      nameFr: { type: [string, 'null'], maxLength: 200 }
+      descriptionEn: { type: [string, 'null'], maxLength: 5000 }
+      descriptionFr: { type: [string, 'null'], maxLength: 5000 }
+      priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      photoCount: { type: integer, minimum: 0 }
+      durationMinutes: { type: integer, minimum: 1 }
+      isActive: { type: boolean }
+      sortOrder: { type: integer, minimum: 0 }
+
+  AddonWrite:
+    type: object
+    description: Create requires `serviceId` (null for every service), `nameEn` and `priceRwf`; `serviceId` cannot be changed later.
+    additionalProperties: false
+    properties:
+      serviceId:
+        type: [string, 'null']
+        format: uuid
+        description: Create only.
+      nameEn: { type: string, minLength: 1, maxLength: 200 }
+      nameFr: { type: [string, 'null'], maxLength: 200 }
+      priceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      isActive: { type: boolean }
+      sortOrder: { type: integer, minimum: 0 }

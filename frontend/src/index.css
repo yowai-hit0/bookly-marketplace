@@ -1,0 +1,959 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+/* Geist and Geist Mono: the admin console's faces (admin-console.md) and,
+   since the client front redesign (client-front.md), the client's too. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* `dark:` means the client's dark theme, and `client:` anything on a client
+   page (design-system/bookly/client-front.md decision 11). `ClientShell` sets
+   `<html data-theme>`; the admin never does, so neither variant can match on
+   an admin page, and the shared primitives can carry client-only rendering
+   without changing the admin by a pixel. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+@custom-variant client (&:where([data-theme], [data-theme] *));
+
+@theme {
+    /* Client motion (client-front.md section 6). Used only behind
+       `motion-safe:`, so nothing moves under reduced motion. */
+    --animate-fade-up: client-fade-up 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    --animate-pop: client-pop 300ms ease;
+    --animate-tick: client-tick 250ms cubic-bezier(0.2, 0.7, 0.2, 1.4) both;
+    --animate-rise: client-rise 350ms ease both;
+    --animate-draw: client-draw 600ms ease-out 350ms forwards;
+
+    @keyframes client-fade-up {
+        from {
+            opacity: 0;
+            transform: translateY(16px);
+        }
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+    @keyframes client-pop {
+        0% {
+            transform: scale(1);
+        }
+        40% {
+            transform: scale(1.04);
+        }
+        100% {
+            transform: scale(1);
+        }
+    }
+    @keyframes client-tick {
+        from {
+            opacity: 0;
+            transform: scale(0.4);
+        }
+        to {
+            opacity: 1;
+            transform: scale(1);
+        }
+    }
+    @keyframes client-rise {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
+        }
+        to {
+            opacity: 1;
+            transform: none;
+        }
+    }
+    @keyframes client-draw {
+        to {
+            stroke-dashoffset: 0;
+        }
+    }
+}
+
+@theme inline {
+    --font-heading: 'Geist Variable', system-ui, sans-serif;
+    --font-sans: 'Geist Variable', system-ui, sans-serif;
+    /* Client colours (client-front.md section 2.3). */
+    --color-primary-hover: var(--primary-hover);
+    --color-brand: var(--brand);
+    --color-brand-hover: var(--brand-hover);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-subtle-foreground: var(--subtle-foreground);
+    --color-selected: var(--selected);
+    --color-selected-edge: var(--selected-edge);
+    --color-band: var(--band);
+    --color-band-foreground: var(--band-foreground);
+    --color-band-muted: var(--band-muted);
+    --color-band-accent: var(--band-accent);
+    --color-band-edge: var(--band-edge);
+    --color-dot: var(--dot);
+    /* Admin console colours: defined only under `:root[data-admin-theme]`
+       below, so these utilities resolve to nothing outside the admin. */
+    --color-console-surface: var(--console-surface);
+    --color-console-chip: var(--console-chip);
+    --color-console-border-strong: var(--console-border-strong);
+    --color-console-link: var(--console-link);
+    --color-console-link-hover: var(--console-link-hover);
+    --color-console-accent: var(--console-accent);
+    --color-console-accent-foreground: var(--console-accent-foreground);
+    --color-console-info-foreground: var(--console-info-foreground);
+    --color-console-info-icon: var(--console-info-icon);
+    --color-console-accent-strong: var(--console-accent-strong);
+    --color-console-success: var(--console-success);
+    --color-console-success-tint: var(--console-success-tint);
+    --color-console-warning: var(--console-warning);
+    --color-console-warning-tint: var(--console-warning-tint);
+    --color-console-danger-tint: var(--console-danger-tint);
+    --color-console-danger-solid: var(--console-danger-solid);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* The client's tokens (design-system/bookly/client-front.md section 2), in
+   light and dark. `ClientShell` sets `<html data-theme>` to the resolved
+   theme while a client page is mounted. Plain `:root` carries the light
+   values too, so the first paint and jsdom tests have sane tokens.
+
+   Until 2026-09-27 this file held a swapped pair here (commit dc69157): the
+   old sky palette sat under `.dark`, which nothing applied, and `:root` held
+   shadcn's stock neutral dark, which is why the client rendered dark.
+
+   The `--console-*` names are the admin's family tokens, defined here too so
+   the shared console variants (status badge, banner, badges) render on client
+   pages. The admin's own blocks below come later at equal or higher
+   specificity, so on an admin page they win. */
+:root,
+:root[data-theme="light"] {
+    color-scheme: light;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.2103 0.0059 285.89);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.2103 0.0059 285.89);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.2103 0.0059 285.89);
+    --primary: oklch(0.2103 0.0059 285.89);
+    --primary-foreground: oklch(1 0 0);
+    --primary-hover: oklch(0.3703 0.0119 285.81);
+    --secondary: oklch(0.9674 0.0013 286.38);
+    --secondary-foreground: oklch(0.2103 0.0059 285.89);
+    --muted: oklch(0.9674 0.0013 286.38);
+    --muted-foreground: oklch(0.5517 0.0138 285.94);
+    --accent: oklch(0.9851 0 0);
+    --accent-foreground: oklch(0.2103 0.0059 285.89);
+    --destructive: oklch(0.5054 0.1905 27.52);
+    --border: oklch(0.9197 0.004 286.32);
+    --input: oklch(0.6493 0.0118 286.07);
+    --ring: oklch(0.5413 0.2466 293.01);
+    --radius: 0.125rem;
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.9851 0 0);
+    --sidebar-foreground: oklch(0.2103 0.0059 285.89);
+    --sidebar-primary: oklch(0.9522 0.0245 298.61);
+    --sidebar-primary-foreground: oklch(0.4907 0.2412 292.58);
+    --sidebar-accent: oklch(0.9674 0.0013 286.38);
+    --sidebar-accent-foreground: oklch(0.2103 0.0059 285.89);
+    --sidebar-border: oklch(0.9197 0.004 286.32);
+    --sidebar-ring: oklch(0.5413 0.2466 293.01);
+
+    --console-surface: oklch(0.9851 0 0);
+    --console-chip: oklch(0.9674 0.0013 286.38);
+    --console-border-strong: oklch(0.8711 0.0055 286.29);
+    --console-link: oklch(0.4907 0.2412 292.58);
+    --console-link-hover: oklch(0.3796 0.1783 293.74);
+    --console-accent: oklch(0.9522 0.0245 298.61);
+    --console-accent-foreground: oklch(0.4907 0.2412 292.58);
+    --console-info-foreground: oklch(0.2103 0.0059 285.89);
+    --console-info-icon: oklch(0.5413 0.2466 293.01);
+    --console-accent-strong: oklch(0.5413 0.2466 293.01);
+    --console-success: oklch(0.5273 0.1371 150.07);
+    --console-success-tint: oklch(0.9662 0.0189 157.88);
+    --console-warning: oklch(0.5553 0.1455 49);
+    --console-warning-tint: oklch(0.9869 0.0214 95.28);
+    --console-danger-tint: oklch(0.9705 0.0129 17.38);
+    --console-danger-solid: oklch(0.5054 0.1905 27.52);
+
+    --brand: oklch(0.5413 0.2466 293.01);
+    --brand-hover: oklch(0.4907 0.2412 292.58);
+    --brand-foreground: oklch(1 0 0);
+    --subtle-foreground: oklch(0.4419 0.0146 285.79);
+    --selected: oklch(0.9707 0.0164 301.22);
+    --selected-edge: oklch(0.5413 0.2466 293.01);
+    --band: oklch(0.1452 0.0021 286.13);
+    --band-foreground: oklch(0.9674 0.0013 286.38);
+    --band-muted: oklch(0.7118 0.0129 286.07);
+    --band-accent: oklch(0.7679 0.1322 294.45);
+    --band-edge: oklch(0.3703 0.0119 285.81);
+    --dot: oklch(0.9197 0.004 286.32);
+
+    --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --background: oklch(0.1452 0.0021 286.13);
+    --foreground: oklch(0.9674 0.0013 286.38);
+    --card: oklch(0.1452 0.0021 286.13);
+    --card-foreground: oklch(0.9674 0.0013 286.38);
+    --popover: oklch(0.1876 0.004 286.01);
+    --popover-foreground: oklch(0.9674 0.0013 286.38);
+    --primary: oklch(0.9851 0 0);
+    --primary-foreground: oklch(0.1452 0.0021 286.13);
+    --primary-hover: oklch(0.9197 0.004 286.32);
+    --secondary: oklch(0.2739 0.0055 286.03);
+    --secondary-foreground: oklch(0.9674 0.0013 286.38);
+    --muted: oklch(0.2739 0.0055 286.03);
+    --muted-foreground: oklch(0.7118 0.0129 286.07);
+    --accent: oklch(0.1876 0.004 286.01);
+    --accent-foreground: oklch(0.9674 0.0013 286.38);
+    --destructive: oklch(0.7106 0.1661 22.22);
+    --border: oklch(0.2739 0.0055 286.03);
+    --input: oklch(0.5025 0.0126 285.94);
+    --ring: oklch(0.7679 0.1322 294.45);
+    --sidebar: oklch(0.1452 0.0021 286.13);
+    --sidebar-foreground: oklch(0.9674 0.0013 286.38);
+    --sidebar-primary: oklch(0.3364 0.1647 288.7);
+    --sidebar-primary-foreground: oklch(0.857 0.0795 295.94);
+    --sidebar-accent: oklch(0.1876 0.004 286.01);
+    --sidebar-accent-foreground: oklch(0.9674 0.0013 286.38);
+    --sidebar-border: oklch(0.2739 0.0055 286.03);
+    --sidebar-ring: oklch(0.7679 0.1322 294.45);
+
+    --console-surface: oklch(0.1876 0.004 286.01);
+    --console-chip: oklch(0.2739 0.0055 286.03);
+    --console-border-strong: oklch(0.3703 0.0119 285.81);
+    --console-link: oklch(0.7679 0.1322 294.45);
+    --console-link-hover: oklch(0.857 0.0795 295.94);
+    --console-accent: oklch(0.3364 0.1647 288.7);
+    --console-accent-foreground: oklch(0.857 0.0795 295.94);
+    --console-info-foreground: oklch(0.9674 0.0013 286.38);
+    --console-info-icon: oklch(0.9674 0.0013 286.38);
+    --console-accent-strong: oklch(0.432 0.2106 292.76);
+    --console-success: oklch(0.8003 0.1821 151.71);
+    --console-success-tint: oklch(0.2718 0.0501 155.43);
+    --console-warning: oklch(0.8369 0.1644 84.43);
+    --console-warning-tint: oklch(0.2535 0.0317 82.37);
+    --console-danger-tint: oklch(0.2189 0.0398 12.97);
+    --console-danger-solid: oklch(0.5771 0.2152 27.33);
+
+    --subtle-foreground: oklch(0.7118 0.0129 286.07);
+    --selected: oklch(0.2107 0.0575 293.11);
+    --selected-edge: oklch(0.7679 0.1322 294.45);
+    --band: oklch(0.1876 0.004 286.01);
+    --dot: oklch(0.2739 0.0055 286.03);
+}
+
+/* The admin console (design-system/bookly/admin-console.md section 2).
+   `src/admin/theme.ts` sets `data-admin-theme` on <html> only while an admin
+   route is mounted, and removes it on the way out, so nothing below reaches a
+   client page. The client's blocks above and the `dark:` variant are keyed on
+   `data-theme`, which an admin page never sets (client-front.md decision 11). */
+:root[data-admin-theme="dark"] {
+    color-scheme: dark;
+    --background: oklch(0.1452 0.0021 286.13);
+    --foreground: oklch(0.9674 0.0013 286.38);
+    --card: oklch(0.1452 0.0021 286.13);
+    --card-foreground: oklch(0.9674 0.0013 286.38);
+    --popover: oklch(0.1876 0.004 286.01);
+    --popover-foreground: oklch(0.9674 0.0013 286.38);
+    --primary: oklch(0.9851 0 0);
+    --primary-foreground: oklch(0.1452 0.0021 286.13);
+    --secondary: oklch(0.2739 0.0055 286.03);
+    --secondary-foreground: oklch(0.9674 0.0013 286.38);
+    --muted: oklch(0.2739 0.0055 286.03);
+    --muted-foreground: oklch(0.7118 0.0129 286.07);
+    --accent: oklch(0.1876 0.004 286.01);
+    --accent-foreground: oklch(0.9674 0.0013 286.38);
+    --destructive: oklch(0.7106 0.1661 22.22);
+    --border: oklch(0.2739 0.0055 286.03);
+    --input: oklch(0.5025 0.0126 285.94);
+    --ring: oklch(0.7679 0.1322 294.45);
+    --radius: 0.125rem;
+    --sidebar: oklch(0.1452 0.0021 286.13);
+    --sidebar-foreground: oklch(0.9674 0.0013 286.38);
+    --sidebar-primary: oklch(0.3364 0.1647 288.7);
+    --sidebar-primary-foreground: oklch(0.857 0.0795 295.94);
+    --sidebar-accent: oklch(0.1876 0.004 286.01);
+    --sidebar-accent-foreground: oklch(0.9674 0.0013 286.38);
+    --sidebar-border: oklch(0.2739 0.0055 286.03);
+    --sidebar-ring: oklch(0.7679 0.1322 294.45);
+
+    --console-surface: oklch(0.1876 0.004 286.01);
+    --console-chip: oklch(0.2739 0.0055 286.03);
+    --console-border-strong: oklch(0.3703 0.0119 285.81);
+    --console-link: oklch(0.7679 0.1322 294.45);
+    --console-link-hover: oklch(0.857 0.0795 295.94);
+    --console-accent: oklch(0.3364 0.1647 288.7);
+    --console-accent-foreground: oklch(0.857 0.0795 295.94);
+    --console-info-foreground: oklch(0.9674 0.0013 286.38);
+    --console-info-icon: oklch(0.9674 0.0013 286.38);
+    --console-accent-strong: oklch(0.432 0.2106 292.76);
+    --console-success: oklch(0.8003 0.1821 151.71);
+    --console-success-tint: oklch(0.2718 0.0501 155.43);
+    --console-warning: oklch(0.8369 0.1644 84.43);
+    --console-warning-tint: oklch(0.2535 0.0317 82.37);
+    --console-danger-tint: oklch(0.2189 0.0398 12.97);
+    --console-danger-solid: oklch(0.5771 0.2152 27.33);
+}
+
+:root[data-admin-theme="light"] {
+    color-scheme: light;
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.2103 0.0059 285.89);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.2103 0.0059 285.89);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.2103 0.0059 285.89);
+    --primary: oklch(0.2103 0.0059 285.89);
+    --primary-foreground: oklch(1 0 0);
+    --secondary: oklch(0.9674 0.0013 286.38);
+    --secondary-foreground: oklch(0.2103 0.0059 285.89);
+    --muted: oklch(0.9674 0.0013 286.38);
+    --muted-foreground: oklch(0.5517 0.0138 285.94);
+    --accent: oklch(0.9851 0 0);
+    --accent-foreground: oklch(0.2103 0.0059 285.89);
+    --destructive: oklch(0.5054 0.1905 27.52);
+    --border: oklch(0.9197 0.004 286.32);
+    --input: oklch(0.6493 0.0118 286.07);
+    --ring: oklch(0.5413 0.2466 293.01);
+    --radius: 0.125rem;
+    --sidebar: oklch(0.9851 0 0);
+    --sidebar-foreground: oklch(0.2103 0.0059 285.89);
+    --sidebar-primary: oklch(0.9522 0.0245 298.61);
+    --sidebar-primary-foreground: oklch(0.5413 0.2466 293.01);
+    --sidebar-accent: oklch(0.9674 0.0013 286.38);
+    --sidebar-accent-foreground: oklch(0.2103 0.0059 285.89);
+    --sidebar-border: oklch(0.9197 0.004 286.32);
+    --sidebar-ring: oklch(0.5413 0.2466 293.01);
+
+    --console-surface: oklch(0.9851 0 0);
+    --console-chip: oklch(0.9674 0.0013 286.38);
+    --console-border-strong: oklch(0.8711 0.0055 286.29);
+    --console-link: oklch(0.5413 0.2466 293.01);
+    --console-link-hover: oklch(0.432 0.2106 292.76);
+    --console-accent: oklch(0.9522 0.0245 298.61);
+    --console-accent-foreground: oklch(0.5413 0.2466 293.01);
+    --console-info-foreground: oklch(0.2103 0.0059 285.89);
+    --console-info-icon: oklch(0.5413 0.2466 293.01);
+    --console-accent-strong: oklch(0.5413 0.2466 293.01);
+    --console-success: oklch(0.5273 0.1371 150.07);
+    --console-success-tint: oklch(0.9662 0.0189 157.88);
+    --console-warning: oklch(0.5553 0.1455 49);
+    --console-warning-tint: oklch(0.9734 0.0209 79.1);
+    --console-danger-tint: oklch(0.9566 0.0185 17.48);
+    --console-danger-solid: oklch(0.5054 0.1905 27.52);
+}
+
+:root[data-admin-theme] {
+    --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --console-font-sans: 'Geist Variable', system-ui, sans-serif;
+}
+
+/* One focus indicator in the admin: a 2px violet outline, offset 2px, in both
+   themes (9.12:1 dark, 5.70:1 light). Unlayered on purpose, so it wins over
+   the `outline-none` the shadcn primitives carry; it also zeroes their 50%
+   ring halo, so there are not two indicators. Anything focused by script
+   (`tabindex="-1"`: the content wrapper, headings) is left without one. */
+:root[data-admin-theme] :focus-visible:not([tabindex="-1"]) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    --tw-ring-shadow: 0 0 #0000;
+}
+
+@layer base {
+  /* Geist for everything in the admin, headings included. In the base layer,
+     so a utility on the element (`font-mono` on the booking reference `h1`)
+     still wins. */
+  :root[data-admin-theme] {
+    font-family: var(--console-font-sans);
+  }
+  :root[data-admin-theme] :is(h1, h2, h3) {
+    font-family: var(--console-font-sans);
+  }
+  /* Outline icons at 1.5px with square caps, as the style guide draws them.
+     A presentation attribute (`stroke-width="2"`) loses to any stylesheet
+     rule, so this needs no `!important`. */
+  :root[data-admin-theme] svg.lucide {
+    stroke-width: 1.5;
+    stroke-linecap: square;
+  }
+}
+
+@layer utilities {
+  /* `font-heading` inlines Poppins; inside the admin it is Geist too. */
+  :root[data-admin-theme] .font-heading {
+    font-family: var(--console-font-sans);
+  }
+  /* The shared popover (the stage legend) is a raised surface with a hairline
+     in the console: no shadow in dark, the faintest one in light. It portals
+     into <body>, which is why the admin tokens live on <html>. */
+  :root[data-admin-theme] [data-slot="popover-content"] {
+    background-color: var(--popover);
+    box-shadow: none;
+  }
+  :root[data-admin-theme="light"] [data-slot="popover-content"] {
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.06);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+  h1,
+  h2,
+  h3 {
+    @apply font-heading;
+    }
+}
+
+/* The client (design-system/bookly/client-front.md section 4): the admin's
+   one focus indicator re-scoped to client pages, a 2px violet outline offset
+   2px (5.70:1 light, 9.12:1 dark on the canvas). Unlayered, so it wins over
+   the primitives' `outline-none`, and it zeroes their 50% ring halo. Anything
+   focused by script (`tabindex="-1"`) is left without one, and so is an
+   element that hands its outline to a parent that draws it
+   (`data-focus-ring="parent"`: a stretched card link, a hidden radio). */
+:root[data-theme] :focus-visible:not([tabindex="-1"], [data-focus-ring="parent"]) {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    --tw-ring-shadow: 0 0 #0000;
+}
+
+@layer base {
+  /* Outline icons at 1.5px with square caps, as on the boards. */
+  :root[data-theme] svg.lucide {
+    stroke-width: 1.5;
+    stroke-linecap: square;
+  }
+  /* Tabular figures wherever the mono face sets data. */
+  :root[data-theme] .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Popovers (the stage legend) are a raised surface with a hairline: flat. */
+  :root[data-theme] [data-slot="popover-content"] {
+    background-color: var(--popover);
+    box-shadow: none;
+  }
+}
+/* FullCalendar (admin calendar, Task 9), in the admin console's look
+   (design-system/bookly/admin-console.md 6.9, pages/admin-calendar.md). The
+   calendar only ever renders inside the admin, so the `--console-*` tokens it
+   reads are always defined. Square cells on a hairline grid, mono hour labels
+   and date numbers, today as a violet date chip (not a tinted cell), events
+   as square chips with a 3px edge in their status colour, and the toolbar as
+   joined strips with a segmented view switch.
+   `calendar-events.ts` is protected and already sets a background/border/text
+   colour inline on every event (its `COLOURS` map); FullCalendar applies those
+   as literal inline styles on the event element (`elStyle` in
+   `@fullcalendar/core`'s `StandardEvent`), which beats any class selector, so
+   the event colours below use `!important` -- the only way to change an
+   event's look from here without editing that file. FullCalendar injects its
+   own stylesheet ahead of this one, so a rule here at the same specificity
+   wins without it. */
+.fc {
+    --fc-border-color: var(--border);
+    --fc-page-bg-color: var(--background);
+    --fc-neutral-bg-color: var(--console-surface);
+    --fc-neutral-text-color: var(--muted-foreground);
+    --fc-today-bg-color: transparent;
+    /* Fallback only: every event supplies its own colour via `COLOURS`, and
+       the `.bookly-event` rules below override that. */
+    --fc-event-bg-color: var(--console-surface);
+    --fc-event-border-color: var(--border);
+    --fc-event-text-color: var(--foreground);
+    /* Focus is the admin's violet outline alone, not a darkening overlay too. */
+    --fc-event-selected-overlay-color: transparent;
+    font-size: 0.875rem;
+}
+
+/* The toolbar ------------------------------------------------------------ */
+
+.fc .fc-toolbar.fc-header-toolbar {
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+/* The period on show, the calendar's section heading: Geist 20px / 500. */
+.fc .fc-toolbar-title {
+    font-family: inherit;
+    font-size: 1.25rem;
+    font-weight: 500;
+    line-height: 1.75rem;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Console buttons: square, 44px below `lg` and on touch, 40px from `lg`,
+   Geist 15px / 500, the outline edge of the style guide, no shadow. */
+.fc .fc-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.75rem;
+    padding: 0 0.875rem;
+    border-radius: 0;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    text-transform: none;
+    box-shadow: none;
+}
+
+@media (min-width: 64rem) {
+    .fc .fc-button {
+        height: 2.5rem;
+    }
+}
+
+@media (pointer: coarse) {
+    .fc .fc-button {
+        height: 2.75rem;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .fc .fc-button {
+        transition:
+            color 150ms ease,
+            background-color 150ms ease,
+            border-color 150ms ease;
+    }
+}
+
+.fc .fc-button-primary,
+.fc .fc-button-primary:disabled {
+    background-color: transparent;
+    border-color: var(--console-border-strong);
+    color: var(--foreground);
+}
+
+.fc .fc-button-primary:not(:disabled):hover,
+.fc .fc-button-primary:not(:disabled):active {
+    background-color: var(--muted);
+    border-color: var(--console-border-strong);
+    color: var(--foreground);
+}
+
+.fc .fc-button:disabled {
+    opacity: 0.5;
+}
+
+/* The view switch's selected segment: the inverted neutral fill. It is a
+   selected state, so violet is not needed; `aria-pressed` carries it too. */
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+    background-color: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+}
+
+/* One focus indicator: the admin's violet outline (index.css, above), not
+   FullCalendar's grey halo as well. */
+.fc .fc-button:focus,
+.fc .fc-button-primary:focus,
+.fc .fc-button-primary:not(:disabled).fc-button-active:focus,
+.fc .fc-button-primary:not(:disabled):active:focus {
+    box-shadow: none;
+}
+
+/* Previous / next: square, with lucide's 1.5px chevrons in place of
+   FullCalendar's icon font, drawn in the button's text colour. */
+.fc .fc-prev-button,
+.fc .fc-next-button {
+    width: 2.75rem;
+    padding: 0;
+}
+
+@media (min-width: 64rem) {
+    .fc .fc-prev-button,
+    .fc .fc-next-button {
+        width: 2.5rem;
+    }
+}
+
+@media (pointer: coarse) {
+    .fc .fc-prev-button,
+    .fc .fc-next-button {
+        width: 2.75rem;
+    }
+}
+
+.fc .fc-button .fc-icon {
+    width: 1rem;
+    height: 1rem;
+    font-size: 1rem;
+    background-color: currentColor;
+    -webkit-mask: var(--fc-console-chevron) center / 1rem 1rem no-repeat;
+    mask: var(--fc-console-chevron) center / 1rem 1rem no-repeat;
+}
+
+.fc .fc-button .fc-icon::before {
+    content: none;
+}
+
+.fc .fc-icon-chevron-left {
+    --fc-console-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='square'%3E%3Cpath d='m15 18-6-6 6-6'/%3E%3C/svg%3E");
+}
+
+.fc .fc-icon-chevron-right {
+    --fc-console-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='square'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
+}
+
+/* Previous, next and today are one joined strip: "today" loses the gap
+   FullCalendar puts before it and shares its edge with "next". */
+.fc .fc-toolbar-chunk:first-child {
+    display: flex;
+}
+
+.fc .fc-toolbar-chunk:first-child > .fc-today-button {
+    margin-left: -1px;
+}
+
+/* A phone (below `sm`): the period on its own line, then the two strips,
+   each growing to fill its row, and wrapping to a row each where they do
+   not both fit (320px). */
+@media (max-width: 39.999rem) {
+    .fc .fc-toolbar.fc-header-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .fc .fc-toolbar-chunk:nth-child(2) {
+        order: -1;
+        flex-basis: 100%;
+    }
+
+    .fc .fc-toolbar-chunk:first-child,
+    .fc .fc-toolbar-chunk:last-child {
+        display: flex;
+        flex: 1 1 auto;
+    }
+
+    .fc .fc-toolbar-chunk:first-child > .fc-today-button,
+    .fc .fc-toolbar-chunk:last-child > .fc-button-group {
+        flex: 1 1 auto;
+    }
+
+    .fc .fc-toolbar-chunk:last-child > .fc-button-group > .fc-button {
+        flex: 1 1 0;
+        padding: 0 0.75rem;
+    }
+}
+
+/* The grid ---------------------------------------------------------------- */
+
+/* Column heads read like the console's table headers: mono, uppercase,
+   muted, left-aligned. In week and day view they link to the day. */
+.fc .fc-col-header-cell {
+    text-align: left;
+}
+
+.fc .fc-col-header-cell-cushion {
+    margin: 0.375rem 0.25rem;
+    padding: 0.25rem 0.375rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted-foreground);
+}
+
+/* Date numbers: mono, tabular, top left of the cell. */
+.fc .fc-daygrid-day-top {
+    flex-direction: row;
+}
+
+.fc .fc-daygrid-day-number {
+    min-width: 1.5rem;
+    margin: 0.375rem 0.375rem 0.125rem;
+    padding: 0.125rem 0.375rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    color: var(--foreground);
+}
+
+.fc .fc-daygrid-month-start {
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+/* Days of the next and last month: muted, and still readable (4.5:1 or
+   better on the canvas), rather than FullCalendar's 30% opacity. */
+.fc .fc-day-other .fc-daygrid-day-top {
+    opacity: 1;
+}
+
+.fc .fc-day-other .fc-daygrid-day-number {
+    color: var(--muted-foreground);
+}
+
+/* Today: a violet date chip in the console link colour, with the canvas
+   colour on it (9.12:1 dark, 5.70:1 light, white on violet), in the month
+   grid and on the week and day column heads. The cell itself is not tinted. */
+.fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number,
+.fc .fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion {
+    background-color: var(--console-link);
+    color: var(--background);
+}
+
+/* Month cells keep a calm, even height (the all-day row of the hourly grids
+   is a day grid too, and stays as short as its content). */
+.fc .fc-dayGridMonth-view .fc-daygrid-day-frame {
+    min-height: 5.5rem;
+}
+
+@media (min-width: 64rem) {
+    .fc .fc-dayGridMonth-view .fc-daygrid-day-frame {
+        min-height: 7rem;
+    }
+}
+
+/* Fit to the screen (1280x720 and up, admin console fixes item 4): the month
+   stretches or shrinks its weeks to the height it is given, and busy days fold
+   into "+N more", so there is no minimum to push it past that height. */
+.bookly-calendar-fit .fc .fc-dayGridMonth-view .fc-daygrid-day-frame {
+    min-height: 0;
+}
+
+/* Below `lg` and on touch every date link is 44px tall to a thumb. A
+   transparent border makes up the height, and the chip (today's violet
+   fill) stays the size of the number, on the padding box. */
+@media (max-width: 63.999rem), (pointer: coarse) {
+    .fc a.fc-daygrid-day-number[data-navlink],
+    .fc a.fc-col-header-cell-cushion[data-navlink] {
+        min-width: 2rem;
+        margin: 0;
+        border: solid transparent;
+        border-width: 0.625rem 0.25rem;
+        background-clip: padding-box;
+    }
+}
+
+/* A phone's columns are 33-50px wide: the column heads drop their tracking
+   and a size, and wrap ("MON / 5 / OCT") inside the column. */
+@media (max-width: 39.999rem) {
+    .fc .fc-col-header-cell-cushion {
+        margin: 0.375rem 0.125rem;
+        padding: 0.125rem;
+        font-size: 0.6875rem;
+        letter-spacing: 0;
+    }
+
+    .fc a.fc-col-header-cell-cushion[data-navlink] {
+        margin: 0;
+        border-left-width: 0.125rem;
+        border-right-width: 0.125rem;
+    }
+}
+
+/* The hourly grids: an hour is 56px, so an hour's booking has room for its
+   time, name and status; hour labels mono, muted, tabular, at the top of
+   their hour. */
+.fc .fc-timegrid-slot {
+    height: 1.75rem;
+}
+
+.fc .fc-timegrid-slot-label {
+    vertical-align: top;
+}
+
+.fc .fc-timegrid-slot-label-cushion,
+.fc .fc-timegrid-axis-cushion {
+    padding: 0.25rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted-foreground);
+}
+
+.fc .fc-timegrid-axis-cushion {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+@media (max-width: 39.999rem) {
+    .fc .fc-timegrid-slot-label-cushion,
+    .fc .fc-timegrid-axis-cushion {
+        padding: 0.25rem 0.25rem;
+        font-size: 0.6875rem;
+    }
+
+    .fc .fc-timegrid-axis-cushion {
+        letter-spacing: 0;
+    }
+}
+
+/* Events ------------------------------------------------------------------ */
+
+/* Square chips on the raised surface, a hairline edge and a 3px edge on the
+   left in the status colour: the one side edge the admin allows, since it is
+   the status key in a dense grid and the word and icon are inside the event
+   as well. Text is the text colour on every fill (13px title, mono time). */
+.fc .bookly-event {
+    border-radius: 0;
+    border-left-width: 3px;
+    background-color: var(--console-surface) !important;
+    border-color: var(--border) !important;
+    cursor: pointer;
+}
+
+.fc .bookly-event .fc-event-main {
+    padding: 0;
+    color: var(--foreground) !important;
+}
+
+/* Status edges (admin-console.md section 5). Apart without colour too: the
+   hold is dashed with no fill, a block is hatched, and each carries its own
+   icon and word. */
+.fc .bookly-event--confirmed,
+.fc .bookly-event--completed {
+    border-left-color: var(--console-success) !important;
+}
+
+.fc .bookly-event--no_show {
+    border-left-color: var(--destructive) !important;
+}
+
+/* A hold is unpaid and may lapse: no fill (the canvas) and a dashed edge in
+   the 3:1 field grey, left edge included. */
+.fc .bookly-event--pending_payment {
+    background-color: var(--background) !important;
+    border-color: var(--input) !important;
+    border-style: dashed;
+}
+
+/* A block is not a status: the raised surface under a diagonal hatch in the
+   hairline colour, so "blocked" reads as a pattern rather than a colour, and
+   a muted left edge. Its words stay in the text colour, which clears 4.5:1
+   on the stripes as well as between them in both themes. */
+.fc .bookly-event--block {
+    border-left-color: var(--muted-foreground) !important;
+    background-image: repeating-linear-gradient(
+        45deg,
+        var(--border),
+        var(--border) 2px,
+        transparent 2px,
+        transparent 8px
+    );
+}
+
+/* Every event opens something -- a booking its own page, a block the page
+   that edits it -- and FullCalendar puts each one in the tab order. Hover
+   strengthens the chip's edge (fills stay put, so no text loses contrast);
+   the admin's violet focus outline is drawn inside the box, where a
+   neighbouring event cannot cover it, and FullCalendar's focus shadow goes. */
+@media (prefers-reduced-motion: no-preference) {
+    .fc .bookly-event {
+        transition: border-color 150ms ease;
+    }
+}
+
+.fc .bookly-event:hover {
+    border-top-color: var(--muted-foreground) !important;
+    border-right-color: var(--muted-foreground) !important;
+    border-bottom-color: var(--muted-foreground) !important;
+}
+
+.fc .bookly-event:focus {
+    box-shadow: none;
+}
+
+.fc .fc-event.bookly-event:focus-visible {
+    outline-offset: -2px;
+}
+
+/* FullCalendar's 1px canvas ring between overlapping hourly events: a
+   separation line, not elevation, so it stays. */
+.fc .fc-timegrid-event-harness-inset .bookly-event {
+    box-shadow: 0 0 0 1px var(--fc-page-bg-color);
+}
+
+/* A booking inside a block (spec §6.4): a 2px danger outline, visible at any
+   event size and on every fill above (7.15:1 dark, 6.47:1 light on the
+   canvas). It is drawn as a hard inset line inside the edges, not as an
+   `outline`, so the 3px status edge stays whole beside it and the violet
+   focus outline never replaces it. No status uses a 2px danger edge of its
+   own, so this stays the one place that does. */
+.fc .bookly-event.bookly-event--conflict {
+    box-shadow: inset 0 0 0 2px var(--destructive);
+}
+
+.fc .fc-timegrid-event-harness-inset .bookly-event.bookly-event--conflict {
+    box-shadow:
+        inset 0 0 0 2px var(--destructive),
+        0 0 0 1px var(--fc-page-bg-color);
+}
+
+/* Month cells: events 4px in from the cell's sides and apart. */
+.fc-direction-ltr .fc-daygrid-event.bookly-event {
+    margin: 0.25rem 0.25rem 0;
+}
+
+/* A phone's month cell is about 40px wide: the chip hugs the cell, and is
+   44px tall to a thumb below `lg` and on touch. */
+@media (max-width: 39.999rem) {
+    .fc-direction-ltr .fc-daygrid-event.bookly-event {
+        margin: 0.125rem 0.0625rem 0;
+    }
+}
+
+@media (max-width: 63.999rem), (pointer: coarse) {
+    .fc .fc-daygrid-event.bookly-event {
+        min-height: 2.75rem;
+    }
+}

@@ -1,0 +1,10 @@
+/* The API reference page (api/index.md, layout: page, pageClass set) hands its
+   whole canvas to the embedded Redoc frame: no page padding, no width cap. */
+.api-reference-page {
+  padding: 0 !important;
+}
+.api-reference-page .VPPage {
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+}

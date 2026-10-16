@@ -1,0 +1,543 @@
+# The bookings list, one booking, and every lifecycle action. All require the
+# admin bearer token. Every action answers the booking as it now stands (200),
+# or a 409 carrying that same booking when it refuses.
+
+list:
+  get:
+    operationId: listBookings
+    tags: [Admin bookings]
+    summary: List bookings
+    description: Filtered by stage, status and shoot date, searched by reference, name, email or phone, and paged by number with a total.
+    parameters:
+      - name: stage
+        in: query
+        description: Repeatable. Display stages (see `BookingStage`).
+        schema:
+          oneOf:
+            - $ref: ../components/common.yaml#/schemas/BookingStage
+            - type: array
+              items: { $ref: ../components/common.yaml#/schemas/BookingStage }
+      - name: status
+        in: query
+        description: Repeatable. Kept for links made before stages existed.
+        schema:
+          oneOf:
+            - $ref: ../components/common.yaml#/schemas/BookingStatus
+            - type: array
+              items: { $ref: ../components/common.yaml#/schemas/BookingStatus }
+      - name: from
+        in: query
+        schema: { $ref: ../components/common.yaml#/schemas/KigaliDate }
+      - name: to
+        in: query
+        schema: { $ref: ../components/common.yaml#/schemas/KigaliDate }
+      - name: search
+        in: query
+        schema: { type: string, maxLength: 200 }
+      - name: page
+        in: query
+        description: 1-based. Past the end, the last page is answered.
+        schema: { type: integer, minimum: 1 }
+      - name: pageSize
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    responses:
+      '200':
+        description: One page of bookings.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/BookingsPage }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+detail:
+  get:
+    operationId: getBooking
+    tags: [Admin bookings]
+    summary: One booking
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+reschedule:
+  post:
+    operationId: rescheduleBooking
+    tags: [Admin bookings]
+    summary: Reschedule a booking
+    description: Keeps the booking, its reference, token and payments; moves the slot and its buffer to a free slot.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [startsAt]
+            additionalProperties: false
+            properties:
+              startsAt: { $ref: ../components/common.yaml#/schemas/OffsetInstant }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: The slot is taken, or the booking cannot be rescheduled. Carries the booking.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            examples:
+              slot_taken: { value: { error: slot_taken, booking: null } }
+              not_allowed: { value: { error: not_allowed, booking: null } }
+      '422':
+        description: A start the engine does not offer.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+cancel:
+  post:
+    operationId: cancelBooking
+    tags: [Admin bookings]
+    summary: Cancel a booking
+    description: Releases the slot and marks the booking fee `refund_due` for a full refund. An optional reason is shown to the client.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              reason: { type: [string, 'null'], minLength: 1, maxLength: 1000 }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/conflict'
+
+complete:
+  post:
+    operationId: completeBooking
+    tags: [Admin bookings]
+    summary: Mark a booking completed
+    description: Completing means paid. A booking that still owes money is a 409 `balance_due`.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Not in a state that can be completed, or money is still owed.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            examples:
+              not_allowed: { value: { error: not_allowed, booking: null } }
+              balance_due: { value: { error: balance_due, booking: null } }
+
+noShow:
+  post:
+    operationId: markNoShow
+    tags: [Admin bookings]
+    summary: Mark a no-show
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/conflict'
+
+resendLink:
+  post:
+    operationId: resendAccessLink
+    tags: [Admin bookings]
+    summary: Resend the client's access link
+    description: Issues a fresh token and invalidates the old one, then emails the new link.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/conflict'
+
+addons:
+  post:
+    operationId: addPostShootAddon
+    tags: [Admin bookings]
+    summary: Add a post-shoot add-on
+    description: Adds a catalogue add-on to a booking whose shoot has begun. The price is read from the catalogue, never sent.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [addonId]
+            additionalProperties: false
+            properties:
+              addonId: { $ref: ../components/common.yaml#/schemas/Uuid }
+              quantity: { type: integer, minimum: 1, maximum: 99, default: 1 }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/conflict'
+      '422':
+        description: An add-on the booking cannot take.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+addonItem:
+  delete:
+    operationId: removePostShootAddon
+    tags: [Admin bookings]
+    summary: Remove a post-shoot add-on
+    description: Removes an add-on still removable (post-shoot, not yet paid for).
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+      - name: addonId
+        in: path
+        required: true
+        schema: { $ref: ../components/common.yaml#/schemas/Uuid }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: The add-on cannot be removed (not post-shoot, or already paid).
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            examples:
+              not_allowed: { value: { error: not_allowed, booking: null } }
+              already_paid: { value: { error: already_paid, booking: null } }
+
+sessionFee:
+  post:
+    operationId: requestSessionFee
+    tags: [Admin bookings]
+    summary: Ask the client for the session fee
+    description: |
+      Opens a session-fee request for what the booking owes and emails the
+      client. Only mounted when a payment provider is configured; without one
+      the route is a 404.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Not in a state to ask, nothing to ask for, or an attempt already in progress.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            examples:
+              not_allowed: { value: { error: not_allowed, booking: null } }
+              nothing_to_pay: { value: { error: nothing_to_pay, booking: null } }
+              in_progress: { value: { error: in_progress, booking: null } }
+
+cash:
+  post:
+    operationId: recordCashPayment
+    tags: [Admin bookings]
+    summary: Record a cash payment
+    description: |
+      Records cash the photographer was handed, up to what is owed. Refused
+      while an online payment may be in flight; it voids an open online request
+      so the same money cannot be taken twice, and emails nobody.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [amountRwf]
+            additionalProperties: false
+            properties:
+              amountRwf: { type: integer, minimum: 1, maximum: 2147483647 }
+              note: { type: [string, 'null'], minLength: 1, maxLength: 500 }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Not payable, nothing owed, more than is owed, or an online attempt in flight.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            examples:
+              not_allowed: { value: { error: not_allowed, booking: null } }
+              nothing_to_pay: { value: { error: nothing_to_pay, booking: null } }
+              over_outstanding: { value: { error: over_outstanding, booking: null } }
+              in_progress: { value: { error: in_progress, booking: null } }
+      '422':
+        description: A malformed amount.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+delivery:
+  put:
+    operationId: saveDelivery
+    tags: [Admin bookings]
+    summary: Save the photo-delivery link
+    description: Sets the external photo link and its expiry on a completed booking. The link must be https.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [url]
+            additionalProperties: false
+            properties:
+              url: { type: string, format: uri, maxLength: 2000, description: Must be https. }
+              expiresOn:
+                $ref: ../components/common.yaml#/schemas/KigaliDate
+                description: Defaults to today plus the delivery-expiry setting.
+              note: { type: [string, 'null'], minLength: 1, maxLength: 2000 }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/conflict'
+      '422':
+        description: A non-https or malformed link.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+deliverySend:
+  post:
+    operationId: sendDelivery
+    tags: [Admin bookings]
+    summary: Send the photos
+    description: Emails the saved delivery link, optionally to another address for this one email. The booking's own contact email is not changed.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              recipient: { type: string, maxLength: 254, description: A one-off address; a mistyped one is a 422. }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Not deliverable, or no link saved to send.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            examples:
+              not_allowed: { value: { error: not_allowed, booking: null } }
+              no_link: { value: { error: no_link, booking: null } }
+      '422':
+        description: A mistyped recipient address.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+notes:
+  post:
+    operationId: addNote
+    tags: [Admin bookings]
+    summary: Add a note to the client
+    description: A plain-text note, emailed to the client unless `email` is false.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [body]
+            additionalProperties: false
+            properties:
+              body: { type: string, minLength: 1, maxLength: 1000 }
+              email: { type: boolean, default: true }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        $ref: '#/_responses/conflict'
+      '422':
+        description: An empty or over-long note.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+noteItem:
+  delete:
+    operationId: deleteNote
+    tags: [Admin bookings]
+    summary: Delete a note
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+      - name: noteId
+        in: path
+        required: true
+        schema: { $ref: ../components/common.yaml#/schemas/Uuid }
+    responses:
+      '200':
+        $ref: '#/_responses/booking'
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+refund:
+  post:
+    operationId: recordRefund
+    tags: [Admin payments]
+    summary: Record a refund
+    description: |
+      Records that the photographer refunded a payment by hand (the system
+      never moves money). Needs the MoMo or bank reference it was sent with.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [reference]
+            additionalProperties: false
+            properties:
+              reference: { type: string, minLength: 1, maxLength: 100 }
+              refundedAt: { $ref: ../components/common.yaml#/schemas/OffsetInstant }
+    responses:
+      '200':
+        description: The booking the payment belongs to, as it now stands.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: The payment is not in a state that can be refunded.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            example: { error: not_refundable, booking: null }
+      '422':
+        description: A malformed reference or timestamp.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+# --- Reused responses (not operations; referenced with #/_responses/...) -----
+_responses:
+  booking:
+    description: The booking as it now stands.
+    content:
+      application/json:
+        schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingEnvelope }
+  conflict:
+    description: The action was refused; the booking as it stands is included.
+    content:
+      application/json:
+        schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+        example: { error: not_allowed, booking: null }

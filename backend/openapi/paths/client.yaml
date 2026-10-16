@@ -1,0 +1,150 @@
+# The client's own booking, addressed by its access token. Anonymous (the token
+# is the identity). Scope comes from the token alone: no id, reference or email
+# in any parameter widens it. All `Cache-Control: no-store`.
+
+booking:
+  get:
+    operationId: getClientBooking
+    tags: [Client booking]
+    summary: View my booking
+    description: The booking the token addresses, and records the token's use. Any token that does not resolve is a 404.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/AccessToken
+    responses:
+      '200':
+        description: The booking.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/ClientBookingEnvelope }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+cancel:
+  post:
+    operationId: cancelClientBooking
+    tags: [Client booking]
+    summary: Cancel my booking
+    description: Cancellable up to the shoot, and only on a confirmed booking. The booking fee is not refunded (it is non-refundable on a client cancellation).
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/AccessToken
+    responses:
+      '200':
+        description: Cancelled.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/ClientBookingEnvelope }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Already cancelled, or the shoot has passed. Carries the booking as it stands.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/ClientBookingConflict }
+            example: { error: not_cancellable, booking: null }
+
+email:
+  post:
+    operationId: requestClientEmailChange
+    tags: [Client booking]
+    summary: Change my contact email
+    description: |
+      Stores the new address as pending and emails a confirmation link to it;
+      nothing changes until that link is followed, so a link-holder who is not
+      the client cannot redirect the booking's email without also owning the new
+      inbox. At most three requests a day per booking.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/AccessToken
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/booking.yaml#/schemas/EmailRequest }
+    responses:
+      '200':
+        description: It is the address the booking already has; nothing to do.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/ClientBookingEnvelope }
+      '202':
+        description: A confirmation link is on its way to the new address.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/ClientBookingEnvelope }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: A booking that no longer stands has no email to change.
+        content:
+          application/json:
+            schema: { $ref: ../components/booking.yaml#/schemas/ClientBookingConflict }
+            example: { error: not_allowed, booking: null }
+      '422':
+        description: Not an email address.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+      '429':
+        description: |
+          `too_many_requests`: more than three requests today for this booking,
+          or `rate_limited` (with `Retry-After`): too many from this IP.
+        headers:
+          Retry-After:
+            schema: { type: integer, minimum: 1 }
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            examples:
+              too_many_requests: { value: { error: too_many_requests } }
+              rate_limited: { value: { error: rate_limited } }
+
+payments:
+  post:
+    operationId: startClientSessionFeePayment
+    tags: [Client booking]
+    summary: Pay my session fee
+    description: |
+      Starts a session-fee payment for what the booking owes. Only mounted when
+      a payment provider is configured. The amount is computed server-side from
+      the booking, never sent by the client.
+    security: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/AccessToken
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/common.yaml#/schemas/PayRequest }
+    responses:
+      '201':
+        description: The attempt was accepted; poll its `ourRef`.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/PaymentStarted }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Nothing owed, or an attempt already waiting (`payment_in_progress`, with its `ourRef`).
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: ../components/booking.yaml#/schemas/ClientBookingConflict
+                - $ref: ../components/common.yaml#/schemas/PaymentInProgress
+            examples:
+              nothing_to_pay: { value: { error: nothing_to_pay, booking: null } }
+              in_progress: { value: { error: payment_in_progress, payment: { ourRef: 00000000-0000-4000-8000-000000000000 } } }
+      '422':
+        description: A method not on offer, or an unusable phone number.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+      '502':
+        description: The provider refused the request or could not be reached.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/PaymentNotStarted }

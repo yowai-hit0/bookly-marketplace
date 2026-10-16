@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(0.2, 0.7, 0.2, 1.4)",
+        "createdAt": "2026-09-27T15:01:44.717Z",
+        "reason": "Design source: the canvas board Client-Booking.dc.html draws the selected card's tick with this exact curve (.card .tick transition), and the brief's decision 3 keeps the tick scale-in; only a 250ms scale on a 24px tick"
+      }
+    ]
+  }
+}

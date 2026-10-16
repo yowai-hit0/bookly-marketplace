@@ -1,0 +1,404 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-20T11:53:24.179Z",
+  "title": "Design System: Bookly",
+  "extensions": {
+    "colorMeta": {
+      "available-green": {
+        "role": "primary",
+        "displayName": "Available Green",
+        "canonical": "oklch(0.5081 0.1049 165.61)",
+        "tonalRamp": [
+          "oklch(15% 0.1049 165.61)",
+          "oklch(26% 0.1049 165.61)",
+          "oklch(37% 0.1049 165.61)",
+          "oklch(48% 0.1049 165.61)",
+          "oklch(59% 0.1049 165.61)",
+          "oklch(70% 0.1049 165.61)",
+          "oklch(82% 0.1049 165.61)",
+          "oklch(95% 0.1049 165.61)"
+        ]
+      },
+      "calendar-blue": {
+        "role": "secondary",
+        "displayName": "Calendar Blue",
+        "canonical": "oklch(0.5876 0.1389 241.97)",
+        "tonalRamp": [
+          "oklch(15% 0.1389 241.97)",
+          "oklch(26% 0.1389 241.97)",
+          "oklch(37% 0.1389 241.97)",
+          "oklch(48% 0.1389 241.97)",
+          "oklch(59% 0.1389 241.97)",
+          "oklch(70% 0.1389 241.97)",
+          "oklch(82% 0.1389 241.97)",
+          "oklch(95% 0.1389 241.97)"
+        ]
+      },
+      "cancel-red": {
+        "role": "tertiary",
+        "displayName": "Cancel Red",
+        "canonical": "oklch(0.5054 0.1905 27.52)",
+        "tonalRamp": [
+          "oklch(15% 0.1905 27.52)",
+          "oklch(26% 0.1905 27.52)",
+          "oklch(37% 0.1905 27.52)",
+          "oklch(48% 0.1905 27.52)",
+          "oklch(59% 0.1905 27.52)",
+          "oklch(70% 0.1905 27.52)",
+          "oklch(82% 0.1905 27.52)",
+          "oklch(95% 0.1905 27.52)"
+        ]
+      },
+      "morning-sky": {
+        "role": "neutral",
+        "displayName": "Morning Sky",
+        "canonical": "oklch(0.9771 0.0125 236.62)",
+        "tonalRamp": [
+          "oklch(15% 0.0125 236.62)",
+          "oklch(26% 0.0125 236.62)",
+          "oklch(37% 0.0125 236.62)",
+          "oklch(48% 0.0125 236.62)",
+          "oklch(59% 0.0125 236.62)",
+          "oklch(70% 0.0125 236.62)",
+          "oklch(82% 0.0125 236.62)",
+          "oklch(95% 0.0125 236.62)"
+        ]
+      },
+      "studio-white": {
+        "role": "neutral",
+        "displayName": "Studio White",
+        "canonical": "oklch(1 0 0)",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(26% 0 0)",
+          "oklch(37% 0 0)",
+          "oklch(48% 0 0)",
+          "oklch(59% 0 0)",
+          "oklch(70% 0 0)",
+          "oklch(82% 0 0)",
+          "oklch(95% 0 0)"
+        ]
+      },
+      "ink-navy": {
+        "role": "neutral",
+        "displayName": "Ink Navy",
+        "canonical": "oklch(0.2077 0.0398 265.75)",
+        "tonalRamp": [
+          "oklch(15% 0.0398 265.75)",
+          "oklch(26% 0.0398 265.75)",
+          "oklch(37% 0.0398 265.75)",
+          "oklch(48% 0.0398 265.75)",
+          "oklch(59% 0.0398 265.75)",
+          "oklch(70% 0.0398 265.75)",
+          "oklch(82% 0.0398 265.75)",
+          "oklch(95% 0.0398 265.75)"
+        ]
+      },
+      "slate-text": {
+        "role": "neutral",
+        "displayName": "Slate Text",
+        "canonical": "oklch(0.4455 0.0374 257.28)",
+        "tonalRamp": [
+          "oklch(15% 0.0374 257.28)",
+          "oklch(26% 0.0374 257.28)",
+          "oklch(37% 0.0374 257.28)",
+          "oklch(48% 0.0374 257.28)",
+          "oklch(59% 0.0374 257.28)",
+          "oklch(70% 0.0374 257.28)",
+          "oklch(82% 0.0374 257.28)",
+          "oklch(95% 0.0374 257.28)"
+        ]
+      },
+      "powder-blue": {
+        "role": "neutral",
+        "displayName": "Powder Blue",
+        "canonical": "oklch(0.9514 0.0250 236.82)",
+        "tonalRamp": [
+          "oklch(15% 0.025 236.82)",
+          "oklch(26% 0.025 236.82)",
+          "oklch(37% 0.025 236.82)",
+          "oklch(48% 0.025 236.82)",
+          "oklch(59% 0.025 236.82)",
+          "oklch(70% 0.025 236.82)",
+          "oklch(82% 0.025 236.82)",
+          "oklch(95% 0.025 236.82)"
+        ]
+      },
+      "hairline-blue": {
+        "role": "neutral",
+        "displayName": "Hairline Blue",
+        "canonical": "oklch(0.9456 0.0201 229.04)",
+        "tonalRamp": [
+          "oklch(15% 0.0201 229.04)",
+          "oklch(26% 0.0201 229.04)",
+          "oklch(37% 0.0201 229.04)",
+          "oklch(48% 0.0201 229.04)",
+          "oklch(59% 0.0201 229.04)",
+          "oklch(70% 0.0201 229.04)",
+          "oklch(82% 0.0201 229.04)",
+          "oklch(95% 0.0201 229.04)"
+        ]
+      },
+      "field-slate": {
+        "role": "neutral",
+        "displayName": "Field Slate",
+        "canonical": "oklch(0.6305 0.0374 253.82)",
+        "tonalRamp": [
+          "oklch(15% 0.0374 253.82)",
+          "oklch(26% 0.0374 253.82)",
+          "oklch(37% 0.0374 253.82)",
+          "oklch(48% 0.0374 253.82)",
+          "oklch(59% 0.0374 253.82)",
+          "oklch(70% 0.0374 253.82)",
+          "oklch(82% 0.0374 253.82)",
+          "oklch(95% 0.0374 253.82)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The title of a client page: Home wordmark, services, service detail, booking, checkout."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "The title of an error, invalid-link or payment-progress state, and of admin pages such as bookings."
+      },
+      "section": {
+        "displayName": "Section",
+        "purpose": "Every h2, card section title and fieldset legend (a legend takes the heading font by hand, and drops to 1rem inside a card that has its own h2)."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Almost all text; inputs are 1rem on phones."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Buttons and form labels."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Badges, hints and small print."
+      },
+      "reference": {
+        "displayName": "Reference",
+        "purpose": "Booking and payment reference numbers: monospace, semibold, wide tracking."
+      }
+    },
+    "shadows": [
+      {
+        "name": "card-lift",
+        "value": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+        "purpose": "The resting shadow of every card, with a 1px Hairline Blue border."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 3px color-mix(in oklch, oklch(0.5876 0.1389 241.97) 50%, transparent)",
+        "purpose": "Keyboard focus on buttons, inputs, checkboxes and badges; the control border turns full Calendar Blue."
+      },
+      {
+        "name": "link-focus-outline",
+        "value": "outline: 2px solid oklch(0.5876 0.1389 241.97); outline-offset: 2px",
+        "purpose": "Keyboard focus on a standalone text link; full strength because a 50% ring is only about 1.9:1 on the page."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Tailwind default easing for state transitions."
+      },
+      {
+        "name": "duration-standard",
+        "value": "150ms",
+        "purpose": "Tailwind default: hover, focus and press on buttons and inputs."
+      },
+      {
+        "name": "duration-status",
+        "value": "200ms",
+        "purpose": "The status dot colour change; off under prefers-reduced-motion."
+      },
+      {
+        "name": "press-nudge",
+        "value": "translateY(1px)",
+        "purpose": "A pressed button moves down one pixel."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "40rem"
+      },
+      {
+        "name": "md",
+        "value": "48rem"
+      },
+      {
+        "name": "lg",
+        "value": "64rem"
+      },
+      {
+        "name": "pointer-coarse",
+        "value": "(pointer: coarse)",
+        "purpose": "Input modality: controls grow to 44px on touch, stay 32px otherwise."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action on a screen: Available Green, white label, darkens on hover.",
+      "html": "<button class=\"ds-btn-primary\">Check again</button>",
+      "css": ".ds-btn-primary{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border:1px solid transparent;border-radius:var(--radius, 0.5rem);font:500 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;white-space:nowrap;cursor:pointer;transition:all 150ms cubic-bezier(0.4,0,0.2,1);outline:none;background:var(--primary, oklch(0.5081 0.1049 165.61));color:var(--primary-foreground, oklch(1 0 0));}.ds-btn-primary:hover{background:color-mix(in oklch, var(--primary, oklch(0.5081 0.1049 165.61)), black 12%);}.ds-btn-primary:focus-visible{border-color:var(--ring, oklch(0.5876 0.1389 241.97));box-shadow:0 0 0 3px color-mix(in oklch, var(--ring, oklch(0.5876 0.1389 241.97)) 50%, transparent);}.ds-btn-primary:active{transform:translateY(1px);}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "A quieter action beside a primary one: white fill, a slate edge like a text field, Powder Blue on hover.",
+      "html": "<button class=\"ds-btn-outline\">Save</button>",
+      "css": ".ds-btn-outline{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border:1px solid transparent;border-radius:var(--radius, 0.5rem);font:500 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;white-space:nowrap;cursor:pointer;transition:all 150ms cubic-bezier(0.4,0,0.2,1);outline:none;background:var(--card, oklch(1 0 0));color:var(--foreground, oklch(0.2077 0.0398 265.75));border-color:var(--input, oklch(0.6305 0.0374 253.82));}.ds-btn-outline:hover{background:var(--muted, oklch(0.9514 0.0250 236.82));}.ds-btn-outline:focus-visible{border-color:var(--ring, oklch(0.5876 0.1389 241.97));box-shadow:0 0 0 3px color-mix(in oklch, var(--ring, oklch(0.5876 0.1389 241.97)) 50%, transparent);}.ds-btn-outline:active{transform:translateY(1px);}"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "A tinted cancel action. The irreversible confirmation is a solid red override at the call site, not this.",
+      "html": "<button class=\"ds-btn-destructive\">Cancel this booking</button>",
+      "css": ".ds-btn-destructive{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border:1px solid transparent;border-radius:var(--radius, 0.5rem);font:500 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;white-space:nowrap;cursor:pointer;transition:all 150ms cubic-bezier(0.4,0,0.2,1);outline:none;background:color-mix(in oklch, var(--destructive, oklch(0.5054 0.1905 27.52)) 10%, transparent);color:var(--destructive, oklch(0.5054 0.1905 27.52));}.ds-btn-destructive:hover{background:color-mix(in oklch, var(--destructive, oklch(0.5054 0.1905 27.52)) 20%, transparent);}.ds-btn-destructive:focus-visible{border-color:color-mix(in oklch, var(--destructive, oklch(0.5054 0.1905 27.52)) 40%, transparent);box-shadow:0 0 0 3px color-mix(in oklch, var(--destructive, oklch(0.5054 0.1905 27.52)) 20%, transparent);}.ds-btn-destructive:active{transform:translateY(1px);}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A white field with a slate edge so its boundary passes 3:1; the ring and edge turn Calendar Blue on focus.",
+      "html": "<input class=\"ds-input\" type=\"text\" aria-label=\"Full name\" placeholder=\"Full name\" />",
+      "css": ".ds-input{box-sizing:border-box;width:220px;height:32px;padding:4px 10px;border:1px solid var(--input, oklch(0.6305 0.0374 253.82));border-radius:var(--radius, 0.5rem);background:var(--card, oklch(1 0 0));color:var(--foreground, oklch(0.2077 0.0398 265.75));font:400 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;outline:none;transition:color 150ms,box-shadow 150ms,border-color 150ms;}.ds-input::placeholder{color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));}.ds-input:focus-visible{border-color:var(--ring, oklch(0.5876 0.1389 241.97));box-shadow:0 0 0 3px color-mix(in oklch, var(--ring, oklch(0.5876 0.1389 241.97)) 50%, transparent);}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "White surface on the sky page: 1px hairline plus one soft shadow, 16px padding, 11.2px corners.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">All services</div><div class=\"ds-card-body\">Choose a service to see its packages and prices.</div></div>",
+      "css": ".ds-card{box-sizing:border-box;width:280px;display:flex;flex-direction:column;gap:4px;padding:16px;border:1px solid var(--border, oklch(0.9456 0.0201 229.04));border-radius:calc(var(--radius, 0.5rem) * 1.4);background:var(--card, oklch(1 0 0));color:var(--card-foreground, oklch(0.2077 0.0398 265.75));box-shadow:0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);}.ds-card-title{font:500 16px/1.375 Poppins, sans-serif;}.ds-card-body{font:400 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));}"
+    },
+    {
+      "name": "Active Badge",
+      "kind": "chip",
+      "refersTo": "badge-active",
+      "description": "A pill in Available Green for an active state; the label is always the state in words.",
+      "html": "<span class=\"ds-badge-active\">Active</span>",
+      "css": ".ds-badge-active{box-sizing:border-box;display:inline-flex;align-items:center;height:20px;padding:2px 8px;border-radius:999px;background:var(--primary, oklch(0.5081 0.1049 165.61));color:var(--primary-foreground, oklch(1 0 0));font:500 12px/16px 'Open Sans Variable', 'Open Sans', sans-serif;white-space:nowrap;}"
+    },
+    {
+      "name": "Outline Badge",
+      "kind": "chip",
+      "refersTo": "badge-outline",
+      "description": "A pill with a hairline edge: the plain outline badge. A booking status uses the Status Badge instead.",
+      "html": "<span class=\"ds-badge-outline\">Draft</span>",
+      "css": ".ds-badge-outline{box-sizing:border-box;display:inline-flex;align-items:center;height:20px;padding:2px 8px;border:1px solid var(--border, oklch(0.9456 0.0201 229.04));border-radius:999px;color:var(--foreground, oklch(0.2077 0.0398 265.75));font:500 12px/16px 'Open Sans Variable', 'Open Sans', sans-serif;white-space:nowrap;}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "custom",
+      "description": "A booking status as a pill with its label and a small icon. The seven stay apart in greyscale: dashed, dotted, tinted, muted and unfilled edges, and a different icon each. Green only for a confirmed booking.",
+      "html": "<div class=\"ds-sp-row\"><span class=\"ds-sp ds-sp-confirmed\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16 9-5.5 5.5L8 12\"/></svg>Confirmed</span><span class=\"ds-sp ds-sp-pending\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 6v6l4 2\"/></svg>Waiting for payment</span><span class=\"ds-sp ds-sp-completed\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M18 6 7 17l-5-5\"/><path d=\"m22 10-7.5 7.5L13 16\"/></svg>Completed</span><span class=\"ds-sp ds-sp-noshow\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/><line x1=\"17\" x2=\"22\" y1=\"8\" y2=\"13\"/><line x1=\"22\" x2=\"17\" y1=\"8\" y2=\"13\"/></svg>Recorded as missed</span><span class=\"ds-sp ds-sp-expired\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 22h14\"/><path d=\"M5 2h14\"/><path d=\"M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22\"/><path d=\"M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2\"/></svg>Expired</span><span class=\"ds-sp ds-sp-cancelled\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m15 9-6 6\"/><path d=\"m9 9 6 6\"/></svg>Cancelled by you</span><span class=\"ds-sp ds-sp-cancelled-admin\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M4.929 4.929 19.07 19.071\"/></svg>Cancelled by the photographer</span></div>",
+      "css": ".ds-sp-row{display:flex;flex-wrap:wrap;gap:8px;max-width:440px;}.ds-sp{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px 0 10px;border:1px solid transparent;border-radius:999px;background:transparent;font:500 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;white-space:nowrap;}.ds-sp svg{flex:none;}.ds-sp-confirmed{border-color:color-mix(in oklab, var(--primary, oklch(0.5081 0.1049 165.61)) 30%, transparent);background:color-mix(in oklab, var(--primary, oklch(0.5081 0.1049 165.61)) 10%, var(--card, oklch(1 0 0)));color:var(--primary, oklch(0.5081 0.1049 165.61));}.ds-sp-pending{border-style:dashed;border-color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));color:var(--foreground, oklch(0.2077 0.0398 265.75));}.ds-sp-completed{background:var(--muted, oklch(0.9514 0.0250 236.82));color:var(--foreground, oklch(0.2077 0.0398 265.75));}.ds-sp-noshow{background:color-mix(in oklab, var(--destructive, oklch(0.5054 0.1905 27.52)) 10%, var(--card, oklch(1 0 0)));color:var(--destructive, oklch(0.5054 0.1905 27.52));}.ds-sp-expired{border-style:dotted;border-color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));}.ds-sp-cancelled{border-color:color-mix(in oklab, var(--destructive, oklch(0.5054 0.1905 27.52)) 40%, transparent);color:var(--destructive, oklch(0.5054 0.1905 27.52));}.ds-sp-cancelled-admin{border-color:var(--input, oklch(0.6305 0.0374 253.82));color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));}"
+    },
+    {
+      "name": "Text Link",
+      "kind": "custom",
+      "refersTo": "link-text",
+      "description": "A standalone link with a back arrow: slate, underlined on hover, a full-strength 2px blue outline on keyboard focus.",
+      "html": "<a class=\"ds-link\" href=\"#\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m12 19-7-7 7-7\"/><path d=\"M19 12H5\"/></svg>All services</a>",
+      "css": ".ds-link{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;min-height:24px;border-radius:calc(var(--radius, 0.5rem) * 0.6);color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));font:400 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;text-decoration:none;}.ds-link:hover{text-decoration:underline;text-underline-offset:4px;}.ds-link:focus-visible{outline:2px solid var(--ring, oklch(0.5876 0.1389 241.97));outline-offset:2px;}"
+    },
+    {
+      "name": "Callout",
+      "kind": "custom",
+      "description": "A notice with a blue tint, a full hairline-blue edge and a small icon. Never a stripe down one side; the words carry the meaning.",
+      "html": "<div class=\"ds-callout\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/></svg><p>The booking fee is non-refundable if you cancel.</p></div>",
+      "css": ".ds-callout{box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;width:320px;padding:12px;border:1px solid color-mix(in oklch, var(--ring, oklch(0.5876 0.1389 241.97)) 30%, transparent);border-radius:var(--radius, 0.5rem);background:color-mix(in oklch, var(--ring, oklch(0.5876 0.1389 241.97)) 5%, transparent);color:var(--foreground, oklch(0.2077 0.0398 265.75));font:400 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;}.ds-callout svg{flex:none;margin-top:2px;color:var(--ring, oklch(0.5876 0.1389 241.97));}.ds-callout p{margin:0;font-weight:500;}"
+    },
+    {
+      "name": "Destructive Callout",
+      "kind": "custom",
+      "description": "The callout in Cancel Red, for the warning before an irreversible cancel. The text stays Ink Navy; the red icon carries the tone.",
+      "html": "<div class=\"ds-callout ds-callout-destructive\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/></svg><p>If you cancel, your booking fee is not refunded.</p></div>",
+      "css": ".ds-callout{box-sizing:border-box;display:flex;align-items:flex-start;gap:8px;width:320px;padding:12px;border:1px solid color-mix(in oklch, var(--ring, oklch(0.5876 0.1389 241.97)) 30%, transparent);border-radius:var(--radius, 0.5rem);background:color-mix(in oklch, var(--ring, oklch(0.5876 0.1389 241.97)) 5%, transparent);color:var(--foreground, oklch(0.2077 0.0398 265.75));font:400 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;}.ds-callout svg{flex:none;margin-top:2px;color:var(--ring, oklch(0.5876 0.1389 241.97));}.ds-callout p{margin:0;font-weight:500;}.ds-callout-destructive{border-color:color-mix(in oklab, var(--destructive, oklch(0.5054 0.1905 27.52)) 30%, transparent);background:color-mix(in oklab, var(--destructive, oklch(0.5054 0.1905 27.52)) 5%, transparent);}.ds-callout-destructive svg{color:var(--destructive, oklch(0.5054 0.1905 27.52));}"
+    },
+    {
+      "name": "Status Line",
+      "kind": "custom",
+      "description": "A dot that repeats the words beside it: green when reachable, red on failure, slate while checking.",
+      "html": "<p class=\"ds-status\" role=\"status\"><span class=\"ds-status-dot\" aria-hidden=\"true\"></span><span>API: reachable</span></p>",
+      "css": ".ds-status{display:flex;align-items:flex-start;gap:8px;margin:0;color:var(--muted-foreground, oklch(0.4455 0.0374 257.28));font:400 14px/20px 'Open Sans Variable', 'Open Sans', sans-serif;}.ds-status-dot{flex:none;width:8px;height:8px;margin-top:6px;border-radius:999px;background:var(--primary, oklch(0.5081 0.1049 165.61));transition:background-color 200ms;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Front Desk",
+    "overview": "Bookly should feel like the front desk of a well-run studio: someone calm at the counter who tells you plainly what is free, what you owe and when, and never oversells. The surfaces stay quiet (a sky-tinted page, white cards with a hairline edge and a whisper of shadow) so that the things that matter, a time, an amount, a status word, are the loudest thing on the screen. Colour appears only when it means something, and it is never the only carrier of meaning.\n\nOne system serves two people. Clients book on a phone or a laptop, with no account, usually once. The photographer runs the business from the admin on a desktop. Both get the same tokens and the same primitives; the admin is denser (the low end of the spacing scale), never different in kind. The feel is calm and exact: precise numbers, plain labels, no flourish. Decoration is non-textual (an icon or a dot beside words that already say the thing) and stays small.\n\nVisual rejections recorded in the design system (`design-system/bookly/MASTER.md` section 2; the first three are also enforced by Impeccable's design hook): no gradient text, no glow shadows, no coloured left-edge stripes, no modals, no 3D, parallax or scroll-driven effects, no emoji as icons. The theme is light only; the `.dark` block in `index.css` is unreachable and undesigned.\n\nThe palette and the type pairing were chosen by a design tool and accepted by the user. The client has supplied no logo or brand colours yet, so nothing here is brand-derived. If brand colours arrive, they replace Available Green and Calendar Blue in `frontend/src/index.css` and nothing else changes.",
+    "keyCharacteristics": [
+      "Sky-tinted page, white cards, one green for the next step, one blue for focus.",
+      "Poppins for headings, Open Sans for everything else, both self-hosted.",
+      "32px controls on a mouse, 44px on touch.",
+      "Hairline borders plus `shadow-sm`; no heavy shadows.",
+      "Every status and every amount is written in words; colour and icons only repeat them."
+    ],
+    "rules": [
+      {
+        "name": "The One Green Rule",
+        "body": "Available Green marks the next step and the confirmed state, and nothing else. It is never decoration, and never the fill of a status that is not confirmed.",
+        "section": "colors"
+      },
+      {
+        "name": "The Blue Is For Looking Rule",
+        "body": "Calendar Blue is focus and information. As text on white it is only 4.10:1, so blue text uses #0369A1 (5.93:1); the plain brand blue is for outlines and rings.",
+        "section": "colors"
+      },
+      {
+        "name": "The Words Come First Rule",
+        "body": "Colour never carries a meaning alone. A status dot, a tint or an icon always sits beside the words that state the same thing.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Voices Rule",
+        "body": "Poppins speaks only in `h1`, `h2`, `h3`, card titles and fieldset legends: the headings get it once from the base layer of `index.css`, and a legend, which is a heading inside a form, adds `font-heading` itself. Everything else is Open Sans.",
+        "section": "typography"
+      },
+      {
+        "name": "The Numbers Stay Put Rule",
+        "body": "Amounts, times and counts use tabular figures so columns and totals do not shift as digits change.",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "A card's edge is a 1px border plus `shadow-sm` and nothing heavier. The one clickable card, a service on the list, lifts to `shadow-md` on hover as its affordance. Extra separation comes from tone (white on sky), never from a bigger shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** write every status, amount and time in words; let a dot, tint or icon only repeat them.",
+      "**Do** keep controls 32px on a mouse and 44px under `pointer-coarse:`.",
+      "**Do** put keyboard focus in Calendar Blue: a 3px ring at 50% plus a full-strength border on controls, and a 2px full-strength outline offset 2px on text links and on a bare native checkbox.",
+      "**Do** set `aria-disabled` on a busy control instead of `disabled`, and fade it to 50%.",
+      "**Do** put unpredictable text (errors, names, references) in a shrinkable child with `min-w-0 wrap-anywhere`.",
+      "**Do** use tabular figures for amounts and times, and monospace semibold for references.",
+      "**Do** reuse existing strings; new decoration is an icon, a dot or a border, not new copy.",
+      "**Do** keep icons to lucide, outline style, with `aria-hidden=\"true\"` when they sit beside words."
+    ],
+    "donts": [
+      "**Don't** use gradient text, glow shadows or a one-sided coloured stripe on a card or callout; they are ruled out in `MASTER.md` section 2 and flagged by Impeccable's design hook.",
+      "**Don't** add modals, 3D, parallax, scroll-driven effects, or emoji icons. (Public pages gained a shared header and footer on 2026-09-21, at the user's request; that is no longer a rejection.)",
+      "**Don't** use white text on the lighter #059669 green (3.77:1), and don't let a hover state lighten the default Button.",
+      "**Don't** set text in the plain Calendar Blue on white (4.10:1); use #0369A1.",
+      "**Don't** use Hairline Blue or Powder Blue as the only boundary of a control or as the only signal of state.",
+      "**Don't** show a green icon, tick or tint for anything the API has not confirmed: waiting, received-but-unconfirmed and refund views are blue.",
+      "**Don't** hard-code a colour, radius or font in a component; use the tokens in `index.css`.",
+      "**Don't** use `bg-input/…` for a disabled fill (the input token is now a mid slate); use Powder Blue."
+    ]
+  }
+}

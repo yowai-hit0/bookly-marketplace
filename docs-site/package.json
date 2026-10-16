@@ -1,0 +1,18 @@
+{
+  "name": "bookly-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run bundle-openapi && vitepress dev",
+    "build": "npm run bundle-openapi && vitepress build",
+    "preview": "vitepress preview",
+    "bundle-openapi": "node scripts/bundle-openapi.mjs",
+    "sync-spec": "redocly bundle ../backend/openapi/openapi.yaml -o openapi.json --ext json",
+    "api:lint": "redocly lint openapi.json"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.62.1",
+    "vitepress": "^1.6.4",
+    "vue": "^3.5.43"
+  }
+}

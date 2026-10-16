@@ -1,0 +1,291 @@
+# All require the admin bearer token (inherited from the root `security`).
+
+workingHours:
+  get:
+    operationId: listWorkingHours
+    tags: [Admin availability]
+    summary: List working hours
+    responses:
+      '200':
+        description: Weekly rules and dated overrides.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workingHours]
+              additionalProperties: false
+              properties:
+                workingHours:
+                  type: array
+                  items: { $ref: ../components/admin.yaml#/schemas/WorkingHours }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  post:
+    operationId: createWorkingHours
+    tags: [Admin availability]
+    summary: Add a weekly rule or dated override
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/admin.yaml#/schemas/WorkingHoursWrite }
+    responses:
+      '201':
+        description: Created.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workingHours]
+              additionalProperties: false
+              properties:
+                workingHours: { $ref: ../components/admin.yaml#/schemas/WorkingHours }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '409':
+        description: A rule already exists for that weekday or date.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: working_hours_exists }
+      '422':
+        description: An open day whose window does not open before it closes.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+workingHoursItem:
+  put:
+    operationId: replaceWorkingHours
+    tags: [Admin availability]
+    summary: Replace a working-hours row
+    description: Replaces the whole row, so a rule can move between a weekday and a date.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/admin.yaml#/schemas/WorkingHoursWrite }
+    responses:
+      '200':
+        description: Replaced.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workingHours]
+              additionalProperties: false
+              properties:
+                workingHours: { $ref: ../components/admin.yaml#/schemas/WorkingHours }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: A rule already exists for the target weekday or date.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: working_hours_exists }
+      '422':
+        description: An open day whose window does not open before it closes.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+  delete:
+    operationId: deleteWorkingHours
+    tags: [Admin availability]
+    summary: Delete a working-hours row
+    description: Deleting a weekday rule closes that weekday; deleting an override restores the weekly rule for its date.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '204':
+        description: Deleted.
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+blocks:
+  get:
+    operationId: listBlocks
+    tags: [Admin availability]
+    summary: List blocks
+    responses:
+      '200':
+        description: Blocked time, with reasons (admin-only).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [blocks]
+              additionalProperties: false
+              properties:
+                blocks:
+                  type: array
+                  items: { $ref: ../components/admin.yaml#/schemas/Block }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  post:
+    operationId: createBlock
+    tags: [Admin availability]
+    summary: Block time
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/admin.yaml#/schemas/BlockWrite }
+    responses:
+      '201':
+        description: Created.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [block]
+              additionalProperties: false
+              properties:
+                block: { $ref: ../components/admin.yaml#/schemas/Block }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '409':
+        description: "The range covers confirmed bookings; resend with `confirm: true` to save it anyway."
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/BlockConflict }
+      '422':
+        description: A range whose end is not after its start.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+blocksItem:
+  put:
+    operationId: updateBlock
+    tags: [Admin availability]
+    summary: Change a block
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/admin.yaml#/schemas/BlockWrite }
+    responses:
+      '200':
+        description: Updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [block]
+              additionalProperties: false
+              properties:
+                block: { $ref: ../components/admin.yaml#/schemas/Block }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: "The range covers confirmed bookings; resend with `confirm: true`."
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/BlockConflict }
+      '422':
+        description: A range whose end is not after its start.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+  delete:
+    operationId: deleteBlock
+    tags: [Admin availability]
+    summary: Delete a block
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '204':
+        description: Deleted.
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+settings:
+  get:
+    operationId: getSettings
+    tags: [Admin settings]
+    summary: The five operating values
+    responses:
+      '200':
+        description: Settings.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/SettingsEnvelope }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  patch:
+    operationId: updateSettings
+    tags: [Admin settings]
+    summary: Change settings
+    description: Any subset of the five. Each is range-checked here, so a value out of range is a 422 rather than a database error.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/admin.yaml#/schemas/SettingsPatch }
+    responses:
+      '200':
+        description: The settings as they now stand.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/SettingsEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        description: A value outside its range.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+calendar:
+  get:
+    operationId: getCalendar
+    tags: [Admin calendar]
+    summary: Bookings, holds and blocks for a range
+    parameters:
+      - name: from
+        in: query
+        required: true
+        schema: { $ref: ../components/common.yaml#/schemas/KigaliDate }
+      - name: to
+        in: query
+        required: true
+        description: Inclusive. At most 62 days after `from`.
+        schema: { $ref: ../components/common.yaml#/schemas/KigaliDate }
+    responses:
+      '200':
+        description: The calendar.
+        content:
+          application/json:
+            schema: { $ref: ../components/admin.yaml#/schemas/Calendar }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        description: '`to` before `from`, or a range over 62 days.'
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
