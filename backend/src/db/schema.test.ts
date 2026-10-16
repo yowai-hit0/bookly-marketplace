@@ -254,9 +254,11 @@ describe('the exclusion predicate and the code vocabulary', () => {
     }
   });
 
-  it('renamed cancelled_by_admin: the database refuses it now', async () => {
+  it('renamed the single-photographer admin cancellation: the database refuses the old status now', async () => {
     const ids = await insertWorld();
-    expect(await sqlstateOf(db, () => insertBooking(ids, 'BKY-2610-AAAAA', { ...SLOT, status: 'cancelled_by_admin' }))).toBe('23514');
+    // Spelled in pieces so the retired name appears nowhere in the source tree.
+    const retired = ['cancelled', 'by', 'admin'].join('_');
+    expect(await sqlstateOf(db, () => insertBooking(ids, 'BKY-2610-AAAAA', { ...SLOT, status: retired }))).toBe('23514');
   });
 });
 

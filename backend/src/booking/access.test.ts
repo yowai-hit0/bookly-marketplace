@@ -116,7 +116,7 @@ describe('a token that addresses a booking', () => {
   });
 
   it('works for a booking in any status, not only confirmed', async () => {
-    for (const status of ['confirmed', 'completed', 'no_show', 'cancelled_by_client', 'cancelled_by_admin']) {
+    for (const status of ['confirmed', 'completed', 'no_show', 'cancelled_by_client', 'cancelled_by_photographer']) {
       const { booking, token } = await insertBookingWithToken(prisma, world, { status });
       await expect(findBookingByToken(prisma, token)).resolves.toMatchObject({ id: booking.id, status });
     }

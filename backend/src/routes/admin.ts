@@ -6,9 +6,9 @@ import {
   confirmPasswordReset,
   requestPasswordReset,
 } from '../auth/admin-auth.js';
-import { adminLocals, requireAdmin } from '../auth/middleware.js';
+import { photographerLocals, requirePhotographer } from '../auth/middleware.js';
 import type { PaymentProviderId } from '../payments/provider.js';
-import { toPublicAdmin } from '../auth/public-admin.js';
+import { toPublicUser } from '../auth/public-admin.js';
 import { blocksRouter, workingHoursRouter } from './admin-availability.js';
 import { adminBookingsRouter } from './admin-bookings.js';
 import { calendarRouter } from './admin-calendar.js';
@@ -16,14 +16,17 @@ import { catalogueRouter } from './admin-catalogue.js';
 import { settingsRouter } from './admin-settings.js';
 
 /**
- * `/api/admin/*` (plan.md Task 7, revision 2.3).
+ * `/api/admin/*` (plan.md Task 7, revision 2.3): the photographer's studio.
+ * The paths keep their single-photographer names until Phase 2 moves them to
+ * `/api/studio/*` (brief decision 3).
  *
  * Order is the security model. The three unauthenticated endpoints come first;
- * everything registered after `requireAdmin` is protected by construction --
- * including paths that do not exist, which answer 401 rather than revealing
- * whether a route is there.
+ * everything registered after `requirePhotographer` is protected by
+ * construction -- including paths that do not exist, which answer 401 rather
+ * than revealing whether a route is there. Every router below it reads the
+ * photographer to scope to from `photographerLocals(res).photographerId`.
  *
- * There is no logout endpoint. Admin auth is a bearer token the client holds, so
+ * There is no logout endpoint. Studio auth is a bearer token the client holds, so
  * signing out is the client discarding it; a server endpoint could not revoke a
  * stateless token and would only pretend to. Real revocation is a password
  * change or rotating SESSION_SECRET.
@@ -76,7 +79,7 @@ export function adminRouter(deps: AdminRouterDeps): Router {
     // proxy between it and here (RFC 6749 §5.1).
     res.set('Cache-Control', 'no-store');
     res.status(200).json({
-      admin: toPublicAdmin(result.admin),
+      admin: toPublicUser(result.user),
       token: result.token,
       tokenType: 'Bearer',
       expiresAt: result.expiresAt.toISOString(),
@@ -91,7 +94,7 @@ export function adminRouter(deps: AdminRouterDeps): Router {
     }
 
     await requestPasswordReset(deps, body.data.email);
-    // Identical whether or not the address is the admin's.
+    // Identical whether or not the address has a studio login.
     res.status(202).json({ ok: true });
   });
 
@@ -110,12 +113,12 @@ export function adminRouter(deps: AdminRouterDeps): Router {
     res.status(204).end();
   });
 
-  // --- Everything below requires a valid admin bearer token ------------------
+  // --- Everything below requires a photographer's valid bearer token ---------
 
-  router.use(requireAdmin(deps));
+  router.use(requirePhotographer(deps));
 
   router.get('/me', (_req, res) => {
-    res.json({ admin: toPublicAdmin(adminLocals(res).admin) });
+    res.json({ admin: toPublicUser(photographerLocals(res).user) });
   });
 
   // Availability and settings (Task 8).

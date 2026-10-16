@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
-import type { AdminUser, Outbox, PrismaClient } from '@prisma/client';
-import type { Express } from 'express';
+import type { AppUser, Outbox, PrismaClient } from '@prisma/client';
+import express, { type Express } from 'express';
 import { SignJWT } from 'jose';
 import type pg from 'pg';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { LOCKOUT_THRESHOLD } from '../auth/admin-auth.js';
+import { photographerLocals, requirePhotographer } from '../auth/middleware.js';
 import { hashPassword } from '../auth/password.js';
-import { toPublicAdmin } from '../auth/public-admin.js';
+import { toPublicUser } from '../auth/public-admin.js';
 import {
   TOKEN_AUDIENCE,
   TOKEN_ISSUER,
@@ -20,9 +21,11 @@ import { createPrismaClient } from '../db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 
 /**
- * `/api/admin/*` over HTTP, against real PostgreSQL (plan.md Task 7, rev 2.3).
+ * `/api/admin/*` over HTTP, against real PostgreSQL (plan.md Task 7, rev 2.3):
+ * the photographer's studio, which keeps these paths until Phase 2 (brief
+ * decision 3). Only a `photographer` login with a photographer row gets in.
  *
- * Admin auth is a JWT in `Authorization: Bearer`. No cookie is set, read or
+ * Studio auth is a JWT in `Authorization: Bearer`. No cookie is set, read or
  * honoured, and there is no CSRF token -- several tests below exist to prove
  * those absences, because a stray `Set-Cookie` or a cookie fallback would quietly
  * reintroduce the attack surface this design removed.
@@ -34,7 +37,7 @@ import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 
 let prisma: PrismaClient;
 let raw: pg.Client;
-/** Argon2id of PASSWORD, computed once: every seeded admin reuses it. */
+/** Argon2id of PASSWORD, computed once: every seeded user reuses it. */
 let passwordHash: string;
 let clock: Date;
 let app: Express;
@@ -76,15 +79,43 @@ beforeEach(async () => {
 
 // --- Fixtures ---------------------------------------------------------------
 
-function seedAdmin(email = EMAIL): Promise<AdminUser> {
-  return prisma.adminUser.create({ data: { email, passwordHash } });
+let handleCounter = 0;
+
+/** A photographer's login and their approved photographer row: what the studio admits. */
+function seedAdmin(email = EMAIL): Promise<AppUser> {
+  handleCounter += 1;
+  return prisma.appUser.create({
+    data: {
+      email,
+      role: 'photographer',
+      passwordHash,
+      photographer: {
+        create: { handle: `studio-${handleCounter}`, displayName: 'Kigali Lens', status: 'approved', approvedAt: START },
+      },
+    },
+  });
 }
 
-function reload(admin: AdminUser): Promise<AdminUser> {
-  return prisma.adminUser.findUniqueOrThrow({ where: { id: admin.id } });
+/** A login of another role, with no photographer row. */
+function seedUser(role: 'platform_admin' | 'client', email = EMAIL): Promise<AppUser> {
+  return prisma.appUser.create({ data: { email, role, passwordHash } });
 }
 
-function lockedUntilMs(admin: AdminUser): number {
+function reload(admin: AppUser): Promise<AppUser> {
+  return prisma.appUser.findUniqueOrThrow({ where: { id: admin.id } });
+}
+
+/** The stored password hash, which every seeded user has. */
+function hashOf(user: AppUser): string {
+  if (user.passwordHash === null) throw new Error('Expected a password hash');
+  return user.passwordHash;
+}
+
+async function photographerIdOf(user: AppUser): Promise<string> {
+  return (await prisma.photographer.findUniqueOrThrow({ where: { userId: user.id } })).id;
+}
+
+function lockedUntilMs(admin: AppUser): number {
   if (admin.lockedUntil === null) throw new Error('Expected the admin to be locked');
   return admin.lockedUntil.getTime();
 }
@@ -102,7 +133,7 @@ function setCookies(res: Response): string[] {
 }
 
 /** A token exactly as login would issue it, without spending Argon2. */
-async function mint(admin: AdminUser, now = clock): Promise<string> {
+async function mint(admin: AppUser, now = clock): Promise<string> {
   return (await issueAdminToken(SECRET, admin, now)).token;
 }
 
@@ -113,14 +144,16 @@ type ForgeOptions = {
   aud?: string;
   iss?: string;
   expSeconds?: number;
+  role?: string;
   fingerprint?: string;
 };
 
 /** A token with its claims under the test's control, for forgery cases. */
-async function forge(admin: AdminUser, options: ForgeOptions = {}): Promise<string> {
+async function forge(admin: AppUser, options: ForgeOptions = {}): Promise<string> {
   const nowSeconds = Math.floor(clock.getTime() / 1000);
   return new SignJWT({
-    pwd_fp: options.fingerprint ?? passwordFingerprint(SECRET, admin.passwordHash),
+    role: options.role ?? admin.role,
+    pwd_fp: options.fingerprint ?? passwordFingerprint(SECRET, hashOf(admin)),
   })
     .setProtectedHeader({ alg: options.alg ?? 'HS256', typ: 'JWT' })
     .setSubject(options.sub ?? admin.id)
@@ -167,9 +200,9 @@ function payloadOf(row: Outbox): Record<string, unknown> {
 
 /** The plaintext token, from the only place it lives: the reset email's payload. */
 async function latestResetToken(): Promise<string> {
-  const rows = await prisma.outbox.findMany({ orderBy: { createdAt: 'asc' } });
-  const row = rows.filter((r) => payloadOf(r).variant === 'password_reset').at(-1);
-  if (row === undefined) throw new Error('No password_reset email was enqueued');
+  const rows = await prisma.outbox.findMany({ where: { template: 'account_password_reset' }, orderBy: { createdAt: 'asc' } });
+  const row = rows.at(-1);
+  if (row === undefined) throw new Error('No account_password_reset email was enqueued');
   const hash = new URL(String(payloadOf(row).resetUrl)).hash;
   if (!hash.startsWith('#token=')) throw new Error(`No #token= fragment: ${hash}`);
   return hash.slice('#token='.length);
@@ -365,7 +398,7 @@ describe('POST /api/admin/auth/login', () => {
   it('answers a simultaneous burst of wrong passwords with 401 every time, never 500', async () => {
     await seedAdmin();
     // Open the pool first, so the burst measures the race, not connection setup.
-    await Promise.all(Array.from({ length: 10 }, () => prisma.adminUser.count()));
+    await Promise.all(Array.from({ length: 10 }, () => prisma.appUser.count()));
     // 20 from one IP: this measures the lockout's race, not the request limit.
     app = createApp({
       corsOrigin: WEB_ORIGIN,
@@ -377,6 +410,31 @@ describe('POST /api/admin/auth/login', () => {
 
     expect(results.map((res) => res.status)).toEqual(Array<number>(20).fill(401));
   }, 30_000);
+
+  it.each(['platform_admin', 'client'] as const)(
+    'refuses a %s with the right password exactly as it refuses an unknown email, counting nothing',
+    async (role) => {
+      const user = await seedUser(role);
+
+      const unknown = await login('nobody@bookly.example', PASSWORD);
+      const refused = await login(EMAIL, PASSWORD);
+
+      expect(refused.status).toBe(401);
+      expect(refused.text).toBe(unknown.text);
+      expect(refused.headers['content-type']).toBe(unknown.headers['content-type']);
+      await expect(reload(user)).resolves.toEqual(user);
+    },
+  );
+
+  it('refuses a photographer whose login a platform admin disabled', async () => {
+    const admin = await seedAdmin();
+    await prisma.appUser.update({ where: { id: admin.id }, data: { disabledAt: START } });
+
+    const res = await login();
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: 'invalid_credentials' });
+  });
 });
 
 // --- The bearer token -------------------------------------------------------------
@@ -405,7 +463,7 @@ describe('the bearer token', () => {
     const token = await mint(admin);
     expect((await me(token)).status).toBe(200);
 
-    await prisma.adminUser.update({
+    await prisma.appUser.update({
       where: { id: admin.id },
       data: { passwordHash: await hashPassword(NEW_PASSWORD) },
     });
@@ -428,12 +486,15 @@ describe('the bearer token', () => {
     expectUnauthenticated(await me(token), 'invalid_token');
   });
 
-  it.each<[string, (admin: AdminUser) => Promise<string>]>([
+  it.each<[string, (admin: AppUser) => Promise<string>]>([
     ['a token signed with another secret', (a) => forge(a, { secret: OTHER_SECRET })],
     ['an HS512 token signed with the right secret', (a) => forge(a, { alg: 'HS512' })],
     ['a token for another audience', (a) => forge(a, { aud: 'bookly-client' })],
     ['a token from another issuer', (a) => forge(a, { iss: 'someone-else' })],
-    ['a token for a nonexistent admin', (a) => forge(a, { sub: NONEXISTENT_ID })],
+    ['a token for a nonexistent user', (a) => forge(a, { sub: NONEXISTENT_ID })],
+    ['a token claiming the platform_admin role', (a) => forge(a, { role: 'platform_admin' })],
+    ['a token claiming the client role', (a) => forge(a, { role: 'client' })],
+    ['a token claiming a role outside the vocabulary', (a) => forge(a, { role: 'admin' })],
     ['a token whose subject is not a UUID', (a) => forge(a, { sub: 'not-a-uuid' })],
     ['a token with a stale fingerprint', (a) => forge(a, { fingerprint: 'stale' })],
     [
@@ -468,21 +529,73 @@ describe('the bearer token', () => {
     expectUnauthenticated(await me(await build(admin)), 'invalid_token');
   });
 
-  it('refuses a token for an admin that has since been deleted', async () => {
+  it('refuses a token for a user that has since been deleted', async () => {
     const admin = await seedAdmin();
     const token = await mint(admin);
-    await prisma.adminUser.delete({ where: { id: admin.id } });
+    await prisma.photographer.delete({ where: { userId: admin.id } });
+    await prisma.appUser.delete({ where: { id: admin.id } });
 
     expectUnauthenticated(await me(token), 'invalid_token');
   });
 
-  it("refuses one admin's token after the other admin's password changes only if it is theirs", async () => {
+  it('refuses a token for a photographer whose row has since been removed', async () => {
+    const admin = await seedAdmin();
+    const token = await mint(admin);
+    await prisma.photographer.delete({ where: { userId: admin.id } });
+
+    expectUnauthenticated(await me(token), 'invalid_token');
+  });
+
+  it('refuses a token, on the very next request, once a platform admin disables the login', async () => {
+    const admin = await seedAdmin();
+    const token = await mint(admin);
+    expect((await me(token)).status).toBe(200);
+
+    await prisma.appUser.update({ where: { id: admin.id }, data: { disabledAt: START } });
+
+    expectUnauthenticated(await me(token), 'invalid_token');
+  });
+
+  it('decides on the role stored now, not the one in the token', async () => {
+    const admin = await seedAdmin();
+    const token = await mint(admin);
+
+    await prisma.appUser.update({ where: { id: admin.id }, data: { role: 'client' } });
+
+    expectUnauthenticated(await me(token), 'invalid_token');
+  });
+
+  it.each(['platform_admin', 'client'] as const)('refuses a correctly issued token for a %s', async (role) => {
+    const user = await seedUser(role);
+
+    expectUnauthenticated(await me(await mint(user)), 'invalid_token');
+  });
+
+  it.each(['pending', 'suspended'])('admits a %s photographer, whose studio stays open', async (status) => {
+    const admin = await seedAdmin();
+    await prisma.photographer.update({
+      where: { userId: admin.id },
+      data: { status, approvedAt: null, ...(status === 'suspended' ? { suspendedAt: START } : {}) },
+    });
+
+    expect((await me(await mint(admin))).status).toBe(200);
+  });
+
+  it("answers /me with each photographer's own login", async () => {
+    const first = await seedAdmin();
+    const second = await seedAdmin(OTHER_EMAIL);
+
+    expect((await me(await mint(first))).body).toEqual({ admin: toPublicUser(first) });
+    expect((await me(await mint(second))).body).toEqual({ admin: toPublicUser(second) });
+  });
+
+  it("refuses one photographer's token after the other's password changes only if it is theirs", async () => {
     const first = await seedAdmin();
     const second = await seedAdmin(OTHER_EMAIL);
     const firstToken = await mint(first);
     const secondToken = await mint(second);
 
-    await prisma.adminUser.update({
+    await prisma.appUser.update({
       where: { id: second.id },
       data: { passwordHash: await hashPassword(NEW_PASSWORD) },
     });
@@ -660,7 +773,7 @@ describe('the endpoints the cookie design had and this one does not', () => {
 // --- Password reset ---------------------------------------------------------------
 
 describe('password reset over HTTP', () => {
-  it('answers 202 alike for the admin and an unknown email, emailing only the admin', async () => {
+  it('answers 202 alike for a photographer and an unknown email, emailing only the photographer', async () => {
     const admin = await seedAdmin();
 
     const unknown = await requestReset('nobody@bookly.example');
@@ -825,6 +938,18 @@ describe('password reset over HTTP', () => {
     await expect(prisma.outbox.count()).resolves.toBe(0);
   });
 
+  it.each(['platform_admin', 'client'] as const)('answers a reset request for a %s with the same 202, sending nothing', async (role) => {
+    const user = await seedUser(role);
+
+    const unknown = await requestReset('nobody@bookly.example');
+    const res = await requestReset(EMAIL);
+
+    expect(res.status).toBe(202);
+    expect(res.text).toBe(unknown.text);
+    await expect(prisma.outbox.count()).resolves.toBe(0);
+    await expect(reload(user)).resolves.toEqual(user);
+  });
+
   it.each<[string, (token: string) => unknown]>([
     ['an empty object', () => ({})],
     ['no new password', (token) => ({ token })],
@@ -871,14 +996,24 @@ describe('password_hash never leaves the API', () => {
     'failedLoginCount',
     'lockedUntil',
     'passwordReset',
+    'emailVerify',
+    'googleSub',
+    'disabledAt',
+    'role',
   ];
 
-  it('toPublicAdmin exposes exactly id, email and lastLoginAt from a fully set row', async () => {
+  it('toPublicUser exposes exactly id, email and lastLoginAt from a fully set row', async () => {
     const resetHash = sha256('a pending reset token');
-    const admin = await prisma.adminUser.create({
+    const verifyHash = sha256('a pending verification token');
+    const admin = await prisma.appUser.create({
       data: {
         email: EMAIL,
+        role: 'photographer',
+        fullName: 'Aline Photographer',
         passwordHash,
+        emailVerifiedAt: START,
+        emailVerifyTokenHash: verifyHash,
+        emailVerifyExpiresAt: START,
         failedLoginCount: 3,
         lockedUntil: START,
         passwordResetTokenHash: resetHash,
@@ -887,20 +1022,20 @@ describe('password_hash never leaves the API', () => {
       },
     });
 
-    const shown = toPublicAdmin(admin);
+    const shown = toPublicUser(admin);
 
     expect(Object.keys(shown).sort()).toEqual(['email', 'id', 'lastLoginAt']);
     expect(shown).toEqual({ id: admin.id, email: EMAIL, lastLoginAt: START.toISOString() });
     const json = JSON.stringify(shown);
-    for (const secret of [passwordHash, resetHash, ...PRIVATE_NAMES]) {
+    for (const secret of [passwordHash, resetHash, verifyHash, ...PRIVATE_NAMES]) {
       expect(json).not.toContain(secret);
     }
   });
 
-  it('toPublicAdmin renders a never-logged-in admin with lastLoginAt null', async () => {
+  it('toPublicUser renders a never-logged-in user with lastLoginAt null', async () => {
     const admin = await seedAdmin();
 
-    expect(toPublicAdmin(admin)).toEqual({ id: admin.id, email: EMAIL, lastLoginAt: null });
+    expect(toPublicUser(admin)).toEqual({ id: admin.id, email: EMAIL, lastLoginAt: null });
   });
 
   it('is absent from the text of login, /me, a refused login and a reset request', async () => {
@@ -919,10 +1054,49 @@ describe('password_hash never leaves the API', () => {
 
     expect(ok.status).toBe(200);
     for (const res of responses) {
-      for (const secret of [admin.passwordHash, passwordResetTokenHash, ...PRIVATE_NAMES]) {
+      for (const secret of [hashOf(admin), passwordResetTokenHash, ...PRIVATE_NAMES]) {
         expect(res.text).not.toContain(secret);
       }
     }
+  });
+});
+
+// --- What requirePhotographer hands the routes behind it ---------------------------------
+
+describe('requirePhotographer', () => {
+  // Every studio router reads the photographer to scope to from here
+  // (marketplace-spec.md R1.4), so this pins exactly what it carries.
+
+  function probe(): Express {
+    const probeApp = express();
+    probeApp.use(requirePhotographer({ prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock }));
+    probeApp.get('/probe', (_req, res) => {
+      const { user, photographerId } = photographerLocals(res);
+      res.json({ userId: user.id, role: user.role, photographerId, keys: Object.keys(user).sort() });
+    });
+    return probeApp;
+  }
+
+  it("puts the user and their own photographerId on res.locals, from the token's user only", async () => {
+    const first = await seedAdmin();
+    const second = await seedAdmin(OTHER_EMAIL);
+
+    for (const user of [first, second]) {
+      const res = await request(probe())
+        .get(`/probe?photographerId=${await photographerIdOf(first === user ? second : first)}`)
+        .set('Authorization', `Bearer ${await mint(user)}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ userId: user.id, role: 'photographer', photographerId: await photographerIdOf(user) });
+    }
+  });
+
+  it('carries the app_user row alone, not the photographer relation it was loaded with', async () => {
+    const admin = await seedAdmin();
+
+    const res = await request(probe()).get('/probe').set('Authorization', `Bearer ${await mint(admin)}`);
+
+    expect((res.body as { keys: string[] }).keys).toEqual(Object.keys(admin).sort());
   });
 });
 

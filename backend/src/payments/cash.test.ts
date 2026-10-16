@@ -128,7 +128,7 @@ describe('recording cash', () => {
     expect(await sessionFees(booking.id)).toHaveLength(1);
   });
 
-  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'refuses a %s booking',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status });

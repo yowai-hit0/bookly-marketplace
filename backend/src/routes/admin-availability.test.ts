@@ -1034,7 +1034,7 @@ describe('a block overlapping a confirmed booking (spec §6.4)', () => {
     const morning = await insertBooking(ids, { reference: 'BKY-2610-00001', ...NINE, contactName: 'First Client' });
     await insertBooking(ids, { reference: 'BKY-2610-00003', date: THURSDAY, from: '09:00', to: '10:00', bufferTo: '10:30' });
     await insertBooking(ids, {
-      reference: 'BKY-2610-00004', date: WEDNESDAY, from: '12:00', to: '13:00', bufferTo: '13:30', status: 'cancelled_by_admin',
+      reference: 'BKY-2610-00004', date: WEDNESDAY, from: '12:00', to: '13:00', bufferTo: '13:30', status: 'cancelled_by_photographer',
     });
 
     const res = await send('post', BLOCKS, allDay(WEDNESDAY));
@@ -1049,7 +1049,7 @@ describe('a block overlapping a confirmed booking (spec §6.4)', () => {
     ['no_show', null],
     ['expired', null],
     ['cancelled_by_client', null],
-    ['cancelled_by_admin', null],
+    ['cancelled_by_photographer', null],
   ])('does not warn for a %s booking, which it leaves untouched', async (status, holdExpiresAt) => {
     const ids = await insertCatalogue();
     const booking = await insertBooking(ids, { reference: 'BKY-2610-00001', ...NINE, status, holdExpiresAt });

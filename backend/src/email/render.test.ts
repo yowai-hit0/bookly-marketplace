@@ -3,9 +3,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import en from '../i18n/locales/en.json' with { type: 'json' };
-import { EMAIL_TEMPLATES, OUTBOX_KINDS } from '../outbox/enqueue.js';
+import { EMAIL_TEMPLATES, OUTBOX_KINDS, SENDABLE_EMAIL_TEMPLATES } from '../outbox/enqueue.js';
 import {
-  ADMIN_ALERT_VARIANTS,
   EMAIL_FIXTURES,
   type EmailFixture,
   FIXTURE_ACCESS_TOKEN,
@@ -15,18 +14,22 @@ import {
   FIXTURE_SECOND_ACCESS_TOKEN,
   FIXTURE_SECOND_REFERENCE,
   FIXTURE_WEB_ORIGIN,
+  TEMPLATE_VARIANTS,
   emailFixture,
 } from '../test/email-fixtures.js';
 import { escapeHtml } from './layout.js';
 import { TEMPLATES, renderEmail } from './render.js';
-import { adminAlert } from './templates/admin-alert.js';
+import { accountSecurityAlert } from './templates/account-security-alert.js';
+import { photographerAlert } from './templates/photographer-alert.js';
+import { platformAlert } from './templates/platform-alert.js';
 import { paymentReceipt } from './templates/payment-receipt.js';
 import { reschedule } from './templates/reschedule.js';
 import { EmailPayloadError } from './templates/shared.js';
 
 /**
- * Rendering (plan.md Task 15, spec §4.1): all nine templates and every
- * admin_alert variant from fixtures, snapshot-tested, with Kigali times and
+ * Rendering (plan.md Task 15, spec §4.1): every sendable template and every
+ * variant of the alert and account templates (marketplace-data-model.md §2.14)
+ * from fixtures, snapshot-tested, with Kigali times and
  * integer RWF read against the same docs/fixtures/format.json the frontend
  * asserts. No database: rendering is a pure function of template and payload.
  */
@@ -87,22 +90,28 @@ function urlsIn(content: string): string[] {
 // --- Every template ------------------------------------------------------------
 
 describe('the fixtures', () => {
-  it('cover every template and every admin_alert variant', () => {
-    expect([...new Set(EMAIL_FIXTURES.map((fixture) => fixture.template))].sort()).toEqual([...EMAIL_TEMPLATES].sort());
-
-    const variants = EMAIL_FIXTURES.filter((fixture) => fixture.template === 'admin_alert').map(
-      (fixture) => (fixture.payload as Payload).variant,
-    );
-    expect([...variants].sort()).toEqual([...ADMIN_ALERT_VARIANTS].sort());
-
-    // And the template accepts no variant the fixtures do not cover.
-    const union = adminAlert.payload as unknown as { options: { shape: { variant: { value: string } } }[] };
-    expect(union.options.map((option) => option.shape.variant.value).sort()).toEqual([...ADMIN_ALERT_VARIANTS].sort());
+  it('cover every sendable template', () => {
+    expect([...new Set(EMAIL_FIXTURES.map((fixture) => fixture.template))].sort()).toEqual([...SENDABLE_EMAIL_TEMPLATES].sort());
   });
 
-  it('includes the four admin_alert situations the plan names: payment received, retries exhausted, login lockout, refund due', () => {
+  it.each([
+    ['photographer_alert', photographerAlert],
+    ['platform_alert', platformAlert],
+    ['account_security_alert', accountSecurityAlert],
+  ] as const)('cover every %s variant, and the template accepts no other', (template, definition) => {
+    const variants = EMAIL_FIXTURES.filter((fixture) => fixture.template === template).map(
+      (fixture) => (fixture.payload as Payload).variant,
+    );
+    expect([...variants].sort()).toEqual([...TEMPLATE_VARIANTS[template]].sort());
+
+    const union = definition.payload as unknown as { options: { shape: { variant: { value: string } } }[] };
+    expect(union.options.map((option) => option.shape.variant.value).sort()).toEqual([...TEMPLATE_VARIANTS[template]].sort());
+  });
+
+  it('still covers the four situations the plan names for the old admin_alert: payment received, retries exhausted, login lockout, refund due', () => {
+    const covered = Object.values(TEMPLATE_VARIANTS).flat();
     for (const variant of ['payment_received', 'retries_exhausted', 'login_lockout', 'refund_due']) {
-      expect(ADMIN_ALERT_VARIANTS).toContain(variant);
+      expect(covered).toContain(variant);
     }
   });
 });
@@ -146,13 +155,13 @@ describe('times in Africa/Kigali and integer RWF, against docs/fixtures/format.j
     expect(receipt.text).toContain(`Paid on: ${expected} (Kigali time)`);
     expect(receipt.html).toContain(`${expected} (Kigali time)`);
 
-    const alert = renderWith('admin_alert payment_received', { paidAt: input });
+    const alert = renderWith('photographer_alert payment_received', { paidAt: input });
     expect(alert.text).toContain(`Paid on: ${expected} (Kigali time)`);
 
-    const lockout = renderWith('admin_alert login_lockout', { lockedUntil: input });
+    const lockout = renderWith('account_security_alert login_lockout', { lockedUntil: input });
     expect(lockout.text).toContain(`locked until ${expected} (Kigali time)`);
 
-    const reset = renderWith('admin_alert password_reset', { expiresAt: input });
+    const reset = renderWith('account_password_reset', { expiresAt: input });
     expect(reset.text).toContain(`until ${expected} (Kigali time)`);
   });
 
@@ -188,7 +197,7 @@ describe('times in Africa/Kigali and integer RWF, against docs/fixtures/format.j
     expect(email.text).toContain('Friday, 1 January 2027, 00:00 to 01:00 (Kigali time)');
     expect(email.text).not.toContain('2026');
 
-    const calendar = renderWith('admin_new_booking', { startsAt: '2026-12-31T22:00:00Z', endsAt: '2026-12-31T23:00:00Z' });
+    const calendar = renderWith('photographer_new_booking', { startsAt: '2026-12-31T22:00:00Z', endsAt: '2026-12-31T23:00:00Z' });
     expect(hrefs(calendar.html)).toContain(`${FIXTURE_WEB_ORIGIN}/admin/calendar?view=day&date=2027-01-01`);
   });
 
@@ -207,11 +216,11 @@ describe('times in Africa/Kigali and integer RWF, against docs/fixtures/format.j
     const request = renderWith('session_fee_request', { amountRwf: input });
     expect(request.text).toContain(`Amount due: ${expected}`);
 
-    const newBooking = renderWith('admin_new_booking', { totalRwf: input, addons: [{ name: 'Prints', priceRwf: input }] });
+    const newBooking = renderWith('photographer_new_booking', { totalRwf: input, addons: [{ name: 'Prints', priceRwf: input }] });
     expect(newBooking.text).toContain(`Total: ${expected}`);
     expect(newBooking.text).toContain(`Prints: ${expected}`);
 
-    const refund = renderWith('admin_alert refund_due', { amountRwf: input });
+    const refund = renderWith('photographer_alert refund_due', { amountRwf: input });
     expect(refund.subject).toContain(`Refund due: ${expected}`);
   });
 
@@ -221,7 +230,7 @@ describe('times in Africa/Kigali and integer RWF, against docs/fixtures/format.j
       ['session_fee_request', 'amountRwf'],
       ['payment_receipt', 'outstandingRwf'],
       ['cancellation (by admin)', 'refundRwf'],
-      ['admin_alert refund_due', 'amountRwf'],
+      ['photographer_alert refund_due', 'amountRwf'],
     ] as const) {
       const { template, payload } = withPayload(name, { [field]: input });
       expect(payloadError(() => render(template, payload)).message).toContain(field);
@@ -307,8 +316,8 @@ describe('booking_confirmation', () => {
     }
   });
 
-  it('password_reset carries its token only inside the reset link', () => {
-    const email = renderFixture(emailFixture('admin_alert password_reset'));
+  it('account_password_reset carries its token only inside the reset link', () => {
+    const email = renderFixture(emailFixture('account_password_reset'));
     const resetUrl = `${FIXTURE_WEB_ORIGIN}/admin/reset-password#token=${FIXTURE_RESET_TOKEN}`;
 
     expect(email.subject).not.toContain(FIXTURE_RESET_TOKEN);
@@ -341,8 +350,9 @@ describe('links point at WEB_ORIGIN, never at the API host', () => {
     );
     expect(withoutLinks.sort()).toEqual(
       [
-        'admin_alert booking_cancelled',
-        'admin_alert retries_exhausted',
+        'photographer_alert booking_cancelled',
+        'photographer_alert retries_exhausted',
+        'platform_alert retries_exhausted',
         'cancellation (by admin)',
         'cancellation (by client)',
         // To the old address after an email change: it must not get a way into the booking.
@@ -357,7 +367,7 @@ describe('links point at WEB_ORIGIN, never at the API host', () => {
     const webOrigin = 'http://localhost:5173';
     for (const fixture of EMAIL_FIXTURES) {
       const payload =
-        fixture.name === 'admin_alert password_reset'
+        fixture.name === 'account_password_reset'
           ? { ...(fixture.payload as Payload), resetUrl: `${webOrigin}/admin/reset-password#token=${FIXTURE_RESET_TOKEN}` }
           : fixture.payload;
       const email = renderEmail(fixture.template, payload, { webOrigin });
@@ -377,7 +387,7 @@ describe('links point at WEB_ORIGIN, never at the API host', () => {
     ['a javascript: URL', 'javascript:alert(document.cookie)'],
     ['not a URL at all', 'reset-password#token=abc'],
   ])('refuses a password_reset link on %s', (_case, resetUrl) => {
-    const { template, payload } = withPayload('admin_alert password_reset', { resetUrl });
+    const { template, payload } = withPayload('account_password_reset', { resetUrl });
 
     const error = payloadError(() => render(template, payload));
     expect(error.message).not.toContain('abc');
@@ -396,9 +406,9 @@ describe('escaping', () => {
     ['booking_confirmation', 'serviceName', HOSTILE],
     ['booking_confirmation', 'packageName', HOSTILE],
     ['booking_confirmation', 'locationText', HOSTILE],
-    ['admin_new_booking', 'clientName', HOSTILE],
-    ['admin_new_booking', 'specialRequests', HOSTILE],
-    ['admin_new_booking', 'addons', [{ name: HOSTILE, priceRwf: 5000 }]],
+    ['photographer_new_booking', 'clientName', HOSTILE],
+    ['photographer_new_booking', 'specialRequests', HOSTILE],
+    ['photographer_new_booking', 'addons', [{ name: HOSTILE, priceRwf: 5000 }]],
     ['session_fee_request', 'clientName', HOSTILE],
     ['payment_receipt', 'paymentReference', HOSTILE],
     ['photo_delivery', 'note', HOSTILE],
@@ -411,10 +421,10 @@ describe('escaping', () => {
     ['email_change_confirm', 'newEmail', HOSTILE],
     ['email_changed_notice', 'newEmail', HOSTILE],
     ['client_note', 'body', HOSTILE],
-    ['admin_alert payment_received', 'clientName', HOSTILE],
-    ['admin_alert retries_exhausted', 'lastError', HOSTILE],
-    ['admin_alert refund_due', 'paymentReference', HOSTILE],
-    ['admin_alert booking_cancelled', 'clientName', HOSTILE],
+    ['photographer_alert payment_received', 'clientName', HOSTILE],
+    ['photographer_alert retries_exhausted', 'lastError', HOSTILE],
+    ['photographer_alert refund_due', 'paymentReference', HOSTILE],
+    ['photographer_alert booking_cancelled', 'clientName', HOSTILE],
   ];
 
   it.each(fields)('%s: %s is escaped in HTML and literal in text', (name, field, value) => {
@@ -426,18 +436,18 @@ describe('escaping', () => {
   });
 
   it('keeps a visitor’s own line breaks, as <br> in HTML and as newlines in text', () => {
-    const email = renderFixture(emailFixture('admin_new_booking'));
+    const email = renderFixture(emailFixture('photographer_new_booking'));
 
     expect(email.html).toContain('Outdoor shots if the weather allows.<br>Please bring a reflector.');
     expect(email.text).toContain('Outdoor shots if the weather allows.\nPlease bring a reflector.');
   });
 
   it.each([
-    ['admin_new_booking', 'clientName'],
+    ['photographer_new_booking', 'clientName'],
     ['booking_confirmation', 'serviceName'],
-    ['admin_alert payment_received', 'clientName'],
-    ['admin_alert refund_due', 'clientName'],
-    ['admin_alert booking_cancelled', 'clientName'],
+    ['photographer_alert payment_received', 'clientName'],
+    ['photographer_alert refund_due', 'clientName'],
+    ['photographer_alert booking_cancelled', 'clientName'],
   ])('%s: CR/LF in %s cannot inject a header through the subject', (name, field) => {
     for (const value of ['Eve\r\nBcc: attacker@evil.example', 'Eve\nBcc: attacker@evil.example', 'Eve\rBcc: attacker@evil.example']) {
       const email = renderWith(name, { [field]: value });
@@ -449,12 +459,12 @@ describe('escaping', () => {
   });
 
   it.each([
-    ['admin_alert booking_cancelled', 'clientName', '{{reference}}'],
-    ['admin_alert payment_received', 'clientName', '{{reference}}'],
-    ['admin_new_booking', 'clientName', '{{date}}'],
+    ['photographer_alert booking_cancelled', 'clientName', '{{reference}}'],
+    ['photographer_alert payment_received', 'clientName', '{{reference}}'],
+    ['photographer_new_booking', 'clientName', '{{date}}'],
     ['booking_confirmation', 'serviceName', '{{reference}}'],
-    ['admin_alert booking_cancelled', 'clientName', '$t(email:common.footer)'],
-    ['admin_alert booking_cancelled', 'clientName', '$& $1 $$'],
+    ['photographer_alert booking_cancelled', 'clientName', '$t(email:common.footer)'],
+    ['photographer_alert booking_cancelled', 'clientName', '$& $1 $$'],
   ])('%s: interpolation syntax in %s (%s) is shown literally, not interpreted', (name, field, value) => {
     const fixture = emailFixture(name);
     const email = renderWith(name, { [field]: value });
@@ -483,9 +493,9 @@ describe('payload validation', () => {
   it('never repeats an offending value: not a token, an address or a name', () => {
     const cases: [string, Payload, string, string][] = [
       ['booking_confirmation', { accessToken: 'SECRET-token-with-illegal-characters!!' }, 'accessToken', 'SECRET-token'],
-      ['admin_new_booking', { clientEmail: 'not-an-address-private-person' }, 'clientEmail', 'private-person'],
+      ['photographer_new_booking', { clientEmail: 'not-an-address-private-person' }, 'clientEmail', 'private-person'],
       ['booking_confirmation', { clientName: 'x'.repeat(201) + 'PRIVATE' }, 'clientName', 'PRIVATE'],
-      ['admin_alert password_reset', { resetUrl: 'not a url PRIVATE-TOKEN' }, 'resetUrl', 'PRIVATE-TOKEN'],
+      ['account_password_reset', { resetUrl: 'not a url PRIVATE-TOKEN' }, 'resetUrl', 'PRIVATE-TOKEN'],
       ['photo_delivery', { deliveryUrl: 'http://drive.example/PRIVATE-share' }, '', 'PRIVATE-share'],
     ];
     for (const [name, changes, path, secret] of cases) {
@@ -508,8 +518,8 @@ describe('payload validation', () => {
   });
 
   it('names nested paths', () => {
-    const error = payloadError(() => renderWith('admin_new_booking', { addons: [{ name: 'Prints', priceRwf: 1.5 }] }));
-    expect(error.message).toBe('The admin_new_booking payload is invalid at: addons.0.priceRwf');
+    const error = payloadError(() => renderWith('photographer_new_booking', { addons: [{ name: 'Prints', priceRwf: 1.5 }] }));
+    expect(error.message).toBe('The photographer_new_booking payload is invalid at: addons.0.priceRwf');
   });
 
   it.each(['http://photos.example-host.com/s/abc', 'javascript:alert(1)', 'ftp://photos.example-host.com/abc', 'not a url'])(
@@ -527,18 +537,30 @@ describe('payload validation', () => {
     ['a short token', { accessToken: 'abc' }, 'booking_confirmation'],
     ['an unknown cancelledBy', { cancelledBy: 'system' }, 'cancellation (by client)'],
     ['an unknown payment kind', { kind: 'tip' }, 'payment_receipt'],
-    ['an unknown refund reason', { reason: 'goodwill' }, 'admin_alert refund_due'],
-    ['an unknown provider', { provider: 'stripe' }, 'admin_alert refund_due'],
-    ['an unknown message kind', { messageKind: 'sms' }, 'admin_alert retries_exhausted'],
-    ['a zero lockout count', { failedLoginCount: 0 }, 'admin_alert login_lockout'],
+    ['an unknown refund reason', { reason: 'goodwill' }, 'photographer_alert refund_due'],
+    ['an unknown provider', { provider: 'stripe' }, 'photographer_alert refund_due'],
+    ['an unknown message kind', { messageKind: 'sms' }, 'photographer_alert retries_exhausted'],
+    ['a zero lockout count', { failedLoginCount: 0 }, 'account_security_alert login_lockout'],
     ['an empty reference', { reference: '   ' }, 'session_fee_request'],
   ])('rejects %s', (_case, changes, name) => {
     expect(() => renderWith(name, changes)).toThrow(EmailPayloadError);
   });
 
-  it('rejects an unknown admin_alert variant, or none, naming variant', () => {
-    expect(payloadError(() => render('admin_alert', { variant: 'weekly_digest' })).message).toContain('variant');
-    expect(payloadError(() => render('admin_alert', { failedLoginCount: 5 })).message).toContain('variant');
+  it.each(['photographer_alert', 'platform_alert', 'account_security_alert'])('rejects an unknown %s variant, or none, naming variant', (template) => {
+    expect(payloadError(() => render(template, { variant: 'weekly_digest' })).message).toContain('variant');
+    expect(payloadError(() => render(template, { failedLoginCount: 5 })).message).toContain('variant');
+  });
+
+  it.each([
+    ['photographer_alert', 'login_lockout', { failedLoginCount: 5, lockedUntil: '2026-03-14T15:00:00.000Z' }],
+    ['photographer_alert', 'password_reset', { resetUrl: `${FIXTURE_WEB_ORIGIN}/admin/reset-password#token=x`, expiresAt: '2026-12-31T22:00:00.000Z' }],
+    ['platform_alert', 'payment_received', {}],
+  ])('no longer renders %s as the old admin_alert %s', (template, variant, rest) => {
+    expect(payloadError(() => render(template, { variant, ...rest })).message).toContain('variant');
+  });
+
+  it.each(['admin_alert', 'admin_new_booking', 'subscription_reminder', 'payout_sent'])('refuses %s, which has no renderer, as an unknown template', (template) => {
+    expect(payloadError(() => render(template, {})).message).toBe(`Unknown email template: ${template}`);
   });
 
   it.each([null, undefined, 'a string', 42, []])('rejects a payload that is not an object: %s', (payload) => {
@@ -555,13 +577,13 @@ describe('payload validation', () => {
     }
   });
 
-  it('defaults the optional admin_new_booking fields', () => {
-    const { payload } = withPayload('admin_new_booking', {});
+  it('defaults the optional photographer_new_booking fields', () => {
+    const { payload } = withPayload('photographer_new_booking', {});
     delete payload.partySize;
     delete payload.specialRequests;
     delete payload.addons;
 
-    const email = render('admin_new_booking', payload);
+    const email = render('photographer_new_booking', payload);
 
     expect(email.text).toContain('People: Not given');
     expect(email.text).toContain('Special requests: Not given');
@@ -700,7 +722,7 @@ describe('content rules', () => {
   });
 
   it('refund_due tells the photographer the system does not move money', () => {
-    const email = renderFixture(emailFixture('admin_alert refund_due'));
+    const email = renderFixture(emailFixture('photographer_alert refund_due'));
 
     expect(email.text).toContain('The system does not move money. Refund the client through MTN MoMo');
   });
@@ -711,7 +733,7 @@ describe('content rules', () => {
     ['duplicate_payment', 'The client paid the booking fee twice. The booking stands on the first payment; this one is owed back.'],
     ['session_fee_after_client_cancel', 'cancelled after paying the session fee'],
   ])('refund_due explains the reason %s in words (plan.md Tasks 17, 19)', (reason, words) => {
-    const email = renderWith('admin_alert refund_due', { reason });
+    const email = renderWith('photographer_alert refund_due', { reason });
 
     expect(email.text).toContain(words);
     expect(email.html).toContain(escapeHtml(words));
@@ -719,7 +741,7 @@ describe('content rules', () => {
   });
 
   it('refund_due for a duplicate booking fee (plan.md Task 17) matches its snapshot', () => {
-    const email = renderWith('admin_alert refund_due', { reason: 'duplicate_payment', paymentReference: '4100000123' });
+    const email = renderWith('photographer_alert refund_due', { reason: 'duplicate_payment', paymentReference: '4100000123' });
 
     expect(email.subject).toMatchSnapshot('subject');
     expect(email.text).toMatchSnapshot('text');
@@ -739,18 +761,28 @@ describe('content rules', () => {
     ...OUTBOX_KINDS.filter((kind) => kind !== 'email').map((kind) => [kind, null] as const),
     ['email', null] as const,
   ])('a retries_exhausted alert for %s %s names the message in words, not a translation key', (messageKind, template) => {
-    const email = render('admin_alert', {
-      variant: 'retries_exhausted',
-      messageKind,
-      template,
-      bookingReference: null,
-      attempts: 8,
-      lastError: 'Error: boom',
-    });
+    for (const alert of ['photographer_alert', 'platform_alert']) {
+      const email = render(alert, {
+        variant: 'retries_exhausted',
+        messageKind,
+        template,
+        bookingReference: null,
+        attempts: 8,
+        lastError: 'Error: boom',
+      });
 
-    const line = email.text.split('\n').find((l) => l.startsWith('Message: ')) ?? '';
-    expect(line).toMatch(/^Message: [A-Z][a-z]+( [A-Za-z]+)+$/);
-    expect(email.text).not.toContain('retriesExhausted');
+      const line = email.text.split('\n').find((l) => l.startsWith('Message: ')) ?? '';
+      expect(line).toMatch(/^Message: [A-Z][a-z]+( [A-Za-z]+)+$/);
+      expect(email.text).not.toContain('retriesExhausted');
+    }
+  });
+
+  it('tells the platform admins, not a photographer, in the platform_alert', () => {
+    const email = renderFixture(emailFixture('platform_alert retries_exhausted'));
+
+    expect(email.text).toContain('Message: Password reset link to an account holder');
+    expect(email.text).toContain('it has come to the platform admins');
+    expect(email.text).not.toMatch(/\byou(r)?\b.*(calendar|client)/i);
   });
 });
 
@@ -839,8 +871,8 @@ describe('reschedule with and without an access token', () => {
 });
 
 describe('the registry', () => {
-  it('holds one definition per template, each with a schema and a composer', () => {
-    expect(Object.keys(TEMPLATES).sort()).toEqual([...EMAIL_TEMPLATES].sort());
+  it('holds one definition per sendable template, each with a schema and a composer', () => {
+    expect(Object.keys(TEMPLATES).sort()).toEqual([...SENDABLE_EMAIL_TEMPLATES].sort());
     for (const definition of Object.values(TEMPLATES)) {
       expect(typeof definition.payload.safeParse).toBe('function');
       expect(typeof definition.compose).toBe('function');
@@ -1092,9 +1124,9 @@ describe('photo_delivery', () => {
   });
 });
 
-describe('admin_alert refund_due for cash (admin console fixes, item 7)', () => {
+describe('photographer_alert refund_due for cash (admin console fixes, item 7)', () => {
   it('names cash as the provider and says to give it back by hand', () => {
-    const email = renderWith('admin_alert refund_due', { provider: 'cash' });
+    const email = renderWith('photographer_alert refund_due', { provider: 'cash' });
 
     expect(email.text).toContain('Cash');
     expect(email.text).toContain('This was paid in cash: give it back to the client, then record the refund on the booking.');
@@ -1102,7 +1134,7 @@ describe('admin_alert refund_due for cash (admin console fixes, item 7)', () => 
   });
 
   it('keeps the provider sentence for money paid online', () => {
-    const email = renderWith('admin_alert refund_due', { provider: 'mtn_momo_direct' });
+    const email = renderWith('photographer_alert refund_due', { provider: 'mtn_momo_direct' });
 
     expect(email.text).toContain('Refund the client through MTN MoMo, then record the refund on the booking.');
   });

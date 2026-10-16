@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { type OutboxKind, enqueue } from './enqueue.js';
+import { type OutboxKind, type SendableEmailTemplate, enqueue } from './enqueue.js';
+import { photographerRecipient, platformAdminRecipients } from './recipients.js';
 
 /**
  * The outbox worker (plan.md Task 14; spec §6.17; data-model_v2.md §5.13): the
@@ -8,8 +9,10 @@ import { type OutboxKind, enqueue } from './enqueue.js';
  * A row is claimed by moving it to `processing` and pushing `next_attempt_at`
  * out by a lease. Delivered, it becomes `done`. A handler that throws puts it
  * back to `pending` with exponential backoff; past the attempt ceiling -- or on
- * an error no retry can fix -- it becomes `failed` and the photographer gets an
- * `admin_alert` carrying the last error, in the same transaction.
+ * an error no retry can fix -- it becomes `failed` and, in the same
+ * transaction, an alert carrying the last error goes to the row's photographer
+ * (`photographer_alert`) or, for a row that concerns no photographer, to every
+ * platform admin (`platform_alert`).
  *
  * The lease is the crash recovery. The queue query takes any row whose
  * `next_attempt_at` has passed while `pending` OR `processing`, so a row claimed
@@ -27,6 +30,8 @@ export type OutboxRow = {
   id: string;
   kind: OutboxKind;
   bookingId: string | null;
+  /** The studio the row concerns: its booking's photographer, or null for platform and account mail. */
+  photographerId: string | null;
   dedupeKey: string;
   template: string | null;
   recipient: string | null;
@@ -99,6 +104,7 @@ type ClaimedRowRecord = {
   id: string;
   kind: OutboxKind;
   booking_id: string | null;
+  photographer_id: string | null;
   dedupe_key: string;
   template: string | null;
   recipient: string | null;
@@ -127,16 +133,21 @@ export async function claimNext(
            attempts = attempts + 1,
            next_attempt_at = now() + make_interval(secs => ${OUTBOX_LEASE_MS / 1000}::double precision)
      WHERE id = (${dueRowQuery(kinds)})
-    RETURNING id::text AS id, kind, booking_id::text AS booking_id, dedupe_key, template, recipient, payload, attempts`;
+    RETURNING ${CLAIMED_COLUMNS}`;
   const row = rows[0];
   return row === undefined ? null : toRow(row);
 }
+
+/** What the claim and the abandoned-row sweep both return: one `ClaimedRowRecord`. */
+const CLAIMED_COLUMNS = Prisma.sql`id::text AS id, kind, booking_id::text AS booking_id, photographer_id::text AS photographer_id,
+              dedupe_key, template, recipient, payload, attempts`;
 
 function toRow(record: ClaimedRowRecord): OutboxRow {
   return {
     id: record.id,
     kind: record.kind,
     bookingId: record.booking_id,
+    photographerId: record.photographer_id,
     dedupeKey: record.dedupe_key,
     template: record.template,
     recipient: record.recipient,
@@ -259,7 +270,7 @@ async function recordFailure(
       data: { status: 'failed', lastError },
     });
     if (count === 0) return false;
-    await alertAdmin(tx, row, lastError, log);
+    await alertOnFailure(tx, row, lastError, log);
     return true;
   });
   // Cancelled while in flight: nothing failed, so nothing to report.
@@ -283,9 +294,9 @@ async function failAbandoned(
          AND next_attempt_at <= now()
          AND attempts >= ${OUTBOX_MAX_ATTEMPTS}
          AND kind = ANY(${[...kinds]}::text[])
-      RETURNING id::text AS id, kind, booking_id::text AS booking_id, dedupe_key, template, recipient, payload, attempts`;
+      RETURNING ${CLAIMED_COLUMNS}`;
     for (const record of rows) {
-      await alertAdmin(tx, toRow(record), ABANDONED_ERROR, log);
+      await alertOnFailure(tx, toRow(record), ABANDONED_ERROR, log);
     }
     return rows;
   });
@@ -295,42 +306,64 @@ async function failAbandoned(
 }
 
 /**
- * Tells the photographer a message will not arrive (spec §6.17). Not for a
- * failed alert to him: the channel that just failed is the one it would use, and
- * a chain of alerts about alerts helps nobody -- that one is logged only.
+ * The alert templates. A failed one is logged only: the channel that just
+ * failed is the one an alert about it would use, and a chain of alerts about
+ * alerts helps nobody.
  */
-async function alertAdmin(
+const ALERT_TEMPLATES: readonly (string | null)[] = ['photographer_alert', 'platform_alert'] satisfies SendableEmailTemplate[];
+
+/**
+ * Tells someone a message will not arrive (spec §6.17): the photographer whose
+ * studio the row concerns (marketplace-spec.md R1.7), or, when it concerns
+ * none -- account mail, say -- every platform admin (brief decision 6).
+ */
+async function alertOnFailure(
   tx: Prisma.TransactionClient,
   row: OutboxRow,
   lastError: string,
   log: (entry: Record<string, unknown>) => void,
 ): Promise<void> {
-  if (row.template === 'admin_alert') return;
+  if (ALERT_TEMPLATES.includes(row.template)) return;
 
-  const admin = await tx.adminUser.findFirst({ orderBy: { createdAt: 'asc' }, select: { email: true } });
-  if (admin === null) {
-    log({ level: 'error', event: 'outbox_alert_skipped', reason: 'no_admin_user', id: row.id });
-    return;
-  }
   const booking =
     row.bookingId === null
       ? null
       : await tx.booking.findUnique({ where: { id: row.bookingId }, select: { reference: true } });
+  const payload = {
+    variant: 'retries_exhausted',
+    messageKind: row.kind,
+    template: row.template,
+    bookingReference: booking?.reference ?? null,
+    attempts: row.attempts,
+    lastError,
+  };
 
-  await enqueue(tx, {
-    kind: 'email',
-    template: 'admin_alert',
-    recipient: admin.email,
-    dedupeKey: `email:admin_alert:retries_exhausted:${row.id}`,
-    payload: {
-      variant: 'retries_exhausted',
-      messageKind: row.kind,
-      template: row.template,
-      bookingReference: booking?.reference ?? null,
-      attempts: row.attempts,
-      lastError,
-    },
-  });
+  const photographer = row.photographerId === null ? null : await photographerRecipient(tx, row.photographerId);
+  if (photographer !== null) {
+    await enqueue(tx, {
+      kind: 'email',
+      template: 'photographer_alert',
+      ...photographer,
+      dedupeKey: `email:photographer_alert:retries_exhausted:${row.id}`,
+      payload,
+    });
+    return;
+  }
+
+  const admins = await platformAdminRecipients(tx);
+  if (admins.length === 0) {
+    log({ level: 'error', event: 'outbox_alert_skipped', reason: 'no_platform_admin', id: row.id });
+    return;
+  }
+  for (const admin of admins) {
+    await enqueue(tx, {
+      kind: 'email',
+      template: 'platform_alert',
+      recipient: admin.recipient,
+      dedupeKey: `email:platform_alert:retries_exhausted:${row.id}:${admin.userId}`,
+      payload,
+    });
+  }
 }
 
 // --- Helpers --------------------------------------------------------------------

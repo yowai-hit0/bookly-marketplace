@@ -7,6 +7,7 @@ import { bookingTotals } from '../booking/totals.js';
 import { isSlotTaken, isTransactionConflict } from '../db/errors.js';
 import { OCCUPYING_STATUSES } from '../db/statuses.js';
 import { enqueue } from '../outbox/enqueue.js';
+import { bookingPhotographerRecipient } from '../outbox/recipients.js';
 import {
   type PaymentProvider,
   type PaymentProviderId,
@@ -407,17 +408,14 @@ async function confirm(
     payload: { ...basics, accessToken: token },
   });
 
-  const admin = await adminRecipient(tx);
-  if (admin === null) {
-    logs.push({ level: 'error', event: 'admin_new_booking_skipped', reason: 'no_admin_user', bookingId: confirmed.id });
-    return;
-  }
+  // The booking's photographer (R1.7): the row takes its photographer_id from the booking.
+  const { recipient } = await bookingPhotographerRecipient(tx, confirmed.id);
   await enqueue(tx, {
     kind: 'email',
-    template: 'admin_new_booking',
-    recipient: admin,
+    template: 'photographer_new_booking',
+    recipient,
     bookingId: confirmed.id,
-    dedupeKey: `email:admin_new_booking:${confirmed.id}`,
+    dedupeKey: `email:photographer_new_booking:${confirmed.id}`,
     payload: {
       ...basics,
       clientEmail: confirmed.contactEmail,
@@ -451,16 +449,11 @@ async function flagOverpayment(
   if (overpaidRwf <= 0) return;
 
   logs.push({ level: 'error', event: 'booking_overpaid', paymentId: payment.id, bookingId: booking.id, overpaidRwf });
-  const admin = await adminRecipient(tx);
-  if (admin === null) {
-    logs.push({ level: 'error', event: 'overpaid_alert_skipped', reason: 'no_admin_user', paymentId: payment.id });
-    return;
-  }
   await enqueue(tx, {
     kind: 'email',
-    template: 'admin_alert',
-    recipient: admin,
-    dedupeKey: `email:admin_alert:overpayment:${payment.id}`,
+    template: 'photographer_alert',
+    ...(await bookingPhotographerRecipient(tx, booking.id)),
+    dedupeKey: `email:photographer_alert:overpayment:${payment.id}`,
     payload: {
       variant: 'refund_due',
       reference: booking.reference,
@@ -493,16 +486,11 @@ async function refundDue(
     select: { providerRef: true, ourRef: true },
   });
 
-  const admin = await adminRecipient(tx);
-  if (admin === null) {
-    logs.push({ level: 'error', event: 'refund_due_alert_skipped', reason: 'no_admin_user', paymentId: payment.id });
-    return;
-  }
   await enqueue(tx, {
     kind: 'email',
-    template: 'admin_alert',
-    recipient: admin,
-    dedupeKey: `email:admin_alert:refund_due:${payment.id}`,
+    template: 'photographer_alert',
+    ...(await bookingPhotographerRecipient(tx, booking.id)),
+    dedupeKey: `email:photographer_alert:refund_due:${payment.id}`,
     payload: {
       variant: 'refund_due',
       reference: booking.reference,
@@ -573,16 +561,11 @@ async function receipt(
     },
   });
 
-  const admin = await adminRecipient(tx);
-  if (admin === null) {
-    logs.push({ level: 'error', event: 'payment_received_alert_skipped', reason: 'no_admin_user', paymentId: payment.id });
-    return;
-  }
   await enqueue(tx, {
     kind: 'email',
-    template: 'admin_alert',
-    recipient: admin,
-    dedupeKey: `email:admin_alert:payment_received:${payment.id}`,
+    template: 'photographer_alert',
+    ...(await bookingPhotographerRecipient(tx, booking.id)),
+    dedupeKey: `email:photographer_alert:payment_received:${payment.id}`,
     payload: {
       variant: 'payment_received',
       reference: booking.reference,
@@ -594,12 +577,6 @@ async function receipt(
       startsAt: booking.startsAt.toISOString(),
     },
   });
-}
-
-/** The photographer: the one admin account (spec §2.1), oldest first should there ever be two. */
-async function adminRecipient(tx: Prisma.TransactionClient): Promise<string | null> {
-  const admin = await tx.adminUser.findFirst({ orderBy: { createdAt: 'asc' }, select: { email: true } });
-  return admin?.email ?? null;
 }
 
 // --- Storage ------------------------------------------------------------------------

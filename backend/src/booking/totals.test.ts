@@ -11,7 +11,7 @@ import { type TotalsAddon, type TotalsPayment, bookingTotals } from './totals.js
  * payments are collected, and refund_due is reported beside them, never netted
  * off; and what is outstanding depends on the status -- the grand total less
  * what was collected for pending_payment, confirmed and completed, and nothing
- * at all for no_show, cancelled_by_client, cancelled_by_admin and expired.
+ * at all for no_show, cancelled_by_client, cancelled_by_photographer and expired.
  * Outstanding never goes below zero, and moving a payment to refund_due does
  * not make the client owe more on a booking that no longer stands.
  */
@@ -84,7 +84,7 @@ describe('bookingTotals: outstanding, by booking status (data-model_v2.md §6.1)
     ['completed', 37_000],
     ['no_show', 0],
     ['cancelled_by_client', 0],
-    ['cancelled_by_admin', 0],
+    ['cancelled_by_photographer', 0],
     ['expired', 0],
   ])('%s owes %s', (status, outstanding) => {
     expect(totalsFor(status).outstandingRwf).toBe(outstanding);
@@ -113,8 +113,8 @@ describe('bookingTotals: outstanding, by booking status (data-model_v2.md §6.1)
   });
 
   it('does not jump for a cancelled booking when its fee moves from succeeded to refund_due', () => {
-    const before = totalsFor('cancelled_by_admin', ADDONS, [{ status: 'succeeded', amountRwf: 22_000 }]);
-    const after = totalsFor('cancelled_by_admin', ADDONS, [{ status: 'refund_due', amountRwf: 22_000 }]);
+    const before = totalsFor('cancelled_by_photographer', ADDONS, [{ status: 'succeeded', amountRwf: 22_000 }]);
+    const after = totalsFor('cancelled_by_photographer', ADDONS, [{ status: 'refund_due', amountRwf: 22_000 }]);
     expect([before.outstandingRwf, after.outstandingRwf]).toEqual([0, 0]);
     expect(after.refundDueRwf).toBe(22_000);
   });

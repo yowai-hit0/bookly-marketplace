@@ -36,7 +36,8 @@ describe('bookingStage', () => {
     ['no_show', after, 'no_show', 'no_show'],
     ['expired', before, 'expired', 'expired'],
     ['cancelled_by_client', before, 'cancelled_by_client', 'cancelled_by_client'],
-    ['cancelled_by_admin', before, 'cancelled_by_admin', 'cancelled_by_admin'],
+    ['cancelled_by_photographer', before, 'cancelled_by_photographer', 'cancelled_by_photographer'],
+    ['cancelled_by_platform', before, 'cancelled_by_platform', 'cancelled_by_platform'],
   ] as const)('%s at %s is %s for the admin and %s for the client', (status, now, admin, client) => {
     expect(bookingStage(booking(status), now, 'admin')).toBe(admin);
     expect(bookingStage(booking(status), now, 'client')).toBe(client);
@@ -50,7 +51,7 @@ describe('bookingStage', () => {
   });
 
   it('never shows the client needs_review, whatever the booking', () => {
-    for (const status of ['pending_payment', 'confirmed', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_admin']) {
+    for (const status of ['pending_payment', 'confirmed', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_photographer', 'cancelled_by_platform']) {
       for (const now of [before, STARTS, during, ENDS, after]) {
         expect(bookingStage(booking(status), now, 'client')).not.toBe('needs_review');
       }

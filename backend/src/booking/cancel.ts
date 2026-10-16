@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { enqueue } from '../outbox/enqueue.js';
+import { bookingPhotographerRecipient } from '../outbox/recipients.js';
 import { type AccessedBooking, findBookingByToken } from './access.js';
 import { canCancel } from './client-view.js';
 
@@ -71,41 +72,40 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
       },
     });
 
-    const admin = await tx.adminUser.findFirst({ orderBy: { createdAt: 'asc' }, select: { email: true } });
-    if (admin !== null) {
+    // The booking's photographer (R1.7): their client cancelled.
+    const photographer = await bookingPhotographerRecipient(tx, booking.id);
+    await enqueue(tx, {
+      kind: 'email',
+      template: 'photographer_alert',
+      ...photographer,
+      dedupeKey: `email:photographer_alert:booking_cancelled:${booking.id}`,
+      payload: {
+        variant: 'booking_cancelled',
+        reference: booking.reference,
+        clientName: booking.contactName,
+        serviceName: booking.serviceNameSnapshot,
+        startsAt: booking.startsAt.toISOString(),
+        endsAt: booking.endsAt.toISOString(),
+        bookingFeeRwf: booking.bookingFeeRwf,
+      },
+    });
+    for (const payment of refunded) {
       await enqueue(tx, {
         kind: 'email',
-        template: 'admin_alert',
-        recipient: admin.email,
-        dedupeKey: `email:admin_alert:booking_cancelled:${booking.id}`,
+        template: 'photographer_alert',
+        ...photographer,
+        dedupeKey: `email:photographer_alert:refund_due:${payment.id}`,
         payload: {
-          variant: 'booking_cancelled',
+          variant: 'refund_due',
           reference: booking.reference,
           clientName: booking.contactName,
-          serviceName: booking.serviceNameSnapshot,
+          amountRwf: payment.amountRwf,
+          reason: 'session_fee_after_client_cancel',
+          paymentReference: payment.providerRef ?? payment.ourRef,
+          provider: payment.provider,
           startsAt: booking.startsAt.toISOString(),
-          endsAt: booking.endsAt.toISOString(),
-          bookingFeeRwf: booking.bookingFeeRwf,
         },
       });
-      for (const payment of refunded) {
-        await enqueue(tx, {
-          kind: 'email',
-          template: 'admin_alert',
-          recipient: admin.email,
-          dedupeKey: `email:admin_alert:refund_due:${payment.id}`,
-          payload: {
-            variant: 'refund_due',
-            reference: booking.reference,
-            clientName: booking.contactName,
-            amountRwf: payment.amountRwf,
-            reason: 'session_fee_after_client_cancel',
-            paymentReference: payment.providerRef ?? payment.ourRef,
-            provider: payment.provider,
-            startsAt: booking.startsAt.toISOString(),
-          },
-        });
-      }
     }
 
     return true;

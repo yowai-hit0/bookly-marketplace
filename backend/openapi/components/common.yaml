@@ -63,14 +63,14 @@ schemas:
 
   BookingStatus:
     type: string
-    enum: [pending_payment, confirmed, completed, no_show, expired, cancelled_by_client, cancelled_by_admin]
+    enum: [pending_payment, confirmed, completed, no_show, expired, cancelled_by_client, cancelled_by_photographer, cancelled_by_platform]
 
   BookingStage:
     type: string
     description: |
       The display stage derived from status and time (`booking/stage.ts`).
       `needs_review` is admin-only: a client never sees it.
-    enum: [awaiting_payment, confirmed, in_progress, needs_review, completed, closed, no_show, expired, cancelled_by_client, cancelled_by_admin]
+    enum: [awaiting_payment, confirmed, in_progress, needs_review, completed, closed, no_show, expired, cancelled_by_client, cancelled_by_photographer, cancelled_by_platform]
 
   PaymentStatus:
     type: string

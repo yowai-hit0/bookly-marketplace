@@ -131,7 +131,7 @@ async function references(query: Parameters<typeof findBookings>[1] = {}): Promi
 describe('filtering by status', () => {
   it('answers every booking when no status is named', async () => {
     const confirmed = await book({ status: 'confirmed' });
-    const cancelled = await book({ status: 'cancelled_by_admin' });
+    const cancelled = await book({ status: 'cancelled_by_photographer' });
     const pending = await book();
 
     expect((await references()).sort()).toEqual([confirmed.reference, cancelled.reference, pending.reference].sort());
@@ -142,7 +142,7 @@ describe('filtering by status', () => {
 
   it('answers only the one status named', async () => {
     const confirmed = await book({ status: 'confirmed' });
-    await book({ status: 'cancelled_by_admin' });
+    await book({ status: 'cancelled_by_photographer' });
     await book();
 
     expect(await references({ statuses: ['confirmed'] })).toEqual([confirmed.reference]);
@@ -151,7 +151,7 @@ describe('filtering by status', () => {
   it('answers the union when several statuses are named', async () => {
     const confirmed = await book({ status: 'confirmed' });
     const noShow = await book({ status: 'no_show' });
-    await book({ status: 'cancelled_by_admin' });
+    await book({ status: 'cancelled_by_photographer' });
     await book();
 
     expect((await references({ statuses: ['confirmed', 'no_show'] })).sort()).toEqual(
@@ -299,7 +299,7 @@ describe('filters combined', () => {
       contactName: 'Aline Uwase',
     });
     // Right name and date, wrong status.
-    await book({ startsAt: at('2027-03-11', '14:00'), status: 'cancelled_by_admin', contactName: 'Aline Uwase' });
+    await book({ startsAt: at('2027-03-11', '14:00'), status: 'cancelled_by_photographer', contactName: 'Aline Uwase' });
     // Right name and status, outside the window.
     await book({ startsAt: at('2027-03-20', '10:00'), status: 'confirmed', contactName: 'Aline Uwase' });
     // Right status and date, wrong name.
@@ -416,14 +416,14 @@ describe('paging by number', () => {
 
   it('carries its filter with it: the total, the page count and every page are filtered', async () => {
     await book({ startsAt: at('2027-03-11', '09:00'), status: 'confirmed' });
-    const cancelledLate = await book({ startsAt: at('2027-03-11', '12:00'), status: 'cancelled_by_admin' });
-    const cancelledEarly = await book({ startsAt: at('2027-03-11', '06:00'), status: 'cancelled_by_admin' });
+    const cancelledLate = await book({ startsAt: at('2027-03-11', '12:00'), status: 'cancelled_by_photographer' });
+    const cancelledEarly = await book({ startsAt: at('2027-03-11', '06:00'), status: 'cancelled_by_photographer' });
 
-    const first = await findBookings(prisma, { statuses: ['cancelled_by_admin'], page: 1, pageSize: 1 });
+    const first = await findBookings(prisma, { statuses: ['cancelled_by_photographer'], page: 1, pageSize: 1 });
     expect(first.bookings.map((row) => row.reference)).toEqual([cancelledLate.reference]);
     expect(first).toMatchObject({ total: 2, pageCount: 2 });
 
-    const second = await findBookings(prisma, { statuses: ['cancelled_by_admin'], page: 2, pageSize: 1 });
+    const second = await findBookings(prisma, { statuses: ['cancelled_by_photographer'], page: 2, pageSize: 1 });
     expect(second.bookings.map((row) => row.reference)).toEqual([cancelledEarly.reference]);
   });
 });
@@ -505,7 +505,7 @@ describe('each row’s money', () => {
   });
 
   it('surfaces money owed back, without netting it off what was collected', async () => {
-    const booking = await book({ status: 'cancelled_by_admin' });
+    const booking = await book({ status: 'cancelled_by_photographer' });
     await insertPayment(prisma, booking.id, { status: 'refund_due', amountRwf: 20_000 });
 
     const row = (await findBookings(prisma)).bookings[0];
@@ -513,7 +513,7 @@ describe('each row’s money', () => {
     expect(row).toMatchObject({ collectedRwf: 0, refundDueRwf: 20_000, hasRefundDue: true, outstandingRwf: 0 });
   });
 
-  it.each(['no_show', 'cancelled_by_client', 'cancelled_by_admin', 'expired'] as const)(
+  it.each(['no_show', 'cancelled_by_client', 'cancelled_by_photographer', 'expired'] as const)(
     'owes nothing on a %s booking, whatever the package cost',
     async (status) => {
       const booking = await book({ status });
@@ -587,7 +587,7 @@ describe('filtering by display stage', () => {
       { seed: { status: 'no_show', holdMinutes: null, startsAt: at('2027-03-03T07:00:00Z') } },
       { seed: { status: 'expired', startsAt: at('2027-03-02T07:00:00Z') } },
       { seed: { status: 'cancelled_by_client', holdMinutes: null, startsAt: at('2027-03-01T07:00:00Z') } },
-      { seed: { status: 'cancelled_by_admin', holdMinutes: null, startsAt: at('2027-02-28T07:00:00Z') } },
+      { seed: { status: 'cancelled_by_photographer', holdMinutes: null, startsAt: at('2027-02-28T07:00:00Z') } },
     ];
     const made: Booking[] = [];
     for (const { seed, delivered } of seeds) {

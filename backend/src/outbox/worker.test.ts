@@ -5,6 +5,14 @@ import { createPrismaClient } from '../db/client.js';
 import { renderEmail } from '../email/render.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
+  PHOTOGRAPHER_EMAIL,
+  PLATFORM_ADMIN_EMAIL,
+  type PaymentWorld,
+  insertBooking,
+  seedSecondPhotographer,
+  seedWorld,
+} from '../test/payment-fixtures.js';
+import {
   OUTBOX_HANDLER_TIMEOUT_MS,
   OUTBOX_LEASE_MS,
   OUTBOX_MAX_ATTEMPTS,
@@ -27,6 +35,11 @@ import {
  *
  * Every "when is it due" assertion is DB-side epoch arithmetic
  * (`next_attempt_at - now()`), so the test and PostgreSQL never compare clocks.
+ *
+ * A failed message is reported to the photographer whose studio its row is
+ * filed under (`photographer_alert`), or, for a row filed under none, to every
+ * platform admin (`platform_alert`) -- marketplace-spec.md R1.7, brief
+ * decision 6.
  */
 
 let prisma: PrismaClient;
@@ -45,12 +58,12 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
+  world = undefined;
 });
 
 // --- Fixtures ---------------------------------------------------------------
 
 const MINUTE_S = 60;
-const ADMIN_EMAIL = 'photographer@bookly.example';
 const CLIENT_EMAIL = 'aline.private@example.com';
 const CLIENT_NAME = 'Aline Uwase-Private';
 const TOKEN = 'Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJe';
@@ -66,7 +79,10 @@ type RowSeed = {
   attempts?: number;
   /** Negative: already due. */
   dueInSeconds?: number;
+  /** The row's photographer_id follows its booking, as enqueue() files it. */
   bookingId?: string | null;
+  /** A row with no booking filed under a studio, as a photographer alert is. */
+  photographerId?: string | null;
 };
 
 let seedCounter = 0;
@@ -74,8 +90,9 @@ let seedCounter = 0;
 async function seedRow(seed: RowSeed = {}): Promise<string> {
   seedCounter += 1;
   const result = await raw.query<{ id: string }>(
-    `INSERT INTO outbox (kind, booking_id, dedupe_key, template, recipient, payload, status, attempts, next_attempt_at)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, now() + make_interval(secs => $9::double precision))
+    `INSERT INTO outbox (kind, booking_id, photographer_id, dedupe_key, template, recipient, payload, status, attempts, next_attempt_at)
+     VALUES ($1, $2::uuid, COALESCE($10::uuid, (SELECT photographer_id FROM booking WHERE id = $2::uuid)),
+             $3, $4, $5, $6::jsonb, $7, $8, now() + make_interval(secs => $9::double precision))
      RETURNING id`,
     [
       seed.kind ?? 'email',
@@ -87,6 +104,7 @@ async function seedRow(seed: RowSeed = {}): Promise<string> {
       seed.status ?? 'pending',
       seed.attempts ?? 0,
       seed.dueInSeconds ?? -1,
+      seed.photographerId ?? null,
     ],
   );
   return firstRow(result).id;
@@ -116,44 +134,31 @@ async function makeDue(id: string): Promise<void> {
   await raw.query(`UPDATE outbox SET next_attempt_at = now() - interval '1 second' WHERE id = $1`, [id]);
 }
 
-async function seedAdmin(email = ADMIN_EMAIL, createdAt?: string): Promise<void> {
-  await raw.query(
-    `INSERT INTO admin_user (email, password_hash, created_at) VALUES ($1, 'not-a-real-hash', COALESCE($2::timestamptz, now()))`,
-    [email, createdAt ?? null],
+/** A platform admin login: who hears about a failed row that concerns no photographer. */
+async function seedPlatformAdmin(email = PLATFORM_ADMIN_EMAIL, options: { createdAt?: string; disabled?: boolean } = {}): Promise<string> {
+  const result = await raw.query<{ id: string }>(
+    `INSERT INTO app_user (email, role, password_hash, created_at, disabled_at)
+     VALUES ($1, 'platform_admin', 'not-a-real-hash', COALESCE($2::timestamptz, now()), CASE WHEN $3 THEN now() END)
+     RETURNING id`,
+    [email, options.createdAt ?? null, options.disabled ?? false],
   );
+  return firstRow(result).id;
+}
+
+/** The photographer (login PHOTOGRAPHER_EMAIL) whose bookings `seedBooking` makes. No platform admin. */
+let world: PaymentWorld | undefined;
+
+async function seedPhotographer(): Promise<PaymentWorld> {
+  world ??= await seedWorld(prisma, { platformAdmin: false });
+  return world;
 }
 
 async function seedBooking(reference = REFERENCE): Promise<string> {
-  const service = await prisma.service.create({ data: { slug: `portrait-${reference}`, nameEn: 'Portrait' } });
-  const pkg = await prisma.package.create({
-    data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 45_000, photoCount: 20, durationMinutes: 60 },
-  });
-  const client = await prisma.client.create({
-    data: { fullName: CLIENT_NAME, email: `${reference.toLowerCase()}@example.com`, phone: '+250788000000' },
-  });
-  const booking = await prisma.booking.create({
-    data: {
-      reference,
-      clientId: client.id,
-      contactName: CLIENT_NAME,
-      contactEmail: CLIENT_EMAIL,
-      contactPhone: '+250788000000',
-      serviceId: service.id,
-      packageId: pkg.id,
-      serviceNameSnapshot: 'Portrait',
-      packageNameSnapshot: 'Standard',
-      packagePriceRwf: 45_000,
-      packageDurationMinutes: 60,
-      packagePhotoCount: 20,
-      locationText: 'Kigali Heights',
-      consentAt: new Date(),
-      bookingFeeRate: '0.400',
-      bookingFeeRwf: 18_000,
-      status: 'confirmed',
-      startsAt: new Date('2026-10-07T07:00:00Z'),
-      endsAt: new Date('2026-10-07T08:00:00Z'),
-      bufferEndsAt: new Date('2026-10-07T08:30:00Z'),
-    },
+  const booking = await insertBooking(prisma, await seedPhotographer(), {
+    reference,
+    status: 'confirmed',
+    startsAt: new Date('2026-10-07T07:00:00Z'),
+    durationMinutes: 60,
   });
   return booking.id;
 }
@@ -174,8 +179,12 @@ const succeeding =
   (providerMessageId: string | null = 'provider-1'): OutboxHandler =>
   async () => ({ providerMessageId });
 
+/** Every alert, to a photographer or to the platform admins. */
 async function alertRows() {
-  return prisma.outbox.findMany({ where: { template: 'admin_alert' }, orderBy: { createdAt: 'asc' } });
+  return prisma.outbox.findMany({
+    where: { template: { in: ['photographer_alert', 'platform_alert'] } },
+    orderBy: [{ createdAt: 'asc' }, { recipient: 'asc' }],
+  });
 }
 
 function deferred<T = void>() {
@@ -254,6 +263,7 @@ describe('claimNext', () => {
       id,
       kind: 'email',
       bookingId,
+      photographerId: world?.photographerId ?? '',
       dedupeKey: 'email:booking_confirmation:b1',
       template: 'booking_confirmation',
       recipient: CLIENT_EMAIL,
@@ -377,7 +387,6 @@ describe('claimNext', () => {
   });
 
   it('fails a row abandoned mid-delivery on its last attempt, with one alert, instead of claiming it again', async () => {
-    await seedAdmin();
     const bookingId = await seedBooking();
     // Claimed for the last time, then the process died: its lease has run out.
     const id = await seedRow({ bookingId, status: 'processing', attempts: OUTBOX_MAX_ATTEMPTS });
@@ -386,7 +395,7 @@ describe('claimNext', () => {
     // Not the abandoned row: the alert about it, which is due at once and is
     // what the worker delivers next.
     const claimed = await claimNext(prisma, ['email'], (entry) => logs.push(entry));
-    expect(claimed).toMatchObject({ template: 'admin_alert', recipient: ADMIN_EMAIL, attempts: 1 });
+    expect(claimed).toMatchObject({ template: 'photographer_alert', recipient: PHOTOGRAPHER_EMAIL, attempts: 1 });
     expect(claimed?.id).not.toBe(id);
     // A second pass must not alert twice.
     await expect(claimNext(prisma, ['email'], (entry) => logs.push(entry))).resolves.toBeNull();
@@ -416,9 +425,9 @@ describe('claimNext', () => {
     expect((await stateOf(leased)).status).toBe('processing');
   });
 
-  it('fails an abandoned admin_alert without alerting about the alert', async () => {
-    await seedAdmin();
-    const id = await seedRow({ template: 'admin_alert', recipient: ADMIN_EMAIL, status: 'processing', attempts: OUTBOX_MAX_ATTEMPTS });
+  it.each(['photographer_alert', 'platform_alert'])('fails an abandoned %s without alerting about the alert', async (template) => {
+    await seedPlatformAdmin();
+    const id = await seedRow({ template, recipient: PLATFORM_ADMIN_EMAIL, status: 'processing', attempts: OUTBOX_MAX_ATTEMPTS });
 
     await claimNext(prisma, ['email']);
 
@@ -523,7 +532,7 @@ describe('processNext: a throwing handler', () => {
   });
 
   it('pushes next_attempt_at out exponentially across successive failures, then fails at the ceiling', async () => {
-    await seedAdmin();
+    await seedPlatformAdmin();
     const id = await seedRow();
     const delays: number[] = [];
 
@@ -552,7 +561,7 @@ describe('processNext: a throwing handler', () => {
     // Only the alert is claimable now; the failed row never is again.
     await makeDue(id);
     const next = await claimNext(prisma, ['email']);
-    expect(next).toMatchObject({ template: 'admin_alert' });
+    expect(next).toMatchObject({ template: 'platform_alert' });
     expect(next?.id).not.toBe(id);
     await expect(claimNext(prisma, ['email'])).resolves.toBeNull();
   });
@@ -582,7 +591,7 @@ describe('processNext: a throwing handler', () => {
   });
 
   it('does not overwrite a row cancelled while a failing delivery was in flight', async () => {
-    await seedAdmin();
+    await seedPlatformAdmin();
     const retrying = await seedRow();
     const exhausted = await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1, dueInSeconds: -10 });
 
@@ -613,8 +622,9 @@ describe('processNext: a throwing handler', () => {
 // --- Exhaustion -------------------------------------------------------------------
 
 describe('processNext: past the attempt ceiling', () => {
-  it('fails the row and enqueues exactly one retries_exhausted admin_alert carrying last_error and the booking reference', async () => {
-    await seedAdmin();
+  it("fails the row and enqueues exactly one retries_exhausted photographer_alert to the booking's photographer", async () => {
+    // A platform admin exists too: a booking's failure is still not theirs to hear about.
+    await seedPlatformAdmin();
     const bookingId = await seedBooking();
     const id = await seedRow({ bookingId, attempts: OUTBOX_MAX_ATTEMPTS - 1 });
     const logs: LogEntry[] = [];
@@ -631,9 +641,12 @@ describe('processNext: past the attempt ceiling', () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({
       kind: 'email',
-      template: 'admin_alert',
-      recipient: ADMIN_EMAIL,
-      dedupeKey: `email:admin_alert:retries_exhausted:${id}`,
+      template: 'photographer_alert',
+      recipient: PHOTOGRAPHER_EMAIL,
+      dedupeKey: `email:photographer_alert:retries_exhausted:${id}`,
+      // Filed under the photographer, but about no booking of its own.
+      bookingId: null,
+      photographerId: world?.photographerId,
       status: 'pending',
       attempts: 0,
       payload: {
@@ -649,36 +662,67 @@ describe('processNext: past the attempt ceiling', () => {
       expect.objectContaining({ level: 'error', event: 'outbox_message_failed', id, permanent: false }),
     ]);
 
-    // The alert the worker writes is one the admin_alert template renders.
-    const rendered = renderEmail('admin_alert', alerts[0]?.payload, { webOrigin: 'https://bookly.example' });
+    // The alert the worker writes is one the photographer_alert template renders.
+    const rendered = renderEmail('photographer_alert', alerts[0]?.payload, { webOrigin: 'https://bookly.example' });
     expect(rendered.text).toContain(REFERENCE);
     expect(rendered.text).toContain('Error: Resend answered 500: internal');
     expect(rendered.text).toContain('Booking confirmation to the client');
   });
 
-  it('addresses the alert to the oldest admin_user', async () => {
-    await seedAdmin('newer@bookly.example', '2026-09-01T00:00:00Z');
-    await seedAdmin('oldest@bookly.example', '2026-01-01T00:00:00Z');
-    await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1 });
+  it("alerts only the booking's own photographer, never another studio", async () => {
+    const own = await seedPhotographer();
+    const other = await seedSecondPhotographer(prisma, own);
+    const theirs = await insertBooking(prisma, other, { reference: 'BKY-2610-0THER', status: 'confirmed' });
+    await seedRow({ bookingId: theirs.id, attempts: OUTBOX_MAX_ATTEMPTS - 1 });
 
     await processNext(deps({ email: failing() }));
 
-    expect((await alertRows()).map((row) => row.recipient)).toEqual(['oldest@bookly.example']);
+    const alerts = await alertRows();
+    expect(alerts.map((row) => [row.template, row.recipient, row.photographerId])).toEqual([
+      ['photographer_alert', 'second.photographer@bookly.example', other.photographerId],
+    ]);
+  });
+
+  it('alerts the photographer a booking-less row is filed under', async () => {
+    const own = await seedPhotographer();
+    await seedRow({ photographerId: own.photographerId, template: 'client_note', attempts: OUTBOX_MAX_ATTEMPTS - 1 });
+
+    await processNext(deps({ email: failing() }));
+
+    expect((await alertRows()).map((row) => [row.template, row.recipient])).toEqual([['photographer_alert', PHOTOGRAPHER_EMAIL]]);
+  });
+
+  it('addresses a row that concerns no photographer to every platform admin whose login is on, one row each', async () => {
+    const newer = await seedPlatformAdmin('newer@bookly.example', { createdAt: '2026-09-01T00:00:00Z' });
+    const oldest = await seedPlatformAdmin('oldest@bookly.example', { createdAt: '2026-01-01T00:00:00Z' });
+    await seedPlatformAdmin('switched-off@bookly.example', { disabled: true });
+    // The photographer is no recipient of what is not theirs.
+    await seedPhotographer();
+    const id = await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1, template: 'account_password_reset' });
+
+    await processNext(deps({ email: failing() }));
+
+    const alerts = await alertRows();
+    expect(alerts.map((row) => [row.template, row.recipient, row.dedupeKey, row.photographerId]).sort()).toEqual([
+      ['platform_alert', 'newer@bookly.example', `email:platform_alert:retries_exhausted:${id}:${newer}`, null],
+      ['platform_alert', 'oldest@bookly.example', `email:platform_alert:retries_exhausted:${id}:${oldest}`, null],
+    ]);
+    const rendered = renderEmail('platform_alert', alerts[0]?.payload, { webOrigin: 'https://bookly.example' });
+    expect(rendered.text).toContain('Password reset link to an account holder');
   });
 
   it('carries a null booking reference for a row that addresses no booking, and still renders', async () => {
-    await seedAdmin();
+    await seedPlatformAdmin();
     await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1, template: 'access_link_resend' });
 
     await processNext(deps({ email: failing() }));
 
     const [alert] = await alertRows();
     expect(alert?.payload).toMatchObject({ bookingReference: null, template: 'access_link_resend' });
-    expect(() => renderEmail('admin_alert', alert?.payload, { webOrigin: 'https://bookly.example' })).not.toThrow();
+    expect(() => renderEmail('platform_alert', alert?.payload, { webOrigin: 'https://bookly.example' })).not.toThrow();
   });
 
   it('alerts for an exhausted calendar job too (spec §6.17), with a renderable payload', async () => {
-    await seedAdmin();
     const bookingId = await seedBooking();
     const id = await seedRow({
       kind: 'gcal_create',
@@ -695,12 +739,13 @@ describe('processNext: past the attempt ceiling', () => {
     expect((await stateOf(id)).status).toBe('failed');
     const [alert] = await alertRows();
     expect(alert?.payload).toMatchObject({ messageKind: 'gcal_create', template: null, bookingReference: REFERENCE });
-    const rendered = renderEmail('admin_alert', alert?.payload, { webOrigin: 'https://bookly.example' });
+    expect(alert?.recipient).toBe(PHOTOGRAPHER_EMAIL);
+    const rendered = renderEmail('photographer_alert', alert?.payload, { webOrigin: 'https://bookly.example' });
     expect(rendered.text).toContain('Adding the booking to your Google Calendar');
   });
 
   it('carries a truncated last_error that still renders', async () => {
-    await seedAdmin();
+    await seedPlatformAdmin();
     await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1 });
 
     await processNext(deps({ email: failing('y'.repeat(4000)) }));
@@ -708,11 +753,11 @@ describe('processNext: past the attempt ceiling', () => {
     const [alert] = await alertRows();
     const lastError = (alert?.payload as { lastError: string }).lastError;
     expect(lastError).toHaveLength(1000);
-    expect(() => renderEmail('admin_alert', alert?.payload, { webOrigin: 'https://bookly.example' })).not.toThrow();
+    expect(() => renderEmail('platform_alert', alert?.payload, { webOrigin: 'https://bookly.example' })).not.toThrow();
   });
 
   it('fails a PermanentOutboxError on the first attempt, with an alert', async () => {
-    await seedAdmin();
+    await seedPlatformAdmin();
     const id = await seedRow();
     const logs: LogEntry[] = [];
 
@@ -738,15 +783,27 @@ describe('processNext: past the attempt ceiling', () => {
     expect(logs).toEqual([expect.objectContaining({ event: 'outbox_message_failed', permanent: true })]);
   });
 
-  it('sends no alert about a failed admin_alert', async () => {
-    await seedAdmin();
-    const id = await seedRow({
-      template: 'admin_alert',
-      recipient: ADMIN_EMAIL,
-      dedupeKey: 'email:admin_alert:login_lockout:1',
-      payload: { variant: 'login_lockout', failedLoginCount: 5, lockedUntil: '2026-10-07T07:00:00.000Z' },
-      attempts: OUTBOX_MAX_ATTEMPTS - 1,
-    });
+  it.each<[string, () => Promise<RowSeed>]>([
+    [
+      'a photographer_alert',
+      async () => ({
+        template: 'photographer_alert',
+        recipient: PHOTOGRAPHER_EMAIL,
+        photographerId: (await seedPhotographer()).photographerId,
+        payload: { variant: 'retries_exhausted', messageKind: 'email', template: 'client_note', bookingReference: null, attempts: 8, lastError: 'x' },
+      }),
+    ],
+    [
+      'a platform_alert',
+      async () => ({
+        template: 'platform_alert',
+        recipient: PLATFORM_ADMIN_EMAIL,
+        payload: { variant: 'retries_exhausted', messageKind: 'email', template: null, bookingReference: null, attempts: 8, lastError: 'x' },
+      }),
+    ],
+  ])('sends no alert about a failed %s', async (_label, build) => {
+    await seedPlatformAdmin();
+    const id = await seedRow({ ...(await build()), attempts: OUTBOX_MAX_ATTEMPTS - 1 });
     const logs: LogEntry[] = [];
 
     await processNext(deps({ email: failing() }, logs));
@@ -756,7 +813,11 @@ describe('processNext: past the attempt ceiling', () => {
     expect(logs).toEqual([expect.objectContaining({ event: 'outbox_message_failed', id })]);
   });
 
-  it('with no admin_user, fails the row, skips the alert and logs why', async () => {
+  it.each([
+    ['no platform admin at all', async () => undefined],
+    ['only a disabled platform admin', async () => void (await seedPlatformAdmin(PLATFORM_ADMIN_EMAIL, { disabled: true }))],
+  ])('with %s, fails a row that concerns no photographer, skips the alert and logs why', async (_label, arrange) => {
+    await arrange();
     const id = await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1 });
     const logs: LogEntry[] = [];
 
@@ -765,13 +826,13 @@ describe('processNext: past the attempt ceiling', () => {
     expect((await stateOf(id)).status).toBe('failed');
     await expect(prisma.outbox.count()).resolves.toBe(1);
     expect(logs).toEqual([
-      expect.objectContaining({ level: 'error', event: 'outbox_alert_skipped', reason: 'no_admin_user', id }),
+      expect.objectContaining({ level: 'error', event: 'outbox_alert_skipped', reason: 'no_platform_admin', id }),
       expect.objectContaining({ level: 'error', event: 'outbox_message_failed', id }),
     ]);
   });
 
   it('does not duplicate the alert when the same row is exhausted a second time', async () => {
-    await seedAdmin();
+    await seedPlatformAdmin();
     const id = await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1 });
 
     await processNext(deps({ email: failing('first exhaustion') }));
@@ -789,14 +850,14 @@ describe('processNext: past the attempt ceiling', () => {
   });
 
   it('is atomic: when the alert cannot be enqueued, the row is not marked failed', async () => {
-    await seedAdmin();
+    await seedPlatformAdmin();
     const id = await seedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1 });
     await raw.query(`
       CREATE OR REPLACE FUNCTION bookly_test_refuse_admin_alert() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN RAISE EXCEPTION 'admin_alert refused by test trigger'; END $$`);
+      BEGIN RAISE EXCEPTION 'platform_alert refused by test trigger'; END $$`);
     await raw.query(`
       CREATE TRIGGER bookly_test_refuse_admin_alert BEFORE INSERT ON outbox
-      FOR EACH ROW WHEN (NEW.template = 'admin_alert') EXECUTE FUNCTION bookly_test_refuse_admin_alert()`);
+      FOR EACH ROW WHEN (NEW.template = 'platform_alert') EXECUTE FUNCTION bookly_test_refuse_admin_alert()`);
     try {
       await expect(processNext(deps({ email: failing('down') }))).rejects.toThrow();
 
@@ -1066,8 +1127,8 @@ describe('logging', () => {
       resetUrl: `https://bookly.example/admin/reset-password#token=${TOKEN}`,
     };
 
-    // Retry, exhaustion with alert, permanent failure: an admin exists.
-    await seedAdmin();
+    // Retry, exhaustion with alert, permanent failure: a platform admin exists.
+    await seedPlatformAdmin();
     await seedRow({ payload: secretPayload });
     await seedRow({ payload: secretPayload, attempts: OUTBOX_MAX_ATTEMPTS - 1 });
     await drainQueue(deps({ email: failing('Resend answered 503') }, logs));
@@ -1075,7 +1136,7 @@ describe('logging', () => {
     await processNext(
       deps({ email: async () => Promise.reject(new PermanentOutboxError('The payload was erased')) }, logs),
     );
-    // Alert skipped: no admin.
+    // Alert skipped: no platform admin.
     await truncateAll(raw);
     await seedRow({ payload: secretPayload, attempts: OUTBOX_MAX_ATTEMPTS - 1 });
     await processNext(deps({ email: failing() }, logs));
@@ -1091,7 +1152,7 @@ describe('logging', () => {
       expect(events).toContain(event);
     }
     const serialised = JSON.stringify(logs);
-    for (const secret of [CLIENT_EMAIL, CLIENT_NAME, TOKEN, ADMIN_EMAIL, 'reset-password']) {
+    for (const secret of [CLIENT_EMAIL, CLIENT_NAME, TOKEN, PLATFORM_ADMIN_EMAIL, PHOTOGRAPHER_EMAIL, 'reset-password']) {
       expect(serialised).not.toContain(secret);
     }
     for (const entry of logs) {

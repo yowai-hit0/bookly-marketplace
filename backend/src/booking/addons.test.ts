@@ -262,7 +262,7 @@ describe('which catalogue add-on may be added', () => {
 // --- Adding: while the shoot is under way, before completion ------------------------------
 
 describe('the editor is open once the shoot has begun, and until the booking is completed (2026-09-27)', () => {
-  it.each(['pending_payment', 'completed', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['pending_payment', 'completed', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'refuses an add-on on a %s booking',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status });
@@ -427,7 +427,7 @@ describe('removing a post-shoot add-on', () => {
     expect(result).toStrictEqual({ status: 'not_found' });
   });
 
-  it.each(['completed', 'no_show', 'cancelled_by_admin'])('refuses on a %s booking, which has no open editor', async (status) => {
+  it.each(['completed', 'no_show', 'cancelled_by_photographer'])('refuses on a %s booking, which has no open editor', async (status) => {
     const { booking, lineId } = await withPostShootLine();
     await prisma.booking.update({ where: { id: booking.id }, data: { status } });
 

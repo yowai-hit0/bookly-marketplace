@@ -297,7 +297,7 @@ describe('bookings loaded for the range', () => {
     expect((await startTimes(WEDNESDAY))[0]).toBe('10:30');
   });
 
-  it.each(['expired', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['expired', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'frees the slot for a %s booking',
     async (status) => {
       await insertBooking({ ...on(WEDNESDAY, '09:00', '10:00', '10:30'), status });

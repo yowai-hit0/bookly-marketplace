@@ -1,8 +1,16 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
+import { type UserRole, isUserRole } from './roles.js';
 
 /**
- * The admin access token (plan.md Task 7, revision 2.3).
+ * The studio access token (plan.md Task 7, revision 2.3), issued on
+ * `/api/admin/*` until Phase 2 renames the paths (brief decision 3).
+ *
+ * Claims are `{ sub: userId, role }` plus the password fingerprint
+ * (marketplace-spec.md R2.1). The role is informative: the middleware decides
+ * on the role stored in `app_user`, never on the one in the token. Phase 2 gives
+ * each role its own `aud`; until then every token is `bookly-admin`, and only a
+ * photographer is ever issued one.
  *
  * A JWT the client sends as `Authorization: Bearer <token>`. No cookie is
  * involved in admin auth, so there is nothing a browser attaches on its own, and
@@ -25,28 +33,38 @@ export const TOKEN_AUDIENCE = 'bookly-admin';
 
 export const TOKEN_TTL_SECONDS = 8 * 60 * 60;
 
-/** Private claim: an HMAC of the admin's password hash -- never the hash. */
+/** Private claim: an HMAC of the user's password hash -- never the hash. */
 const PASSWORD_FINGERPRINT_CLAIM = 'pwd_fp';
+
+/** Private claim: the `app_user.role` the token was issued to. */
+const ROLE_CLAIM = 'role';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type IssuedToken = { token: string; expiresAt: Date };
 
-export type VerifiedClaims = { adminId: string; passwordFingerprint: string };
+export type VerifiedClaims = { userId: string; role: UserRole; passwordFingerprint: string };
 
-export async function issueAdminToken(
-  secret: string,
-  admin: { id: string; passwordHash: string },
-  now: Date,
-): Promise<IssuedToken> {
+/** The `app_user` columns a token is built from. */
+export type TokenSubject = { id: string; role: string; passwordHash: string | null };
+
+/**
+ * Throws for a user without a password (a Google-only client, R2.4): the token
+ * is bound to a password hash, and there is none to bind to. Login never gets
+ * here for one -- `canUseStudio` refuses it first.
+ */
+export async function issueAdminToken(secret: string, user: TokenSubject, now: Date): Promise<IssuedToken> {
+  if (user.passwordHash === null) throw new Error('Cannot issue a password-bound token to a user without a password');
+  if (!isUserRole(user.role)) throw new Error(`Cannot issue a token for the unknown role ${user.role}`);
   const issuedAt = Math.floor(now.getTime() / 1000);
   const expiresAt = issuedAt + TOKEN_TTL_SECONDS;
 
   const token = await new SignJWT({
-    [PASSWORD_FINGERPRINT_CLAIM]: passwordFingerprint(secret, admin.passwordHash),
+    [ROLE_CLAIM]: user.role,
+    [PASSWORD_FINGERPRINT_CLAIM]: passwordFingerprint(secret, user.passwordHash),
   })
     .setProtectedHeader({ alg: TOKEN_ALGORITHM, typ: 'JWT' })
-    .setSubject(admin.id)
+    .setSubject(user.id)
     .setIssuer(TOKEN_ISSUER)
     .setAudience(TOKEN_AUDIENCE)
     .setIssuedAt(issuedAt)
@@ -66,8 +84,9 @@ export async function issueAdminToken(
  * required too, so a correctly-signed token that somehow lacks `exp` is refused
  * rather than treated as valid forever.
  *
- * This does NOT check the password fingerprint against the database: it has no
- * database. `requireAdmin` does that after loading the admin.
+ * This does NOT check the password fingerprint or the role against the
+ * database: it has no database. `requirePhotographer` does both after loading
+ * the user.
  */
 export async function verifyAdminToken(
   secret: string,
@@ -80,19 +99,21 @@ export async function verifyAdminToken(
       issuer: TOKEN_ISSUER,
       audience: TOKEN_AUDIENCE,
       currentDate: now,
-      requiredClaims: ['sub', 'iat', 'exp', PASSWORD_FINGERPRINT_CLAIM],
+      requiredClaims: ['sub', 'iat', 'exp', ROLE_CLAIM, PASSWORD_FINGERPRINT_CLAIM],
     });
 
     const fingerprint = payload[PASSWORD_FINGERPRINT_CLAIM];
+    const role = payload[ROLE_CLAIM];
     // A UUID check before the id reaches a `@db.Uuid` lookup: a malformed id
     // raises a database error there, and a bad token must be a 401, never a 500.
     if (typeof payload.sub !== 'string' || !UUID.test(payload.sub)) return null;
     if (typeof fingerprint !== 'string') return null;
+    if (!isUserRole(role)) return null;
 
-    return { adminId: payload.sub, passwordFingerprint: fingerprint };
+    return { userId: payload.sub, role, passwordFingerprint: fingerprint };
   } catch {
     // Every jose failure -- malformed, expired, wrong key, wrong alg, wrong
-    // audience -- is the same outcome to the caller: not a valid admin token.
+    // audience -- is the same outcome to the caller: not a valid token.
     return null;
   }
 }

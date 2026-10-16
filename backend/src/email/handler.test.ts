@@ -9,6 +9,7 @@ import { enqueue } from '../outbox/enqueue.js';
 import { OUTBOX_MAX_ATTEMPTS, type OutboxRow, PermanentOutboxError, drainQueue, processNext } from '../outbox/worker.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { FIXTURE_ACCESS_TOKEN, FIXTURE_WEB_ORIGIN, emailFixture } from '../test/email-fixtures.js';
+import { PHOTOGRAPHER_EMAIL, PLATFORM_ADMIN_EMAIL, type PaymentWorld, insertBooking, seedWorld } from '../test/payment-fixtures.js';
 import { createEmailHandler } from './handler.js';
 import { type MailMessage, type MailProvider, MailRejectedError } from './provider.js';
 import { renderEmail } from './render.js';
@@ -16,8 +17,9 @@ import { renderEmail } from './render.js';
 /**
  * The email handler (plan.md Tasks 14 and 15): unit behaviour against a fake
  * provider, then end to end through the real worker and real PostgreSQL --
- * including the admin_alert rows Task 7's login lockout and password reset
- * actually write.
+ * including the account emails Task 7's login lockout and password reset
+ * actually write, and the alerts the worker writes to the booking's
+ * photographer or the platform admins (marketplace-spec.md R1.7).
  */
 
 class RecordingProvider implements MailProvider {
@@ -37,6 +39,7 @@ function rowFor(name: string, overrides: Partial<OutboxRow> = {}): OutboxRow {
     id: '00000000-0000-0000-0000-00000000000a',
     kind: 'email',
     bookingId: null,
+    photographerId: null,
     dedupeKey: `email:${fixture.template}:00000000-0000-0000-0000-0000000000b1`,
     template: fixture.template,
     recipient: 'aline@example.com',
@@ -117,14 +120,14 @@ describe('createEmailHandler', () => {
   it('fails permanently on an unknown template and on a reset link off WEB_ORIGIN', async () => {
     const handler = createEmailHandler({ mail: new RecordingProvider(), webOrigin: FIXTURE_WEB_ORIGIN });
     const offSite = {
-      ...(emailFixture('admin_alert password_reset').payload as Record<string, unknown>),
+      ...(emailFixture('account_password_reset').payload as Record<string, unknown>),
       resetUrl: 'http://localhost:4000/api/admin/reset-password#token=abc',
     };
 
     await expect(handler(rowFor('booking_confirmation', { template: 'booking_invite' }), new AbortController().signal)).rejects.toBeInstanceOf(
       PermanentOutboxError,
     );
-    await expect(handler(rowFor('admin_alert password_reset', { payload: offSite }), new AbortController().signal)).rejects.toBeInstanceOf(
+    await expect(handler(rowFor('account_password_reset', { payload: offSite }), new AbortController().signal)).rejects.toBeInstanceOf(
       PermanentOutboxError,
     );
   });
@@ -172,7 +175,9 @@ describe('delivery through the worker, against PostgreSQL', () => {
   let prisma: PrismaClient;
   let raw: pg.Client;
   let passwordHash: string;
-  const ADMIN_EMAIL = 'photographer@bookly.example';
+  let world: PaymentWorld;
+  /** The world photographer's login: the recipient of their bookings' alerts, and the account Task 7 locks and resets. */
+  const ADMIN_EMAIL = PHOTOGRAPHER_EMAIL;
   const noLog = () => undefined;
 
   beforeAll(async () => {
@@ -189,40 +194,17 @@ describe('delivery through the worker, against PostgreSQL', () => {
 
   beforeEach(async () => {
     await truncateAll(raw);
-    await prisma.adminUser.create({ data: { email: ADMIN_EMAIL, passwordHash } });
+    // A photographer whose login has a real password, and a platform admin.
+    world = await seedWorld(prisma);
+    await prisma.appUser.update({ where: { id: world.photographerUserId }, data: { passwordHash } });
   });
 
   async function seedBooking(): Promise<string> {
-    const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
-    const pkg = await prisma.package.create({
-      data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 45_000, photoCount: 20, durationMinutes: 60 },
-    });
-    const client = await prisma.client.create({
-      data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
-    });
-    const booking = await prisma.booking.create({
-      data: {
-        reference: 'BKY-2610-7K3MQ',
-        clientId: client.id,
-        contactName: 'Aline Uwase',
-        contactEmail: 'aline@example.com',
-        contactPhone: '+250788000000',
-        serviceId: service.id,
-        packageId: pkg.id,
-        serviceNameSnapshot: 'Portrait',
-        packageNameSnapshot: 'Standard',
-        packagePriceRwf: 45_000,
-        packageDurationMinutes: 60,
-        packagePhotoCount: 20,
-        locationText: 'Kigali Heights, KG 7 Ave',
-        consentAt: new Date(),
-        bookingFeeRate: '0.400',
-        bookingFeeRwf: 18_000,
-        status: 'confirmed',
-        startsAt: new Date('2026-10-07T07:30:00Z'),
-        endsAt: new Date('2026-10-07T08:30:00Z'),
-        bufferEndsAt: new Date('2026-10-07T09:00:00Z'),
-      },
+    const booking = await insertBooking(prisma, world, {
+      reference: 'BKY-2610-7K3MQ',
+      status: 'confirmed',
+      startsAt: new Date('2026-10-07T07:30:00Z'),
+      durationMinutes: 60,
     });
     return booking.id;
   }
@@ -257,7 +239,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     expect(mail.sent[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('fails an invalid payload on the first attempt, then delivers the admin alert about it', async () => {
+  it("fails an invalid payload on the first attempt, then delivers the alert about it to the booking's photographer", async () => {
     const bookingId = await seedBooking();
     const mail = new RecordingProvider();
     const { accessToken: _dropped, ...payload } = emailFixture('booking_confirmation').payload;
@@ -279,8 +261,8 @@ describe('delivery through the worker, against PostgreSQL', () => {
       attempts: 1,
       lastError: 'PermanentOutboxError: The booking_confirmation payload is invalid at: accessToken',
     });
-    const alert = await prisma.outbox.findFirstOrThrow({ where: { template: 'admin_alert' } });
-    expect(alert).toMatchObject({ status: 'done', recipient: ADMIN_EMAIL, providerMessageId: 'fake-1' });
+    const alert = await prisma.outbox.findFirstOrThrow({ where: { template: 'photographer_alert' } });
+    expect(alert).toMatchObject({ status: 'done', recipient: ADMIN_EMAIL, providerMessageId: 'fake-1', photographerId: world.photographerId });
 
     // Only the alert went out, to the photographer, saying what failed.
     expect(mail.sent.map((sent) => sent.message.to)).toEqual([ADMIN_EMAIL]);
@@ -291,7 +273,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     expect(text).toContain('Last error: PermanentOutboxError: The booking_confirmation payload is invalid at: accessToken');
   });
 
-  it('fails a message the provider refuses on the first attempt, with an alert', async () => {
+  it('fails a message the provider refuses on the first attempt, with an alert to the platform admins when it concerns no photographer', async () => {
     const mail = new RecordingProvider();
     mail.failWith = new MailRejectedError('Resend answered 422: Invalid `to` field.');
     const fixture = emailFixture('access_link_resend');
@@ -300,7 +282,9 @@ describe('delivery through the worker, against PostgreSQL', () => {
     await processNext({ prisma, handlers: { email: createEmailHandler({ mail, webOrigin: FIXTURE_WEB_ORIGIN }) }, log: noLog });
 
     await expect(prisma.outbox.findUniqueOrThrow({ where: { dedupeKey: 'k1' } })).resolves.toMatchObject({ status: 'failed', attempts: 1 });
-    await expect(prisma.outbox.count({ where: { template: 'admin_alert' } })).resolves.toBe(1);
+    await expect(prisma.outbox.findMany({ where: { template: { in: ['photographer_alert', 'platform_alert'] } } })).resolves.toMatchObject([
+      { template: 'platform_alert', recipient: PLATFORM_ADMIN_EMAIL },
+    ]);
   });
 
   it('retries a provider outage with backoff and the same idempotency key, then delivers', async () => {
@@ -349,7 +333,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     expect(mail.sent).toHaveLength(0);
   });
 
-  it('delivers the password_reset admin_alert exactly as requestPasswordReset enqueues it', async () => {
+  it('delivers the account_password_reset exactly as requestPasswordReset enqueues it', async () => {
     const mail = new RecordingProvider();
     const now = new Date('2026-10-07T07:00:00Z');
     await requestPasswordReset({ prisma, sessionSecret: 'x'.repeat(40), webOrigin: FIXTURE_WEB_ORIGIN, now: () => now }, ADMIN_EMAIL);
@@ -362,7 +346,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     expect(mail.sent).toHaveLength(1);
     const message = mail.sent[0]?.message;
     expect(message?.to).toBe(ADMIN_EMAIL);
-    expect(message?.subject).toBe('Reset your admin password');
+    expect(message?.subject).toBe('Reset your password');
     expect(message?.html).toContain(`href="${payload.resetUrl}"`);
     expect(message?.text).toContain(payload.resetUrl);
     // 07:00Z + 30 minutes is 09:30 in Kigali.
@@ -386,7 +370,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     });
   });
 
-  it('delivers the login_lockout admin_alert exactly as attemptLogin enqueues it', async () => {
+  it('delivers the login_lockout account_security_alert exactly as attemptLogin enqueues it', async () => {
     const mail = new RecordingProvider();
     const now = new Date('2026-10-07T07:00:00Z');
     const deps = { prisma, sessionSecret: 'x'.repeat(40), webOrigin: FIXTURE_WEB_ORIGIN, now: () => now };
@@ -400,7 +384,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     await expect(prisma.outbox.findFirstOrThrow()).resolves.toMatchObject({ status: 'done' });
     const message = mail.sent[0]?.message;
     expect(message?.to).toBe(ADMIN_EMAIL);
-    expect(message?.subject).toBe(`Admin sign-in locked after ${LOCKOUT_THRESHOLD} failed attempts`);
+    expect(message?.subject).toBe(`Sign-in locked after ${LOCKOUT_THRESHOLD} failed attempts`);
     // Locked for one minute from 07:00Z: 09:01 in Kigali.
     expect(message?.text).toContain('locked until 7 Oct 2026, 09:01 (Kigali time)');
     expect(message?.html).toContain(`href="${FIXTURE_WEB_ORIGIN}/admin/login"`);
@@ -409,8 +393,15 @@ describe('delivery through the worker, against PostgreSQL', () => {
   it('the worker never delivers an alert about an alert it could not send', async () => {
     const mail = new RecordingProvider();
     mail.failWith = new Error('Resend answered 503: unavailable');
-    const fixture = emailFixture('admin_alert refund_due');
-    await enqueue(prisma, { kind: 'email', template: 'admin_alert', recipient: ADMIN_EMAIL, dedupeKey: 'alert-1', payload: fixture.payload });
+    const fixture = emailFixture('photographer_alert refund_due');
+    await enqueue(prisma, {
+      kind: 'email',
+      template: 'photographer_alert',
+      recipient: ADMIN_EMAIL,
+      photographerId: world.photographerId,
+      dedupeKey: 'alert-1',
+      payload: fixture.payload,
+    });
     await raw.query(`UPDATE outbox SET attempts = $1 WHERE dedupe_key = 'alert-1'`, [OUTBOX_MAX_ATTEMPTS - 1]);
 
     await processNext({ prisma, handlers: { email: createEmailHandler({ mail, webOrigin: FIXTURE_WEB_ORIGIN }) }, log: noLog });

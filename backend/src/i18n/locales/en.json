@@ -178,7 +178,20 @@
           "admin_alert": "Alert to you",
           "gcal_create": "Adding the booking to your Google Calendar",
           "gcal_update": "Updating the booking in your Google Calendar",
-          "gcal_delete": "Removing the booking from your Google Calendar"
+          "gcal_delete": "Removing the booking from your Google Calendar",
+          "photographer_new_booking": "New booking alert to you",
+          "photographer_alert": "Alert to you",
+          "platform_alert": "Alert to the platform admins",
+          "account_verify_email": "Email verification link to you",
+          "account_password_reset": "Password reset link to you",
+          "account_security_alert": "Security alert to you",
+          "photographer_application_received": "Application received notice to you",
+          "photographer_approved": "Approval notice to you",
+          "photographer_suspended": "Suspension notice to you",
+          "subscription_reminder": "Subscription reminder to you",
+          "subscription_receipt": "Subscription receipt to you",
+          "subscription_expired": "Subscription expiry notice to you",
+          "payout_sent": "Payout notice to you"
         }
       },
       "loginLockout": {
@@ -217,6 +230,67 @@
         "heading": "A client cancelled their booking",
         "intro": "{{client}} cancelled their booking for {{service}} on {{when}}. The time is free again.",
         "feeKept": "Their booking fee of {{amount}} is non-refundable and has been kept."
+      }
+    },
+    "platformAlert": {
+      "retriesExhausted": {
+        "subject": "A message could not be sent",
+        "preheader_one": "The system gave up after {{count}} attempt.",
+        "preheader_other": "The system gave up after {{count}} attempts.",
+        "heading": "A message could not be sent",
+        "intro_one": "After {{count}} attempt, the system gave up sending the message below. It will not try again.",
+        "intro_other": "After {{count}} attempts, the system gave up sending the message below. It will not try again.",
+        "message": "Message",
+        "lastError": "Last error",
+        "advice": "It concerns no photographer, so it has come to the platform admins. If it was for someone, you may want to contact them directly.",
+        "messages": {
+          "email": "An email",
+          "booking_confirmation": "Booking confirmation to a client",
+          "photographer_new_booking": "New booking alert to a photographer",
+          "session_fee_request": "Session fee request to a client",
+          "payment_receipt": "Payment receipt to a client",
+          "photo_delivery": "Photo delivery to a client",
+          "cancellation": "Cancellation notice to a client",
+          "reschedule": "Reschedule notice to a client",
+          "access_link_resend": "New booking link to a client",
+          "photographer_alert": "Alert to a photographer",
+          "platform_alert": "Alert to the platform admins",
+          "booking_links": "Booking links a client asked for",
+          "email_change_confirm": "Confirmation link to a new client email",
+          "email_changed_notice": "Notice to an old client email",
+          "client_note": "Message from a photographer to a client",
+          "account_verify_email": "Email verification link to an account holder",
+          "account_password_reset": "Password reset link to an account holder",
+          "account_security_alert": "Security alert to an account holder",
+          "photographer_application_received": "Application received notice to a photographer",
+          "photographer_approved": "Approval notice to a photographer",
+          "photographer_suspended": "Suspension notice to a photographer",
+          "subscription_reminder": "Subscription reminder to a photographer",
+          "subscription_receipt": "Subscription receipt to a photographer",
+          "subscription_expired": "Subscription expiry notice to a photographer",
+          "payout_sent": "Payout notice to a photographer",
+          "gcal_create": "Adding a booking to a Google Calendar",
+          "gcal_update": "Updating a booking in a Google Calendar",
+          "gcal_delete": "Removing a booking from a Google Calendar"
+        }
+      }
+    },
+    "accountPasswordReset": {
+      "subject": "Reset your password",
+      "preheader": "The link works once, until {{until}} (Kigali time).",
+      "heading": "Reset your password",
+      "intro": "Someone asked to reset the password for your account. The link below works once, until {{until}} (Kigali time).",
+      "button": "Choose a new password",
+      "ignore": "If you did not ask for this, ignore this email: your password stays as it is."
+    },
+    "accountSecurityAlert": {
+      "loginLockout": {
+        "subject": "Sign-in locked after {{count}} failed attempts",
+        "preheader": "Sign-in is locked until {{until}} (Kigali time).",
+        "heading": "Sign-in to your account is locked",
+        "intro": "The wrong password was entered for your account {{count}} times, so sign-in is locked until {{until}} (Kigali time).",
+        "ifNotYou": "If this was not you, someone may be trying to guess your password. Once the lock ends, consider resetting your password.",
+        "signIn": "Go to the sign-in page"
       }
     }
   }

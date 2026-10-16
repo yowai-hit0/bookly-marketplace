@@ -36,7 +36,7 @@ const NEXT_SATURDAY = '2026-10-17';
 /** Statuses that hold their slot, per data-model_v2.md §7.1. Spelled out here
  *  rather than imported, so drift in the vocabulary fails this suite too. */
 const OCCUPYING = ['pending_payment', 'confirmed', 'completed', 'no_show'] as const;
-const FREEING = ['expired', 'cancelled_by_client', 'cancelled_by_admin'] as const;
+const FREEING = ['expired', 'cancelled_by_client', 'cancelled_by_photographer'] as const;
 
 /** The seeded weekly rule: Mon–Fri 09:00–17:00 Kigali (spec §A-10, §6.6). */
 const WEEKDAY_HOURS: readonly WorkingHoursRow[] = [1, 2, 3, 4, 5].map((weekday) => ({

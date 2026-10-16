@@ -10,30 +10,31 @@ import {
   defineTemplate,
   instant,
   money,
-  onSite,
   paymentKind,
   paymentProvider,
   personName,
   reference,
-  siteUrl,
   text,
   tr,
   when,
 } from './shared.js';
 
 /**
- * Everything addressed to the photographer that is not a new booking
- * (data-model_v2.md §5.13, plan.md Task 15), one variant per situation:
+ * Everything addressed to a booking's photographer that is not a new booking
+ * (data-model_v2.md §5.13, plan.md Task 15, marketplace-spec.md R1.7), one
+ * variant per situation:
  *
  *   payment_received    a payment arrived (Tasks 17, 20)
- *   retries_exhausted   the outbox gave up on a message (Task 14)
- *   login_lockout       sign-in locked after failed attempts (Task 7)
- *   password_reset      the emailed reset link (Task 7)
- *   refund_due          money is owed back, and only he can send it (Tasks 17-19)
+ *   retries_exhausted   the outbox gave up on a message of theirs (Task 14)
+ *   refund_due          money is owed back, and only they can send it (Tasks 17-19)
  *   booking_cancelled   a client cancelled (Task 18)
  *
- * `login_lockout` and `password_reset` render exactly the payloads Task 7
- * already enqueues.
+ * This is the photographer's half of the old `admin_alert`
+ * (marketplace-data-model.md §2.14). What concerns no photographer is
+ * `platform_alert`, and the sign-in lockout and the reset link are now the
+ * account emails `account_security_alert` and `account_password_reset`. The
+ * copy keys keep their `adminAlert` names: en.json strings may not be edited,
+ * and these already speak to the photographer.
  */
 
 const paymentReceived = z.object({
@@ -48,26 +49,14 @@ const paymentReceived = z.object({
   startsAt: instant,
 });
 
-const retriesExhausted = z.object({
+/** Shared with `platform_alert`, which tells the platform admins the same thing. */
+export const retriesExhausted = z.object({
   variant: z.literal('retries_exhausted'),
   messageKind: z.enum(OUTBOX_KINDS),
   template: z.string().nullable(),
   bookingReference: reference.nullable(),
   attempts: z.int().min(1),
   lastError: z.string().max(2000),
-});
-
-const loginLockout = z.object({
-  variant: z.literal('login_lockout'),
-  failedLoginCount: z.int().min(1),
-  lockedUntil: instant,
-});
-
-const passwordReset = z.object({
-  variant: z.literal('password_reset'),
-  /** Built by Task 7 on WEB_ORIGIN, with the token in the fragment. */
-  resetUrl: z.url(),
-  expiresAt: instant,
 });
 
 const refundDue = z.object({
@@ -97,25 +86,14 @@ const bookingCancelled = z.object({
   bookingFeeRwf: amountRwf,
 });
 
-export const adminAlert = defineTemplate({
-  payload: z.discriminatedUnion('variant', [
-    paymentReceived,
-    retriesExhausted,
-    loginLockout,
-    passwordReset,
-    refundDue,
-    bookingCancelled,
-  ]),
+export const photographerAlert = defineTemplate({
+  payload: z.discriminatedUnion('variant', [paymentReceived, retriesExhausted, refundDue, bookingCancelled]),
   compose(p, ctx): ComposedEmail {
     switch (p.variant) {
       case 'payment_received':
         return composePaymentReceived(p, ctx);
       case 'retries_exhausted':
-        return composeRetriesExhausted(p, ctx);
-      case 'login_lockout':
-        return composeLoginLockout(p, ctx);
-      case 'password_reset':
-        return composePasswordReset(p, ctx);
+        return composeRetriesExhausted(p, ctx, 'email:adminAlert.retriesExhausted');
       case 'refund_due':
         return composeRefundDue(p, ctx);
       case 'booking_cancelled':
@@ -155,49 +133,31 @@ function composePaymentReceived(p: z.infer<typeof paymentReceived>, ctx: EmailCo
   };
 }
 
-function composeRetriesExhausted(p: z.infer<typeof retriesExhausted>, ctx: EmailContext): ComposedEmail {
+/**
+ * "A message could not be sent", in the words under `keys`: the photographer's
+ * copy here, the platform admins' in `platform_alert`. Both name the message
+ * from a `messages.<template or kind>` table, so every template the CHECK
+ * allows needs a line in each.
+ */
+export function composeRetriesExhausted(
+  p: z.infer<typeof retriesExhausted>,
+  ctx: EmailContext,
+  keys: 'email:adminAlert.retriesExhausted' | 'email:platformAlert.retriesExhausted',
+): ComposedEmail {
   const what = p.messageKind === 'email' ? (p.template ?? p.messageKind) : p.messageKind;
   const rows = [
-    { label: tr(ctx, 'email:adminAlert.retriesExhausted.message'), value: tr(ctx, `email:adminAlert.retriesExhausted.messages.${what}`) },
+    { label: tr(ctx, `${keys}.message`), value: tr(ctx, `${keys}.messages.${what}`) },
     ...(p.bookingReference === null ? [] : [{ label: tr(ctx, 'email:common.labels.reference'), value: p.bookingReference }]),
-    { label: tr(ctx, 'email:adminAlert.retriesExhausted.lastError'), value: p.lastError },
+    { label: tr(ctx, `${keys}.lastError`), value: p.lastError },
   ];
   return {
-    subject: tr(ctx, 'email:adminAlert.retriesExhausted.subject'),
-    preheader: tr(ctx, 'email:adminAlert.retriesExhausted.preheader', { count: p.attempts }),
+    subject: tr(ctx, `${keys}.subject`),
+    preheader: tr(ctx, `${keys}.preheader`, { count: p.attempts }),
     blocks: [
-      { type: 'heading', text: tr(ctx, 'email:adminAlert.retriesExhausted.heading') },
-      { type: 'paragraph', text: tr(ctx, 'email:adminAlert.retriesExhausted.intro', { count: p.attempts }) },
+      { type: 'heading', text: tr(ctx, `${keys}.heading`) },
+      { type: 'paragraph', text: tr(ctx, `${keys}.intro`, { count: p.attempts }) },
       { type: 'details', rows },
-      { type: 'paragraph', text: tr(ctx, 'email:adminAlert.retriesExhausted.advice') },
-    ],
-  };
-}
-
-function composeLoginLockout(p: z.infer<typeof loginLockout>, ctx: EmailContext): ComposedEmail {
-  const until = formatDateTime(p.lockedUntil);
-  return {
-    subject: tr(ctx, 'email:adminAlert.loginLockout.subject', { count: p.failedLoginCount }),
-    preheader: tr(ctx, 'email:adminAlert.loginLockout.preheader', { until }),
-    blocks: [
-      { type: 'heading', text: tr(ctx, 'email:adminAlert.loginLockout.heading') },
-      { type: 'paragraph', text: tr(ctx, 'email:adminAlert.loginLockout.intro', { count: p.failedLoginCount, until }) },
-      { type: 'paragraph', text: tr(ctx, 'email:adminAlert.loginLockout.ifNotYou') },
-      { type: 'button', label: tr(ctx, 'email:adminAlert.loginLockout.signIn'), href: siteUrl(ctx, '/admin/login') },
-    ],
-  };
-}
-
-function composePasswordReset(p: z.infer<typeof passwordReset>, ctx: EmailContext): ComposedEmail {
-  const until = formatDateTime(p.expiresAt);
-  return {
-    subject: tr(ctx, 'email:adminAlert.passwordReset.subject'),
-    preheader: tr(ctx, 'email:adminAlert.passwordReset.preheader', { until }),
-    blocks: [
-      { type: 'heading', text: tr(ctx, 'email:adminAlert.passwordReset.heading') },
-      { type: 'paragraph', text: tr(ctx, 'email:adminAlert.passwordReset.intro', { until }) },
-      { type: 'button', label: tr(ctx, 'email:adminAlert.passwordReset.button'), href: onSite(ctx, p.resetUrl) },
-      { type: 'paragraph', text: tr(ctx, 'email:adminAlert.passwordReset.ignore') },
+      { type: 'paragraph', text: tr(ctx, `${keys}.advice`) },
     ],
   };
 }

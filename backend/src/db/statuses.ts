@@ -16,7 +16,8 @@ export const BOOKING_STATUSES = [
   'no_show',
   'expired',
   'cancelled_by_client',
-  // Was `cancelled_by_admin` before the marketplace: the photographer cancelled.
+  // The photographer cancelled. Was the admin's cancellation before the
+  // marketplace, when the one admin was the photographer.
   'cancelled_by_photographer',
   // A platform admin cancelled one booking (marketplace-data-model.md §2.9). Like
   // the photographer's own cancellation it frees the slot and refunds in full.

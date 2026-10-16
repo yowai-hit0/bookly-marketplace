@@ -237,13 +237,13 @@ describe('the system moves no money (spec §6.16, R-5)', () => {
   });
 
   it('changes no booking status: a refund is a payment fact, not a lifecycle event', async () => {
-    const booking = await insertBooking(prisma, world, { status: 'cancelled_by_admin', startsAt: new Date('2027-01-06T07:00:00Z') });
+    const booking = await insertBooking(prisma, world, { status: 'cancelled_by_photographer', startsAt: new Date('2027-01-06T07:00:00Z') });
     const payment = await insertPayment(prisma, booking.id, { status: 'refund_due', amountRwf: 20_000 });
 
     await recordRefund(deps(), payment.id, { reference: 'MOMO-REF-7781' });
 
     const after = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } });
-    expect(after).toMatchObject({ status: 'cancelled_by_admin', cancelledAt: booking.cancelledAt });
+    expect(after).toMatchObject({ status: 'cancelled_by_photographer', cancelledAt: booking.cancelledAt });
   });
 
   it('sends nothing: the client is told about a refund by the photographer, not by the system', async () => {

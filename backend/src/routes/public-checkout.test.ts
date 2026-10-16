@@ -419,7 +419,7 @@ describe('POST /api/checkout/:reference/:token/payments', () => {
   it.each([
     ['hold_expired', 'a lapsed hold', { holdMinutes: -1 }],
     ['hold_expired', 'an expired booking', { status: 'expired' }],
-    ['hold_expired', 'a cancelled booking', { status: 'cancelled_by_admin' }],
+    ['hold_expired', 'a cancelled booking', { status: 'cancelled_by_photographer' }],
     ['nothing_to_pay', 'a zero fee', { bookingFeeRwf: 0 }],
   ])('409 %s for %s', async (error, _case, seed) => {
     const booking = await insertBooking(prisma, world, seed);

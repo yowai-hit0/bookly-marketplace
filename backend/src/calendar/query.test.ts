@@ -151,7 +151,7 @@ describe('which bookings the calendar shows (data-model_v2.md §7.1)', () => {
     // A future hold_expires_at does not bring an expired booking back.
     ['expired', LIVE, false],
     ['cancelled_by_client', null, false],
-    ['cancelled_by_admin', null, false],
+    ['cancelled_by_photographer', null, false],
   ])('%s with hold_expires_at %j: shown = %s', async (status, holdExpiresAt, shown) => {
     await insertNineOClock('BKY-2610-00001', { status, holdExpiresAt });
 
@@ -190,7 +190,7 @@ describe('which bookings the calendar shows (data-model_v2.md §7.1)', () => {
       ['no_show', '12:30'],
       ['expired', '14:00'],
       ['cancelled_by_client', '15:30'],
-      ['cancelled_by_admin', '17:00'],
+      ['cancelled_by_photographer', '17:00'],
     ];
     for (const [index, [status, time]] of statuses.entries()) {
       const startsAt = at(WEDNESDAY, time);

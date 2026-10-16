@@ -3,7 +3,15 @@ import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { EMAIL_TEMPLATES, type EmailTemplate, OUTBOX_KINDS, enqueue } from './enqueue.js';
+import { insertBooking, seedSecondPhotographer, seedWorld } from '../test/payment-fixtures.js';
+import {
+  EMAIL_TEMPLATES,
+  OUTBOX_KINDS,
+  RESERVED_EMAIL_TEMPLATES,
+  SENDABLE_EMAIL_TEMPLATES,
+  type SendableEmailTemplate,
+  enqueue,
+} from './enqueue.js';
 
 /**
  * Enqueuing (plan.md Task 14, data-model_v2.md §5.13), against real PostgreSQL:
@@ -11,6 +19,9 @@ import { EMAIL_TEMPLATES, type EmailTemplate, OUTBOX_KINDS, enqueue } from './en
  * success. The implementation uses ON CONFLICT DO NOTHING rather than catching
  * P2002, so these tests also pin that a duplicate inside a transaction does not
  * abort the transaction around it.
+ *
+ * Every row is filed under its booking's photographer (marketplace-data-model.md
+ * §2.14), and a row with no booking may be filed under one explicitly.
  */
 
 let prisma: PrismaClient;
@@ -96,13 +107,13 @@ describe('enqueue', () => {
       const duplicate = await enqueue(tx, confirmation({ clientName: 'second' }));
       // A write after the conflict: a caught 23505 would have aborted the
       // transaction and this statement would fail with 25P02.
-      await tx.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+      await tx.client.create({ data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' } });
       const fresh = await enqueue(tx, { ...confirmation({ clientName: 'third' }), dedupeKey: `${KEY}:resend:1` });
       return [duplicate, fresh];
     });
 
     expect(results).toEqual(['duplicate', 'enqueued']);
-    await expect(prisma.service.count()).resolves.toBe(1);
+    await expect(prisma.client.count()).resolves.toBe(1);
     const rows = await prisma.outbox.findMany({ orderBy: { createdAt: 'asc' } });
     expect(rows.map((row) => [row.dedupeKey, row.payload])).toEqual(
       expect.arrayContaining([
@@ -146,53 +157,108 @@ describe('enqueue', () => {
     await expect(prisma.outbox.count()).resolves.toBe(1);
   });
 
-  it('writes a calendar job with no template and no recipient', async () => {
-    const service = await prisma.service.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
-    const pkg = await prisma.package.create({
-      data: { serviceId: service.id, nameEn: 'Standard', priceRwf: 40_000, photoCount: 20, durationMinutes: 60 },
-    });
-    const client = await prisma.client.create({
-      data: { fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
-    });
-    const booking = await prisma.booking.create({
-      data: {
-        reference: 'BKY-2610-00001',
-        clientId: client.id,
-        contactName: 'Aline Uwase',
-        contactEmail: 'aline@example.com',
-        contactPhone: '+250788000000',
-        serviceId: service.id,
-        packageId: pkg.id,
-        serviceNameSnapshot: 'Portrait',
-        packageNameSnapshot: 'Standard',
-        packagePriceRwf: 40_000,
-        packageDurationMinutes: 60,
-        packagePhotoCount: 20,
-        locationText: 'Kigali Heights',
-        consentAt: new Date(),
-        bookingFeeRate: '0.400',
-        bookingFeeRwf: 16_000,
-        status: 'confirmed',
-        startsAt: new Date('2026-10-07T07:00:00Z'),
-        endsAt: new Date('2026-10-07T08:00:00Z'),
-        bufferEndsAt: new Date('2026-10-07T08:30:00Z'),
-      },
-    });
+  it("writes a calendar job with no template and no recipient, filed under the booking's photographer", async () => {
+    const world = await seedWorld(prisma);
+    const booking = await insertBooking(prisma, world, { status: 'confirmed' });
 
     await expect(
       enqueue(prisma, { kind: 'gcal_create', bookingId: booking.id, dedupeKey: `gcal_create:${booking.id}`, payload: {} }),
     ).resolves.toBe('enqueued');
 
     const row = await prisma.outbox.findFirstOrThrow();
-    expect(row).toMatchObject({ kind: 'gcal_create', bookingId: booking.id, template: null, recipient: null });
+    expect(row).toMatchObject({
+      kind: 'gcal_create',
+      bookingId: booking.id,
+      photographerId: world.photographerId,
+      template: null,
+      recipient: null,
+    });
   });
 
-  it('does not swallow a CHECK violation as a duplicate', async () => {
+  it.each(['booking_invite', 'admin_alert', 'admin_new_booking'])(
+    'does not swallow a CHECK violation as a duplicate: %s is refused',
+    async (template) => {
+      await expect(
+        enqueue(prisma, {
+          ...confirmation({ clientName: 'x' }),
+          template: template as string as SendableEmailTemplate,
+        }),
+      ).rejects.toThrow();
+      await expect(prisma.outbox.count()).resolves.toBe(0);
+    },
+  );
+});
+
+describe('enqueue and the photographer a row is filed under', () => {
+  it("takes an email's photographer from its booking", async () => {
+    const world = await seedWorld(prisma);
+    const booking = await insertBooking(prisma, world, { status: 'confirmed' });
+
+    await enqueue(prisma, { ...confirmation({ clientName: 'Aline' }), bookingId: booking.id });
+
+    await expect(prisma.outbox.findFirstOrThrow()).resolves.toMatchObject({ bookingId: booking.id, photographerId: world.photographerId });
+  });
+
+  it("takes each booking's own photographer when two studios book at once", async () => {
+    const first = await seedWorld(prisma);
+    const second = await seedSecondPhotographer(prisma, first);
+    const ours = await insertBooking(prisma, first, { status: 'confirmed' });
+    const theirs = await insertBooking(prisma, second, { status: 'confirmed' });
+
+    await enqueue(prisma, { ...confirmation({ clientName: 'Aline' }), bookingId: ours.id, dedupeKey: `${KEY}:ours` });
+    await enqueue(prisma, { ...confirmation({ clientName: 'Aline' }), bookingId: theirs.id, dedupeKey: `${KEY}:theirs` });
+
+    const rows = await prisma.outbox.findMany();
+    expect(Object.fromEntries(rows.map((row) => [row.dedupeKey, row.photographerId]))).toEqual({
+      [`${KEY}:ours`]: first.photographerId,
+      [`${KEY}:theirs`]: second.photographerId,
+    });
+  });
+
+  it('accepts a booking and the same photographer named explicitly', async () => {
+    const world = await seedWorld(prisma);
+    const booking = await insertBooking(prisma, world, { status: 'confirmed' });
+
     await expect(
-      enqueue(prisma, {
-        ...confirmation({ clientName: 'x' }),
-        template: 'booking_invite' as string as EmailTemplate,
-      }),
+      enqueue(prisma, { ...confirmation({ clientName: 'Aline' }), bookingId: booking.id, photographerId: world.photographerId }),
+    ).resolves.toBe('enqueued');
+  });
+
+  it("refuses a booking with another photographer named, enqueuing nothing: one studio's mail is never filed under another", async () => {
+    const first = await seedWorld(prisma);
+    const second = await seedSecondPhotographer(prisma, first);
+    const booking = await insertBooking(prisma, first, { status: 'confirmed' });
+
+    await expect(
+      enqueue(prisma, { ...confirmation({ clientName: 'Aline' }), bookingId: booking.id, photographerId: second.photographerId }),
+    ).rejects.toThrow(/names a photographer other than its booking's/);
+    await expect(prisma.outbox.count()).resolves.toBe(0);
+  });
+
+  it('files a booking-less message under the photographer it names, such as a photographer alert', async () => {
+    const world = await seedWorld(prisma);
+
+    await enqueue(prisma, {
+      kind: 'email',
+      template: 'photographer_alert',
+      recipient: 'photographer@bookly.example',
+      photographerId: world.photographerId,
+      dedupeKey: 'email:photographer_alert:test',
+      payload: {},
+    });
+
+    await expect(prisma.outbox.findFirstOrThrow()).resolves.toMatchObject({ bookingId: null, photographerId: world.photographerId });
+  });
+
+  it('files platform and account mail under no photographer', async () => {
+    await enqueue(prisma, { ...confirmation({ clientName: 'Aline' }), template: 'account_password_reset' });
+
+    await expect(prisma.outbox.findFirstOrThrow()).resolves.toMatchObject({ bookingId: null, photographerId: null });
+  });
+
+  it('leaves a booking that does not exist to the foreign key', async () => {
+    await expect(
+      enqueue(prisma, { ...confirmation({ clientName: 'Aline' }), bookingId: '00000000-0000-4000-8000-000000000000' }),
     ).rejects.toThrow();
     await expect(prisma.outbox.count()).resolves.toBe(0);
   });
@@ -213,5 +279,20 @@ describe('the vocabularies and the CHECK constraints', () => {
 
   it('EMAIL_TEMPLATES is exactly outbox_template_allowed', async () => {
     expect(await allowedValues('outbox_template_allowed')).toEqual([...EMAIL_TEMPLATES].sort());
+  });
+
+  it('splits it into the sendable templates and the names reserved for later phases, with no overlap', () => {
+    expect([...SENDABLE_EMAIL_TEMPLATES, ...RESERVED_EMAIL_TEMPLATES].sort()).toEqual([...EMAIL_TEMPLATES].sort());
+    expect(SENDABLE_EMAIL_TEMPLATES.filter((template) => (RESERVED_EMAIL_TEMPLATES as readonly string[]).includes(template))).toEqual([]);
+    expect(EMAIL_TEMPLATES).toHaveLength(24);
+    expect(SENDABLE_EMAIL_TEMPLATES).toHaveLength(16);
+  });
+
+  it('has retired admin_alert and admin_new_booking (marketplace-data-model.md §2.14)', () => {
+    expect(EMAIL_TEMPLATES).not.toContain('admin_alert');
+    expect(EMAIL_TEMPLATES).not.toContain('admin_new_booking');
+    expect(EMAIL_TEMPLATES).toEqual(
+      expect.arrayContaining(['photographer_alert', 'platform_alert', 'photographer_new_booking', 'account_password_reset', 'account_security_alert']),
+    );
   });
 });

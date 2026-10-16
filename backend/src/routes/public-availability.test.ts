@@ -765,7 +765,7 @@ describe('GET /api/availability with the database changing between two identical
     });
     expect(await startTimes(WEDNESDAY)).not.toContain('11:00');
 
-    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_admin' } });
+    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_photographer' } });
 
     expect(await startTimes(WEDNESDAY)).toEqual(grid('09:00', '16:00'));
   });

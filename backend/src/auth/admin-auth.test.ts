@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AdminUser, Outbox, PrismaClient } from '@prisma/client';
+import type { AppUser, Outbox, PrismaClient } from '@prisma/client';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
@@ -19,15 +19,17 @@ import { hashPassword, verifyPassword } from './password.js';
 import { TOKEN_TTL_SECONDS, passwordFingerprint, verifyAdminToken } from './token.js';
 
 /**
- * Login, lockout and password reset (plan.md Task 7, spec §6.23), called
- * directly against real PostgreSQL. The clock is injected and mutable, so a lock
- * or a token expiry is crossed by moving `clock`, never by waiting.
+ * Login, lockout and password reset (plan.md Task 7, spec §6.23), per
+ * `app_user` (marketplace-spec.md R2.5), called directly against real
+ * PostgreSQL. Phase 1's studio login admits photographers only (brief
+ * decision 3). The clock is injected and mutable, so a lock or a token expiry is
+ * crossed by moving `clock`, never by waiting.
  */
 
 let prisma: PrismaClient;
 let raw: pg.Client;
 let deps: AuthDeps;
-/** Argon2id of PASSWORD, computed once: every seeded admin reuses it. */
+/** Argon2id of PASSWORD, computed once: every seeded user reuses it. */
 let passwordHash: string;
 let clock: Date;
 
@@ -61,19 +63,47 @@ beforeEach(async () => {
 
 // --- Fixtures ---------------------------------------------------------------
 
-function seedAdmin(email = EMAIL): Promise<AdminUser> {
-  return prisma.adminUser.create({ data: { email, passwordHash } });
+let handleCounter = 0;
+
+/** A photographer's login with its approved photographer row: what the studio admits. */
+function seedAdmin(email = EMAIL): Promise<AppUser> {
+  handleCounter += 1;
+  return prisma.appUser.create({
+    data: {
+      email,
+      role: 'photographer',
+      passwordHash,
+      photographer: {
+        create: { handle: `studio-${handleCounter}`, displayName: 'Kigali Lens', status: 'approved', approvedAt: START },
+      },
+    },
+  });
 }
 
-function reload(admin: AdminUser): Promise<AdminUser> {
-  return prisma.adminUser.findUniqueOrThrow({ where: { id: admin.id } });
+/** A login with no photographer row: a platform admin, a client, or a photographer whose row is missing. */
+function seedUser(role: 'platform_admin' | 'client' | 'photographer', email = EMAIL): Promise<AppUser> {
+  return prisma.appUser.create({ data: { email, role, passwordHash } });
+}
+
+function reload(admin: AppUser): Promise<AppUser> {
+  return prisma.appUser.findUniqueOrThrow({ where: { id: admin.id } });
+}
+
+/** The stored password hash, which every seeded user has. */
+function hashOf(user: AppUser): string {
+  if (user.passwordHash === null) throw new Error('Expected a password hash');
+  return user.passwordHash;
+}
+
+async function photographerIdOf(user: AppUser): Promise<string> {
+  return (await prisma.photographer.findUniqueOrThrow({ where: { userId: user.id } })).id;
 }
 
 function advance(ms: number): void {
   clock = new Date(clock.getTime() + ms);
 }
 
-function lockedUntilMs(admin: AdminUser): number {
+function lockedUntilMs(admin: AppUser): number {
   if (admin.lockedUntil === null) throw new Error('Expected the admin to be locked');
   return admin.lockedUntil.getTime();
 }
@@ -99,9 +129,10 @@ function payloadOf(row: Outbox): Record<string, unknown> {
   return payload;
 }
 
-async function outboxRows(variant: 'login_lockout' | 'password_reset'): Promise<Outbox[]> {
-  const rows = await prisma.outbox.findMany({ orderBy: { createdAt: 'asc' } });
-  return rows.filter((row) => payloadOf(row).variant === variant);
+const TEMPLATE_OF = { login_lockout: 'account_security_alert', password_reset: 'account_password_reset' } as const;
+
+async function outboxRows(event: keyof typeof TEMPLATE_OF): Promise<Outbox[]> {
+  return prisma.outbox.findMany({ where: { template: TEMPLATE_OF[event] }, orderBy: { createdAt: 'asc' } });
 }
 
 /** The plaintext token, recovered from the only place it lives: the email payload. */
@@ -159,16 +190,37 @@ describe('lockoutMinutesFor', () => {
 // --- Successful login ---------------------------------------------------------
 
 describe('attemptLogin with correct credentials', () => {
-  it('issues a bearer token bound to the current password hash, expiring in 8 hours', async () => {
+  it('issues a bearer token for the user and role, bound to the current password hash, expiring in 8 hours', async () => {
     const admin = await seedAdmin();
 
     const result = signedIn(await attemptLogin(deps, EMAIL, PASSWORD));
 
     expect(result.expiresAt.getTime()).toBe(START.getTime() + TOKEN_TTL_SECONDS * 1000);
     await expect(verifyAdminToken(SECRET, result.token, START)).resolves.toEqual({
-      adminId: admin.id,
-      passwordFingerprint: passwordFingerprint(SECRET, admin.passwordHash),
+      userId: admin.id,
+      role: 'photographer',
+      passwordFingerprint: passwordFingerprint(SECRET, hashOf(admin)),
     });
+  });
+
+  it('returns the photographer id of the user who signed in', async () => {
+    const admin = await seedAdmin();
+    await seedAdmin('second.photographer@bookly.example');
+
+    const result = signedIn(await attemptLogin(deps, EMAIL, PASSWORD));
+
+    expect(result.user.id).toBe(admin.id);
+    expect(result.photographerId).toBe(await photographerIdOf(admin));
+  });
+
+  it.each(['pending', 'suspended'])('admits a %s photographer: setting up, or keeping the bookings they have', async (status) => {
+    const admin = await seedAdmin();
+    await prisma.photographer.update({
+      where: { userId: admin.id },
+      data: { status, approvedAt: null, ...(status === 'suspended' ? { suspendedAt: START } : {}) },
+    });
+
+    await expect(attemptLogin(deps, EMAIL, PASSWORD)).resolves.toMatchObject({ status: 'ok' });
   });
 
   it('puts neither the password hash nor anything cookie- or CSRF-shaped in the result', async () => {
@@ -176,9 +228,9 @@ describe('attemptLogin with correct credentials', () => {
 
     const result = signedIn(await attemptLogin(deps, EMAIL, PASSWORD));
 
-    expect(Object.keys(result).sort()).toEqual(['admin', 'expiresAt', 'status', 'token']);
+    expect(Object.keys(result).sort()).toEqual(['expiresAt', 'photographerId', 'status', 'token', 'user']);
     const [, payload] = result.token.split('.');
-    expect(Buffer.from(payload ?? '', 'base64url').toString()).not.toContain(admin.passwordHash);
+    expect(Buffer.from(payload ?? '', 'base64url').toString()).not.toContain(hashOf(admin));
   });
 
   it('records last_login_at from the injected clock', async () => {
@@ -186,7 +238,7 @@ describe('attemptLogin with correct credentials', () => {
 
     const result = signedIn(await attemptLogin(deps, EMAIL, PASSWORD));
 
-    expect(result.admin.lastLoginAt?.toISOString()).toBe(START.toISOString());
+    expect(result.user.lastLoginAt?.toISOString()).toBe(START.toISOString());
     await expect(reload(admin)).resolves.toMatchObject({ lastLoginAt: START });
   });
 
@@ -197,7 +249,7 @@ describe('attemptLogin with correct credentials', () => {
 
       const result = signedIn(await attemptLogin(deps, casing, PASSWORD));
 
-      expect(result.admin.id).toBe(admin.id);
+      expect(result.user.id).toBe(admin.id);
     },
   );
 
@@ -261,6 +313,53 @@ describe('attemptLogin refusals', () => {
     const result = await attemptLogin(deps, EMAIL, WRONG);
 
     expect(Object.keys(result)).toEqual(['status']);
+  });
+});
+
+// --- Who the studio admits ------------------------------------------------------------
+
+describe('attemptLogin for a login that is not a photographer studio', () => {
+  // Phase 1's only login is the studio's (brief decision 3). Every other kind of
+  // account gets exactly what an unknown email gets: the same result, nothing
+  // counted against it, and no email -- the studio login must not become a way
+  // to probe for, or lock out, a platform admin or a client.
+
+  const refusals: [string, () => Promise<AppUser>][] = [
+    ['a platform admin', () => seedUser('platform_admin')],
+    ['a client', () => seedUser('client')],
+    ['a photographer login with no photographer row', () => seedUser('photographer')],
+    [
+      'a photographer whose login was disabled',
+      async () => prisma.appUser.update({ where: { id: (await seedAdmin()).id }, data: { disabledAt: START } }),
+    ],
+    [
+      'an erased photographer login',
+      async () => prisma.appUser.update({ where: { id: (await seedAdmin()).id }, data: { anonymizedAt: START } }),
+    ],
+  ];
+
+  it.each(refusals)('refuses %s with the right password, as invalid_credentials', async (_label, seed) => {
+    await seed();
+
+    await expect(attemptLogin(deps, EMAIL, PASSWORD)).resolves.toEqual({ status: 'invalid_credentials' });
+  });
+
+  it.each(refusals)('counts nothing against %s and sends nothing, even past the lockout threshold', async (_label, seed) => {
+    const user = await seed();
+
+    await failLogins(LOCKOUT_THRESHOLD);
+
+    await expect(reload(user)).resolves.toEqual(user);
+    await expect(prisma.outbox.count()).resolves.toBe(0);
+  }, 30_000);
+
+  it.each(refusals)('sends %s no reset link and leaves the row alone', async (_label, seed) => {
+    const user = await seed();
+
+    await expect(requestPasswordReset(deps, EMAIL)).resolves.toBeUndefined();
+
+    await expect(prisma.outbox.count()).resolves.toBe(0);
+    await expect(reload(user)).resolves.toEqual(user);
   });
 });
 
@@ -371,7 +470,7 @@ describe('lockout', () => {
     expect(lockedUntilMs(await reload(admin))).toBe(lockedAt + MINUTE_MS);
   }, 30_000);
 
-  it('enqueues exactly one admin_alert per lock, addressed to the stored email', async () => {
+  it('enqueues exactly one account_security_alert per lock, addressed to the stored email', async () => {
     const admin = await seedAdmin('Photographer@Bookly.Example');
     await failLogins(LOCKOUT_THRESHOLD);
     await failLogins(2); // locked: not counted, no second email
@@ -382,9 +481,11 @@ describe('lockout', () => {
     if (row === undefined) return;
     expect(row).toMatchObject({
       kind: 'email',
-      template: 'admin_alert',
+      template: 'account_security_alert',
       recipient: 'Photographer@Bookly.Example',
       bookingId: null,
+      // Account mail concerns a person, not a studio.
+      photographerId: null,
       status: 'pending',
     });
     const until = lockedUntilMs(await reload(admin));
@@ -404,7 +505,7 @@ describe('lockout under concurrency', () => {
   beforeEach(async () => {
     // Open the pool's connections first, so the burst measures the race rather
     // than connection setup spreading the attempts apart.
-    await Promise.all(Array.from({ length: 10 }, () => prisma.adminUser.count()));
+    await Promise.all(Array.from({ length: 10 }, () => prisma.appUser.count()));
   });
 
   it('counts one lock worth of failures from a simultaneous burst of 10', async () => {
@@ -492,7 +593,7 @@ describe('requestPasswordReset', () => {
 
     // Nowhere in the row at all, in any column.
     const all = await raw.query<{ row: string }>(
-      'SELECT row_to_json(a)::text AS row FROM admin_user a WHERE id = $1',
+      'SELECT row_to_json(a)::text AS row FROM app_user a WHERE id = $1',
       [admin.id],
     );
     expect(firstRow(all).row).not.toContain(token);
@@ -517,7 +618,7 @@ describe('requestPasswordReset', () => {
     expect(row.passwordResetExpiresAt?.getTime()).toBe(START.getTime() + RESET_TTL_MS);
   });
 
-  it('enqueues an admin_alert whose link is a #token= fragment on the web origin', async () => {
+  it('enqueues an account_password_reset whose link is a #token= fragment on the web origin', async () => {
     await seedAdmin();
 
     await requestPasswordReset(deps, EMAIL);
@@ -528,11 +629,13 @@ describe('requestPasswordReset', () => {
     if (row === undefined) return;
     expect(row).toMatchObject({
       kind: 'email',
-      template: 'admin_alert',
+      template: 'account_password_reset',
       recipient: EMAIL,
       bookingId: null,
+      photographerId: null,
     });
     const payload = payloadOf(row);
+    expect(Object.keys(payload).sort()).toEqual(['expiresAt', 'resetUrl']);
     expect(payload.expiresAt).toBe(new Date(START.getTime() + RESET_TTL_MS).toISOString());
 
     const url = new URL(String(payload.resetUrl));
@@ -585,6 +688,24 @@ describe('requestPasswordReset', () => {
 
     await expect(outboxRows('password_reset')).resolves.toHaveLength(1);
   });
+
+  it('keeps each reset to its own user: a second photographer requesting one leaves the first working', async () => {
+    const first = await seedAdmin();
+    const second = await seedAdmin('second.photographer@bookly.example');
+    await requestPasswordReset(deps, EMAIL);
+    const firstToken = await latestResetToken();
+    await requestPasswordReset(deps, 'second.photographer@bookly.example');
+    const secondToken = await latestResetToken();
+
+    await expect(reload(first)).resolves.toMatchObject({ passwordResetTokenHash: sha256(firstToken) });
+    await expect(reload(second)).resolves.toMatchObject({ passwordResetTokenHash: sha256(secondToken) });
+
+    await expect(confirmPasswordReset(deps, secondToken, NEW_PASSWORD)).resolves.toBe('ok');
+    // Only the holder of the token changed password.
+    await expect(verifyPassword(hashOf(await reload(second)), NEW_PASSWORD)).resolves.toBe(true);
+    await expect(reload(first)).resolves.toMatchObject({ passwordHash, passwordResetTokenHash: sha256(firstToken) });
+    await expect(confirmPasswordReset(deps, firstToken, 'the first photographer, resetting')).resolves.toBe('ok');
+  });
 });
 
 // --- Password reset: confirm ---------------------------------------------------
@@ -599,8 +720,8 @@ describe('confirmPasswordReset', () => {
     );
 
     const row = await reload(admin);
-    await expect(verifyPassword(row.passwordHash, NEW_PASSWORD)).resolves.toBe(true);
-    await expect(verifyPassword(row.passwordHash, PASSWORD)).resolves.toBe(false);
+    await expect(verifyPassword(hashOf(row), NEW_PASSWORD)).resolves.toBe(true);
+    await expect(verifyPassword(hashOf(row), PASSWORD)).resolves.toBe(false);
     expect(row.passwordHash).toMatch(/^\$argon2id\$/);
     expect(row.passwordResetTokenHash).toBeNull();
     expect(row.passwordResetExpiresAt).toBeNull();
@@ -617,7 +738,7 @@ describe('confirmPasswordReset', () => {
     );
 
     const row = await reload(admin);
-    await expect(verifyPassword(row.passwordHash, NEW_PASSWORD)).resolves.toBe(true);
+    await expect(verifyPassword(hashOf(row), NEW_PASSWORD)).resolves.toBe(true);
   });
 
   it('accepts the token 1 ms before it expires', async () => {
@@ -646,7 +767,7 @@ describe('confirmPasswordReset', () => {
     },
   );
 
-  it.each<[string, (pending: AdminUser) => string]>([
+  it.each<[string, (pending: AppUser) => string]>([
     ['an unknown token', () => 'x'.repeat(43)],
     // Someone who can read the column must still not be able to use it.
     ['the stored hash submitted as the token', (pending) => String(pending.passwordResetTokenHash)],
@@ -683,7 +804,7 @@ describe('confirmPasswordReset', () => {
     expect(results.filter((r) => r === 'ok')).toHaveLength(1);
     expect(results.filter((r) => r === 'invalid_or_expired_token')).toHaveLength(1);
     const row = await reload(admin);
-    const matches = await Promise.all(passwords.map((p) => verifyPassword(row.passwordHash, p)));
+    const matches = await Promise.all(passwords.map((p) => verifyPassword(hashOf(row), p)));
     expect(matches.filter(Boolean)).toHaveLength(1);
   });
 
@@ -712,8 +833,8 @@ describe('confirmPasswordReset', () => {
 
     const row = await reload(admin);
     // The signature still verifies -- nothing about the JWT itself changed. What
-    // no longer matches is the fingerprint `requireAdmin` compares it against.
-    expect(claims.passwordFingerprint).toBe(passwordFingerprint(SECRET, admin.passwordHash));
-    expect(claims.passwordFingerprint).not.toBe(passwordFingerprint(SECRET, row.passwordHash));
+    // no longer matches is the fingerprint `requirePhotographer` compares it against.
+    expect(claims.passwordFingerprint).toBe(passwordFingerprint(SECRET, hashOf(admin)));
+    expect(claims.passwordFingerprint).not.toBe(passwordFingerprint(SECRET, hashOf(row)));
   });
 });

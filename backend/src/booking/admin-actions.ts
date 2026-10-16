@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { isSlotTaken, isTransactionConflict } from '../db/errors.js';
 import { enqueue } from '../outbox/enqueue.js';
+import { bookingPhotographerRecipient } from '../outbox/recipients.js';
 import { getSettings } from '../settings/index.js';
 import { issueAccessToken } from './access-link.js';
 import { hashAccessToken } from './access-token.js';
@@ -145,7 +146,7 @@ export async function cancelByAdmin(deps: AdminActionDeps, bookingId: string, re
   const cancelled = await deps.prisma.$transaction(async (tx) => {
     const { count } = await tx.booking.updateMany({
       where: { id: booking.id, status: 'confirmed' },
-      data: { status: 'cancelled_by_admin', cancelledAt: now, cancellationReason: reason },
+      data: { status: 'cancelled_by_photographer', cancelledAt: now, cancellationReason: reason },
     });
     if (count === 0) return false;
 
@@ -171,14 +172,14 @@ export async function cancelByAdmin(deps: AdminActionDeps, bookingId: string, re
       },
     });
 
-    const admin = await adminRecipient(tx);
-    if (admin === null) return true;
+    // The booking's photographer (R1.7), who owes the refund.
+    const photographer = await bookingPhotographerRecipient(tx, booking.id);
     for (const payment of refunded) {
       await enqueue(tx, {
         kind: 'email',
-        template: 'admin_alert',
-        recipient: admin,
-        dedupeKey: `email:admin_alert:refund_due:${payment.id}`,
+        template: 'photographer_alert',
+        ...photographer,
+        dedupeKey: `email:photographer_alert:refund_due:${payment.id}`,
         payload: {
           variant: 'refund_due',
           reference: booking.reference,
@@ -301,11 +302,6 @@ async function flagRefunds(tx: Prisma.TransactionClient, booking: AdminBooking):
     if (count === 1) flagged.push(payment);
   }
   return flagged;
-}
-
-async function adminRecipient(tx: Prisma.TransactionClient): Promise<string | null> {
-  const admin = await tx.adminUser.findFirst({ orderBy: { createdAt: 'asc' }, select: { email: true } });
-  return admin?.email ?? null;
 }
 
 /** The booking as it now stands, which is what every action answers with. */

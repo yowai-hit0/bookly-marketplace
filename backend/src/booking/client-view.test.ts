@@ -154,7 +154,7 @@ describe('the whole view', () => {
   });
 
   it('shows the photographer’s cancellation reason and the moment of cancelling', async () => {
-    const { booking } = await insertBookingWithToken(prisma, world, { status: 'cancelled_by_admin' });
+    const { booking } = await insertBookingWithToken(prisma, world, { status: 'cancelled_by_photographer' });
     await prisma.booking.update({
       where: { id: booking.id },
       data: { cancellationReason: 'The photographer is unwell.', cancelledAt: new Date('2026-10-02T09:00:00Z') },
@@ -194,7 +194,7 @@ describe('totals follow the booking’s status (data-model_v2.md §6.1)', () => 
     });
   });
 
-  it.each(['no_show', 'cancelled_by_client', 'cancelled_by_admin', 'expired'])(
+  it.each(['no_show', 'cancelled_by_client', 'cancelled_by_photographer', 'expired'])(
     '%s owes nothing: the session fee is never shown as outstanding',
     async (status) => {
       const booking = await priced(status);
@@ -249,7 +249,7 @@ describe('the session fee block', () => {
     expect(view.sessionFee).toBeNull();
   });
 
-  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'is null for a %s booking, however much is unpaid',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status });
@@ -345,7 +345,7 @@ describe('canCancel', () => {
     expect((await viewOf(booking.id, new Date(startsAt.getTime() + 1))).canCancel).toBe(false);
   });
 
-  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'is false for a %s booking',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status });

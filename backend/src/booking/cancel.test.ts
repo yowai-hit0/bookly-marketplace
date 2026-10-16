@@ -429,7 +429,7 @@ describe('a booking the client cannot cancel', () => {
     await expect(cancelByClient(deps(justBefore), token)).resolves.toMatchObject({ status: 'cancelled' });
   });
 
-  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_admin', 'cancelled_by_client'])(
+  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_photographer', 'cancelled_by_client'])(
     'is not_cancellable when it is %s',
     async (status) => {
       const { booking, token } = await insertBookingWithToken(prisma, world, { status });

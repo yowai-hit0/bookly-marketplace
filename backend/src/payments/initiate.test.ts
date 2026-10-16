@@ -495,7 +495,7 @@ describe('a booking that cannot be paid starts nothing', () => {
     ['a completed booking', { status: 'completed' }],
     ['a no-show', { status: 'no_show' }],
     ['a booking the client cancelled', { status: 'cancelled_by_client' }],
-    ['a booking the photographer cancelled', { status: 'cancelled_by_admin' }],
+    ['a booking the photographer cancelled', { status: 'cancelled_by_photographer' }],
     ['an expired booking whose hold column still reads live', { status: 'expired', holdMinutes: 30 }],
   ])('hold_expired for %s', async (_case, seed) => {
     const booking = await insertBooking(prisma, world, seed);
@@ -755,7 +755,7 @@ describe('a session fee that cannot be started', () => {
     expect(await payments()).toHaveLength(2);
   });
 
-  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'nothing_to_pay for a %s booking, which owes nothing (data-model_v2.md §6.1)',
     async (status) => {
       const booking = await owingBooking(status);

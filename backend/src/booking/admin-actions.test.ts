@@ -37,7 +37,7 @@ import { bookingTotals } from './totals.js';
  * 500 -- and a lapsed hold in the way is expired rather than allowed to block.
  * Two moves racing for one slot produce one winner.
  *
- * **Cancel:** `cancelled_by_admin` with the reason, the slot released, every
+ * **Cancel:** `cancelled_by_photographer` with the reason, the slot released, every
  * penny collected flagged `refund_due` (the booking fee by policy, a session
  * fee because the shoot will not happen), the client emailed once and the
  * photographer alerted once per flagged payment (spec §6.16).
@@ -322,7 +322,7 @@ describe('rescheduling a confirmed booking', () => {
     });
   });
 
-  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_admin'] as const)(
+  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_photographer'] as const)(
     'refuses a %s booking: only a confirmed one can be moved',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status, startsAt: WEDNESDAY_0900 });
@@ -441,14 +441,14 @@ describe('two reschedules racing for the same free slot', () => {
 // --- Cancel by the photographer -----------------------------------------------------------
 
 describe('the photographer cancelling', () => {
-  it('sets cancelled_by_admin with the clock’s instant and stores the reason', async () => {
+  it('sets cancelled_by_photographer with the clock’s instant and stores the reason', async () => {
     const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt: WEDNESDAY_0900 });
 
     const result = ok(await cancelByAdmin(deps(), booking.id, 'The photographer is unwell.'));
 
-    expect(result.booking.status).toBe('cancelled_by_admin');
+    expect(result.booking.status).toBe('cancelled_by_photographer');
     expect(await bookingRow(booking.id)).toMatchObject({
-      status: 'cancelled_by_admin',
+      status: 'cancelled_by_photographer',
       cancelled_at: NOW,
       cancellation_reason: 'The photographer is unwell.',
     });
@@ -571,7 +571,7 @@ describe('the photographer cancelling', () => {
 
     ok(await cancelByAdmin(deps(), booking.id, null));
 
-    expect((await bookingRow(booking.id)).status).toBe('cancelled_by_admin');
+    expect((await bookingRow(booking.id)).status).toBe('cancelled_by_photographer');
     expect((await outbox()).map((row) => row.template)).toEqual(['cancellation']);
     expect((await payments(booking.id))[0]?.status).toBe('refund_due');
   });
@@ -593,7 +593,7 @@ describe('the photographer cancelling', () => {
     expect(await cancelByAdmin(deps(), '3f1b9c2a-0000-4000-8000-00000000abcd', null)).toStrictEqual({ status: 'not_found' });
   });
 
-  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_admin'] as const)(
+  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_photographer'] as const)(
     'refuses a %s booking and changes nothing',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status, startsAt: WEDNESDAY_0900 });
@@ -685,7 +685,7 @@ describe('marking a booking completed', () => {
     expect((await bookingRow(booking.id)).status).toBe('confirmed');
   });
 
-  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_admin'] as const)(
+  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_photographer'] as const)(
     'refuses a %s booking',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status, startsAt: WEDNESDAY_0900 });
@@ -763,7 +763,7 @@ describe('marking a no-show (spec §6.12, A-6)', () => {
     expect((await bookingRow(booking.id)).status).toBe('confirmed');
   });
 
-  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_admin'] as const)(
+  it.each(['pending_payment', 'completed', 'no_show', 'expired', 'cancelled_by_client', 'cancelled_by_photographer'] as const)(
     'refuses a %s booking',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status, startsAt: WEDNESDAY_0900 });
@@ -848,7 +848,7 @@ describe('resending the access link (spec §6.21, P-29)', () => {
     expect(await resendAccessLink(deps(), '3f1b9c2a-0000-4000-8000-00000000abcd')).toStrictEqual({ status: 'not_found' });
   });
 
-  it.each(['completed', 'no_show', 'cancelled_by_client', 'cancelled_by_admin'] as const)(
+  it.each(['completed', 'no_show', 'cancelled_by_client', 'cancelled_by_photographer'] as const)(
     'still resends on a %s booking, exactly as canResendLink advertises',
     async (status) => {
       const booking = await insertBooking(prisma, world, { status, startsAt: WEDNESDAY_0900 });
@@ -885,7 +885,7 @@ describe('the actions flags and the actions themselves agree', () => {
     ['no_show', false],
     ['expired', false],
     ['cancelled_by_client', false],
-    ['cancelled_by_admin', false],
+    ['cancelled_by_photographer', false],
   ] as const)('canReschedule and canCancel are %s = %s, and the actions follow', async (status, allowed) => {
     const booking = await insertBooking(prisma, world, { status, startsAt: WEDNESDAY_0900 });
     const view = adminBookingView(await adminBooking(booking.id), NOW);

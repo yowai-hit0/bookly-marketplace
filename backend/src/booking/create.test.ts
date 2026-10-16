@@ -861,7 +861,7 @@ describe('a start the calendar does not offer', () => {
     expect(result.booking.startsAt.toISOString()).toBe(kigali(WEDNESDAY, '09:00').toISOString());
   });
 
-  it.each(['expired', 'cancelled_by_client', 'cancelled_by_admin'])('books a start freed by a %s booking', async (status) => {
+  it.each(['expired', 'cancelled_by_client', 'cancelled_by_photographer'])('books a start freed by a %s booking', async (status) => {
     await insertExistingBooking({ reference: 'BKY-2610-GONE1', startsAt: kigali(WEDNESDAY, '09:00'), status });
 
     const result = created(await create());

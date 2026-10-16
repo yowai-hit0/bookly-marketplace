@@ -1280,7 +1280,7 @@ describe('DELETE a referenced row (RESTRICT foreign keys, data-model_v2.md §9.4
         const service = await insertService('portraits');
         const pkg = await insertPackage(service.id, { isActive: false });
         const booking = await insertBooking({ serviceId: service.id, packageId: pkg.id }, 'BKY-2610-00001');
-        await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_admin' } });
+        await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_photographer' } });
         return { path: `${PACKAGES}/${pkg.id}`, find: () => prisma.package.findUnique({ where: { id: pkg.id } }) };
       },
     ],

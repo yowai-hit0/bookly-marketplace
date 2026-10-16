@@ -961,7 +961,7 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     expect((await bookingRow(booking.id)).status).toBe('confirmed');
   });
 
-  it.each(['expired', 'cancelled_by_client', 'cancelled_by_admin'])('re-confirms over a %s booking in the same slot, which occupies nothing', async (status) => {
+  it.each(['expired', 'cancelled_by_client', 'cancelled_by_photographer'])('re-confirms over a %s booking in the same slot, which occupies nothing', async (status) => {
     const { booking, payment } = await expiredWithPayment();
     await insertBooking(prisma, world, { status, startsAt: SLOT, holdMinutes: null });
 

@@ -1,9 +1,9 @@
 import { DEFAULT_LOCALE, type Locale, SUPPORTED_LOCALES, t } from '../i18n/index.js';
-import type { EmailTemplate } from '../outbox/enqueue.js';
+import type { SendableEmailTemplate } from '../outbox/enqueue.js';
 import { type ComposedEmail, type RenderedEmail, renderLayout } from './layout.js';
 import { accessLinkResend } from './templates/access-link-resend.js';
-import { adminAlert } from './templates/admin-alert.js';
-import { adminNewBooking } from './templates/admin-new-booking.js';
+import { accountPasswordReset } from './templates/account-password-reset.js';
+import { accountSecurityAlert } from './templates/account-security-alert.js';
 import { bookingConfirmation } from './templates/booking-confirmation.js';
 import { bookingLinks } from './templates/booking-links.js';
 import { emailChangeConfirm } from './templates/email-change-confirm.js';
@@ -12,6 +12,9 @@ import { cancellation } from './templates/cancellation.js';
 import { clientNote } from './templates/client-note.js';
 import { paymentReceipt } from './templates/payment-receipt.js';
 import { photoDelivery } from './templates/photo-delivery.js';
+import { photographerAlert } from './templates/photographer-alert.js';
+import { photographerNewBooking } from './templates/photographer-new-booking.js';
+import { platformAlert } from './templates/platform-alert.js';
 import { reschedule } from './templates/reschedule.js';
 import { sessionFeeRequest } from './templates/session-fee-request.js';
 import { type AnyEmailTemplate, EmailPayloadError } from './templates/shared.js';
@@ -21,25 +24,30 @@ import { type AnyEmailTemplate, EmailPayloadError } from './templates/shared.js'
  * a text body (plan.md Task 15). Later tasks enqueue a template name and a
  * payload; none composes copy.
  *
- * One entry per value of the `outbox_template_allowed` CHECK, each in its own
- * file under `templates/`. The record type makes a missing template a compile
- * error; a test holds the CHECK and the files to each other.
+ * One entry per value of the `outbox_template_allowed` CHECK but the names
+ * reserved for later phases (`RESERVED_EMAIL_TEMPLATES`), each in its own file
+ * under `templates/`. The record type makes a missing template a compile error;
+ * a test holds the CHECK and the files to each other. A reserved name renders
+ * as an unknown template: nothing may enqueue one before it has a file here.
  */
 
-export const TEMPLATES: Record<EmailTemplate, AnyEmailTemplate> = {
+export const TEMPLATES: Record<SendableEmailTemplate, AnyEmailTemplate> = {
   booking_confirmation: bookingConfirmation,
-  admin_new_booking: adminNewBooking,
+  photographer_new_booking: photographerNewBooking,
   session_fee_request: sessionFeeRequest,
   payment_receipt: paymentReceipt,
   photo_delivery: photoDelivery,
   cancellation,
   reschedule,
   access_link_resend: accessLinkResend,
-  admin_alert: adminAlert,
+  photographer_alert: photographerAlert,
+  platform_alert: platformAlert,
   booking_links: bookingLinks,
   email_change_confirm: emailChangeConfirm,
   email_changed_notice: emailChangedNotice,
   client_note: clientNote,
+  account_password_reset: accountPasswordReset,
+  account_security_alert: accountSecurityAlert,
 };
 
 export type RenderOptions = {
@@ -71,7 +79,7 @@ export function renderEmail(template: string, payload: unknown, options: RenderO
   });
 }
 
-export function isEmailTemplate(value: string): value is EmailTemplate {
+export function isEmailTemplate(value: string): value is SendableEmailTemplate {
   return Object.hasOwn(TEMPLATES, value);
 }
 

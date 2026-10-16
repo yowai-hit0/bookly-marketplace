@@ -253,6 +253,11 @@ ALTER TABLE "outbox"
 - `admin_alert` is split into `photographer_alert` and `platform_alert`.
 - Password reset and lockout move to `account_password_reset` and `account_security_alert`.
 - `enqueue()` sets `photographer_id` from the booking.
+- **Phase 1 refinements (2026-10-16):**
+  - A row with no booking may name its photographer explicitly; `photographer_alert` rows do. Naming a photographer other than the booking's is refused.
+  - Account and platform mail (`account_*`, `platform_alert`) has no `photographer_id`.
+  - When the worker gives up on a row, the alert goes to the row's photographer as `photographer_alert`. A row with no photographer alerts every platform admin whose login is on, one `platform_alert` row each. A failed alert is logged only.
+  - The names reserved for later phases (`account_verify_email`, `photographer_*` lifecycle mail, `subscription_*`, `payout_sent`) are in the CHECK but have no renderer yet. In code, `RESERVED_EMAIL_TEMPLATES` lists them and `enqueue()` refuses them at the type level.
 
 ## 3. New models
 

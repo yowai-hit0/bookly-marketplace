@@ -18,7 +18,8 @@ import type { Prisma } from '@prisma/client';
  *   completed          completed, the photos not yet sent -- whatever is still
  *                      owed, which the page shows on its own
  *   closed             completed, and the photos email has gone
- *   no_show, expired, cancelled_by_client, cancelled_by_admin   as stored
+ *   no_show, expired, cancelled_by_client, cancelled_by_photographer,
+ *   cancelled_by_platform                                               as stored
  *
  * `bookingStage()` is the one definition; `stageWhere()` is the same rule as a
  * database filter, and a test holds the two to each other.
@@ -34,7 +35,8 @@ export const BOOKING_STAGES = [
   'no_show',
   'expired',
   'cancelled_by_client',
-  'cancelled_by_admin',
+  'cancelled_by_photographer',
+  'cancelled_by_platform',
 ] as const;
 export type BookingStage = (typeof BOOKING_STAGES)[number];
 
@@ -60,7 +62,8 @@ export function bookingStage(booking: StagedBooking, now: Date, audience: StageA
     case 'no_show':
     case 'expired':
     case 'cancelled_by_client':
-    case 'cancelled_by_admin':
+    case 'cancelled_by_photographer':
+    case 'cancelled_by_platform':
       return booking.status;
     default:
       // A status the database adds later: shown as it is stored would be a

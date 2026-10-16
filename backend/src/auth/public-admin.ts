@@ -1,22 +1,25 @@
-import type { AdminUser } from '@prisma/client';
+import type { AppUser } from '@prisma/client';
 
 /**
- * The only shape of an admin that may leave the API (plan.md Task 7).
+ * The only shape of a signed-in user that may leave the API (plan.md Task 7).
+ * The studio endpoints still send it under the `admin` key in Phase 1, so the
+ * frontend keeps working until Phase 2's `/api/studio/*` (brief decision 3).
  *
  * An explicit allowlist, never a spread with deletions: a column added to
- * `admin_user` later must stay private until someone chooses to publish it.
- * `password_hash`, the reset token hash and the lockout state never appear.
+ * `app_user` later must stay private until someone chooses to publish it.
+ * `password_hash`, the reset and verification token hashes, `google_sub` and
+ * the lockout state never appear.
  */
-export type PublicAdmin = {
+export type PublicUser = {
   id: string;
   email: string;
   lastLoginAt: string | null;
 };
 
-export function toPublicAdmin(admin: AdminUser): PublicAdmin {
+export function toPublicUser(user: AppUser): PublicUser {
   return {
-    id: admin.id,
-    email: admin.email,
-    lastLoginAt: admin.lastLoginAt?.toISOString() ?? null,
+    id: user.id,
+    email: user.email,
+    lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
   };
 }

@@ -14,7 +14,8 @@ import {
 } from './token.js';
 
 /**
- * The admin bearer token (plan.md Task 7, revision 2.3). Pure: no database, no
+ * The studio bearer token (plan.md Task 7, revision 2.3), with the marketplace's
+ * `{ sub: userId, role }` claims (brief decision 3). Pure: no database, no
  * HTTP. Forged tokens are signed with jose directly, so each attack is built
  * exactly rather than approximated by string surgery.
  */
@@ -26,7 +27,7 @@ const PASSWORD_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYX
 const NOW = new Date('2026-09-14T08:00:00Z');
 const NOW_SECONDS = NOW.getTime() / 1000;
 
-const admin = { id: ADMIN_ID, passwordHash: PASSWORD_HASH };
+const admin = { id: ADMIN_ID, role: 'photographer', passwordHash: PASSWORD_HASH };
 
 function key(secret = SECRET): Uint8Array {
   return new TextEncoder().encode(secret);
@@ -40,6 +41,7 @@ type ForgeOptions = {
   aud?: string | null;
   iat?: number | null;
   exp?: number | null;
+  role?: unknown;
   fingerprint?: unknown;
 };
 
@@ -53,10 +55,12 @@ async function forge(options: ForgeOptions = {}): Promise<string> {
     aud = TOKEN_AUDIENCE,
     iat = NOW_SECONDS,
     exp = NOW_SECONDS + TOKEN_TTL_SECONDS,
+    role = 'photographer',
     fingerprint = passwordFingerprint(SECRET, PASSWORD_HASH),
   } = options;
 
   const claims: Record<string, unknown> = {};
+  if (role !== null) claims.role = role;
   if (fingerprint !== null) claims.pwd_fp = fingerprint;
   const jwt = new SignJWT(claims).setProtectedHeader({ alg, typ: 'JWT' });
   if (sub !== null) jwt.setSubject(sub);
@@ -81,13 +85,22 @@ describe('issueAdminToken', () => {
     expect(decodeProtectedHeader(token)).toEqual({ alg: 'HS256', typ: 'JWT' });
   });
 
-  it('names the admin, the issuer and the audience', async () => {
+  it('names the user, their role, the issuer and the audience', async () => {
     const { token } = await issueAdminToken(SECRET, admin, NOW);
     expect(decodeJwt(token)).toMatchObject({
       sub: ADMIN_ID,
+      role: 'photographer',
       iss: 'bookly-api',
       aud: 'bookly-admin',
     });
+  });
+
+  it('refuses to issue for a user without a password: there is nothing to bind the token to', async () => {
+    await expect(issueAdminToken(SECRET, { ...admin, passwordHash: null }, NOW)).rejects.toThrow(/without a password/);
+  });
+
+  it('refuses to issue for a role outside app_user_role_allowed', async () => {
+    await expect(issueAdminToken(SECRET, { ...admin, role: 'admin' }, NOW)).rejects.toThrow(/unknown role/);
   });
 
   it('expires eight hours after the injected clock, in both the claim and the result', async () => {
@@ -120,19 +133,25 @@ describe('issueAdminToken', () => {
     expect(decoded).not.toContain(sha256Hex(PASSWORD_HASH));
   });
 
-  it('carries no claim beyond the six it needs', async () => {
+  it('carries no claim beyond the seven it needs', async () => {
     const { token } = await issueAdminToken(SECRET, admin, NOW);
     expect(Object.keys(decodeJwt(token)).sort()).toEqual(
-      ['aud', 'exp', 'iat', 'iss', 'pwd_fp', 'sub'].sort(),
+      ['aud', 'exp', 'iat', 'iss', 'pwd_fp', 'role', 'sub'].sort(),
     );
   });
 
   it('round-trips through verifyAdminToken', async () => {
     const { token } = await issueAdminToken(SECRET, admin, NOW);
     await expect(verifyAdminToken(SECRET, token, NOW)).resolves.toEqual({
-      adminId: ADMIN_ID,
+      userId: ADMIN_ID,
+      role: 'photographer',
       passwordFingerprint: passwordFingerprint(SECRET, PASSWORD_HASH),
     });
+  });
+
+  it.each(['platform_admin', 'client'])('round-trips the %s role as issued', async (role) => {
+    const { token } = await issueAdminToken(SECRET, { ...admin, role }, NOW);
+    await expect(verifyAdminToken(SECRET, token, NOW)).resolves.toMatchObject({ role });
   });
 });
 
@@ -267,7 +286,7 @@ describe('verifyAdminToken claim shapes', () => {
     await expect(verifyAdminToken(SECRET, await forge({ sub: null }), NOW)).resolves.toBeNull();
   });
 
-  it.each(['not-a-uuid', '', '1', "3f2b8c1e'; DROP TABLE admin_user;--", `${ADMIN_ID}x`])(
+  it.each(['not-a-uuid', '', '1', "3f2b8c1e'; DROP TABLE app_user;--", `${ADMIN_ID}x`])(
     'refuses a correctly-signed subject %j that is not a UUID -- a 401, never a database error',
     async (sub) => {
       await expect(verifyAdminToken(SECRET, await forge({ sub }), NOW)).resolves.toBeNull();
@@ -277,9 +296,20 @@ describe('verifyAdminToken claim shapes', () => {
   it('accepts an upper-case UUID subject', async () => {
     const upper = ADMIN_ID.toUpperCase();
     await expect(verifyAdminToken(SECRET, await forge({ sub: upper }), NOW)).resolves.toMatchObject({
-      adminId: upper,
+      userId: upper,
     });
   });
+
+  it('refuses a token with no role: one issued before the marketplace', async () => {
+    await expect(verifyAdminToken(SECRET, await forge({ role: null }), NOW)).resolves.toBeNull();
+  });
+
+  it.each(['admin', 'Photographer', '', 42, ['photographer'], { role: 'photographer' }])(
+    'refuses a correctly-signed role %j outside app_user_role_allowed',
+    async (role) => {
+      await expect(verifyAdminToken(SECRET, await forge({ role }), NOW)).resolves.toBeNull();
+    },
+  );
 
   it('refuses a token with no password fingerprint', async () => {
     await expect(

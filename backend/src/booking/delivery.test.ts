@@ -593,7 +593,7 @@ describe('a booking cancelled while the send is in flight', () => {
       // The send now blocks on that row, as the photographer's cancel lands.
       const sending = sendDelivery(deps(), booking.id);
       await waitForABlockedWriter();
-      await blocker.query(`UPDATE booking SET status = 'cancelled_by_admin', cancelled_at = now() WHERE id = $1`, [booking.id]);
+      await blocker.query(`UPDATE booking SET status = 'cancelled_by_photographer', cancelled_at = now() WHERE id = $1`, [booking.id]);
       await blocker.query('COMMIT');
       await sending;
     } finally {

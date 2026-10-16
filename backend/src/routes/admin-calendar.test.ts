@@ -214,7 +214,7 @@ describe('GET /api/admin/calendar', () => {
           status: 'pending_payment',
           holdExpiresAt: new Date(START.getTime() - MINUTE_MS),
         }),
-        bookingData({ reference: 'BKY-2610-00003', startsAt: at(WEDNESDAY, '12:00'), status: 'cancelled_by_admin' }),
+        bookingData({ reference: 'BKY-2610-00003', startsAt: at(WEDNESDAY, '12:00'), status: 'cancelled_by_photographer' }),
         bookingData({ reference: 'BKY-2610-00004', startsAt: at('2026-10-08', '09:00') }),
       ],
     });

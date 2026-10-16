@@ -12,12 +12,17 @@ import {
 } from './shared.js';
 
 /**
- * To the photographer when a booking confirms (spec §3.1 step 12, plan.md
+ * To the booking's photographer when it confirms (spec §3.1 step 12, plan.md
  * Task 17): who, what, when and where, what they asked for, and the money --
- * with a link to that day in his calendar. It carries the client's contact
- * details, which the photographer is entitled to see (P-13).
+ * with a link to that day in their calendar. It carries the client's contact
+ * details from the booking's snapshot, which the photographer is entitled to
+ * see (P-13, marketplace-spec.md R1.6).
+ *
+ * Was `admin_new_booking` before the marketplace (marketplace-data-model.md
+ * §2.14). The copy keys keep their old `adminNewBooking` names: the en.json
+ * strings may not be edited, and they already speak to the photographer.
  */
-export const adminNewBooking = defineTemplate({
+export const photographerNewBooking = defineTemplate({
   payload: z.object({
     ...bookingBasics,
     clientEmail: z.email(),

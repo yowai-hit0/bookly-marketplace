@@ -277,7 +277,7 @@ describe('GET /bookings', () => {
 
   it('filters by one status', async () => {
     const confirmed = await insertBooking(prisma, world, { status: 'confirmed', startsAt: WEDNESDAY_0900 });
-    await insertBooking(prisma, world, { status: 'cancelled_by_admin', startsAt: THURSDAY_0900 });
+    await insertBooking(prisma, world, { status: 'cancelled_by_photographer', startsAt: THURSDAY_0900 });
 
     const res = await get(`${BOOKINGS}?status=confirmed`);
 
@@ -286,10 +286,10 @@ describe('GET /bookings', () => {
 
   it('takes status repeated, as ?status=a&status=b', async () => {
     const confirmed = await insertBooking(prisma, world, { status: 'confirmed', startsAt: WEDNESDAY_0900 });
-    const cancelled = await insertBooking(prisma, world, { status: 'cancelled_by_admin', startsAt: THURSDAY_0900 });
+    const cancelled = await insertBooking(prisma, world, { status: 'cancelled_by_photographer', startsAt: THURSDAY_0900 });
     await insertBooking(prisma, world, { status: 'expired', startsAt: new Date('2027-01-08T07:00:00Z') });
 
-    const res = await get(`${BOOKINGS}?status=confirmed&status=cancelled_by_admin`);
+    const res = await get(`${BOOKINGS}?status=confirmed&status=cancelled_by_photographer`);
 
     expect(res.body.bookings.map((row: { reference: string }) => row.reference).sort()).toEqual(
       [confirmed.reference, cancelled.reference].sort(),
@@ -481,7 +481,7 @@ describe('POST /bookings/:id/reschedule', () => {
 
     expect([res.status, res.body.error]).toEqual([409, 'not_allowed']);
     expect(res.body.booking).toMatchObject({
-      status: 'cancelled_by_admin',
+      status: 'cancelled_by_photographer',
       lifecycle: { cancellationReason: 'Studio flooded.' },
       actions: { canReschedule: false, canCancel: false },
     });
@@ -520,7 +520,7 @@ describe('POST /bookings/:id/cancel', () => {
     expect(res.status).toBe(200);
     expect(res.body).toStrictEqual({ booking: await renderedBooking(booking.id) });
     expect(res.body.booking).toMatchObject({
-      status: 'cancelled_by_admin',
+      status: 'cancelled_by_photographer',
       lifecycle: { cancelledAt: START.toISOString(), cancellationReason: 'The photographer is unwell.' },
       money: { totals: { collectedRwf: 0, refundDueRwf: 20_000, outstandingRwf: 0 } },
     });
@@ -532,7 +532,7 @@ describe('POST /bookings/:id/cancel', () => {
 
     const res = await post(`${BOOKINGS}/${booking.id}/cancel`, {});
 
-    expect([res.status, res.body.booking.status]).toEqual([200, 'cancelled_by_admin']);
+    expect([res.status, res.body.booking.status]).toEqual([200, 'cancelled_by_photographer']);
     expect(res.body.booking.lifecycle.cancellationReason).toBeNull();
   });
 
@@ -656,7 +656,7 @@ describe('POST /bookings/:id/complete and /no-show', () => {
 
     const res = await post(`${BOOKINGS}/${booking.id}/${action}`, {});
 
-    expect([res.status, res.body.error, res.body.booking.status]).toEqual([409, 'not_allowed', 'cancelled_by_admin']);
+    expect([res.status, res.body.error, res.body.booking.status]).toEqual([409, 'not_allowed', 'cancelled_by_photographer']);
   });
 
   it.each(['complete', 'no-show'] as const)('answers 404 for a booking that does not exist: %s', async (action) => {
@@ -1134,12 +1134,12 @@ describe('POST /bookings/:id/session-fee', () => {
 
   it('answers 409 not_allowed carrying the booking once it has been cancelled', async () => {
     const booking = await completedBooking();
-    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_admin', cancelledAt: START } });
+    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_photographer', cancelledAt: START } });
 
     const res = await postPaid(`${BOOKINGS}/${booking.id}/session-fee`, {});
 
     expect([res.status, res.body.error]).toEqual([409, 'not_allowed']);
-    expect(res.body.booking).toMatchObject({ status: 'cancelled_by_admin', actions: { canRequestSessionFee: false } });
+    expect(res.body.booking).toMatchObject({ status: 'cancelled_by_photographer', actions: { canRequestSessionFee: false } });
   });
 
   it('answers 409 in_progress carrying the booking while the client is paying', async () => {
@@ -1537,13 +1537,13 @@ describe('POST /bookings/:id/delivery/send', () => {
 
   it('answers 409 not_allowed carrying the booking once it has been cancelled', async () => {
     const booking = await withLink();
-    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_admin', cancelledAt: START } });
+    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'cancelled_by_photographer', cancelledAt: START } });
 
     const res = await post(`${BOOKINGS}/${booking.id}/delivery/send`, {});
 
     expect([res.status, res.body.error]).toEqual([409, 'not_allowed']);
     expect(res.body.booking).toMatchObject({
-      status: 'cancelled_by_admin',
+      status: 'cancelled_by_photographer',
       actions: { canEditDelivery: false, canSendDelivery: false },
     });
     expect(await prisma.outbox.count({ where: { template: 'photo_delivery' } })).toBe(0);

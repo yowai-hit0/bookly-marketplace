@@ -365,7 +365,7 @@ describe('POST /api/booking/:token/cancel', () => {
     ['a completed booking', { status: 'completed' }],
     ['a no-show', { status: 'no_show' }],
     ['an expired booking', { status: 'expired' }],
-    ['a booking the photographer cancelled', { status: 'cancelled_by_admin' }],
+    ['a booking the photographer cancelled', { status: 'cancelled_by_photographer' }],
   ])('answers 409 not_cancellable for %s, and changes nothing', async (_case, seed) => {
     const { booking, token } = await insertBookingWithToken(prisma, world, seed);
 

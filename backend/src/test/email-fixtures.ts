@@ -1,9 +1,9 @@
 import type { Prisma } from '@prisma/client';
-import type { EmailTemplate } from '../outbox/enqueue.js';
+import type { SendableEmailTemplate } from '../outbox/enqueue.js';
 
 /**
- * Fixture payloads for every email template and every `admin_alert` variant
- * (plan.md Task 15). Imported by tests only.
+ * Fixture payloads for every sendable email template and every variant of the
+ * templates that have them (plan.md Task 15). Imported by tests only.
  *
  * Instants are chosen from `docs/fixtures/format.json` where they can be, so a
  * rendered time can be read against the shared fixture. The access token is
@@ -26,7 +26,7 @@ export const FIXTURE_CONFIRM_TOKEN = 'Cf7mN2bV9cX4zL1kJ8hG5fD3sA6pO0iU';
 export type EmailFixture = {
   /** Unique; used as the snapshot name. */
   name: string;
-  template: EmailTemplate;
+  template: SendableEmailTemplate;
   payload: Prisma.InputJsonObject;
 };
 
@@ -53,8 +53,8 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
-    name: 'admin_new_booking',
-    template: 'admin_new_booking',
+    name: 'photographer_new_booking',
+    template: 'photographer_new_booking',
     payload: {
       ...basics,
       clientEmail: 'aline@example.com',
@@ -171,8 +171,8 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
-    name: 'admin_alert payment_received',
-    template: 'admin_alert',
+    name: 'photographer_alert payment_received',
+    template: 'photographer_alert',
     payload: {
       variant: 'payment_received',
       reference: FIXTURE_REFERENCE,
@@ -186,8 +186,8 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
-    name: 'admin_alert retries_exhausted',
-    template: 'admin_alert',
+    name: 'photographer_alert retries_exhausted',
+    template: 'photographer_alert',
     payload: {
       variant: 'retries_exhausted',
       messageKind: 'email',
@@ -198,8 +198,20 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
-    name: 'admin_alert login_lockout',
-    template: 'admin_alert',
+    name: 'platform_alert retries_exhausted',
+    template: 'platform_alert',
+    payload: {
+      variant: 'retries_exhausted',
+      messageKind: 'email',
+      template: 'account_password_reset',
+      bookingReference: null,
+      attempts: 1,
+      lastError: 'PermanentOutboxError: Resend refused the recipient',
+    },
+  },
+  {
+    name: 'account_security_alert login_lockout',
+    template: 'account_security_alert',
     payload: {
       variant: 'login_lockout',
       failedLoginCount: 5,
@@ -208,18 +220,17 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
-    name: 'admin_alert password_reset',
-    template: 'admin_alert',
+    name: 'account_password_reset',
+    template: 'account_password_reset',
     payload: {
-      variant: 'password_reset',
       resetUrl: `${FIXTURE_WEB_ORIGIN}/admin/reset-password#token=${FIXTURE_RESET_TOKEN}`,
       /** format.json `formatDateTime`: 1 Jan 2027, 00:00. */
       expiresAt: '2026-12-31T22:00:00.000Z',
     },
   },
   {
-    name: 'admin_alert refund_due',
-    template: 'admin_alert',
+    name: 'photographer_alert refund_due',
+    template: 'photographer_alert',
     payload: {
       variant: 'refund_due',
       reference: FIXTURE_REFERENCE,
@@ -232,8 +243,8 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
-    name: 'admin_alert booking_cancelled',
-    template: 'admin_alert',
+    name: 'photographer_alert booking_cancelled',
+    template: 'photographer_alert',
     payload: {
       variant: 'booking_cancelled',
       reference: FIXTURE_REFERENCE,
@@ -246,15 +257,16 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
   },
 ];
 
-/** Every `admin_alert` variant the template accepts. */
-export const ADMIN_ALERT_VARIANTS = [
-  'payment_received',
-  'retries_exhausted',
-  'login_lockout',
-  'password_reset',
-  'refund_due',
-  'booking_cancelled',
-] as const;
+/**
+ * Every variant each template with variants accepts. The old `admin_alert`'s six
+ * are split among the first three (marketplace-data-model.md §2.14); its
+ * `password_reset` is the variant-less `account_password_reset`.
+ */
+export const TEMPLATE_VARIANTS = {
+  photographer_alert: ['payment_received', 'retries_exhausted', 'refund_due', 'booking_cancelled'],
+  platform_alert: ['retries_exhausted'],
+  account_security_alert: ['login_lockout'],
+} as const satisfies Partial<Record<SendableEmailTemplate, readonly string[]>>;
 
 export function emailFixture(name: string): EmailFixture {
   const found = EMAIL_FIXTURES.find((fixture) => fixture.name === name);

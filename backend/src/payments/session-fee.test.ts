@@ -332,7 +332,7 @@ describe('the email the request enqueues', () => {
   });
 
   it('enqueues nothing at all when the request is refused', async () => {
-    const { booking } = await owingBooking('cancelled_by_admin');
+    const { booking } = await owingBooking('cancelled_by_photographer');
 
     const result = await requestSessionFee(deps(), booking.id);
 
@@ -513,7 +513,7 @@ describe('a request that cannot be made', () => {
     expect(await payments()).toEqual([]);
   });
 
-  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['pending_payment', 'expired', 'no_show', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'answers not_allowed for a %s booking, which owes nothing (data-model_v2.md §6.1)',
     async (status) => {
       const { booking } = await owingBooking(status);

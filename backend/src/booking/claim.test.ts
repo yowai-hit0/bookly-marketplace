@@ -283,7 +283,7 @@ describe('claimSlot and stale holds', () => {
 // --- Occupancy by status (data-model_v2.md §7.1) -----------------------------
 
 describe('claimSlot and the occupancy table', () => {
-  it.each(['expired', 'cancelled_by_client', 'cancelled_by_admin'])(
+  it.each(['expired', 'cancelled_by_client', 'cancelled_by_photographer'])(
     'claims a slot held only by a %s booking',
     async (status) => {
       const ids = await insertCatalogue();
