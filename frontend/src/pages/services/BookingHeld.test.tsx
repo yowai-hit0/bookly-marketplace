@@ -11,7 +11,8 @@ import { BookingHeld } from './BookingHeld'
  * 13, spec §3.1 step 8): the reference, what and when in Kigali time, the
  * package and add-on lines, and the amounts exactly as the API froze them --
  * never recomputed -- with the fee's percentage read off the booking's own
- * rate, how long the hold lasts, and the non-refundable notice. Focus moves to
+ * rate, how long the hold lasts, and the photographer's cancellation policy
+ * (non-refundable unless a test says otherwise, R1.8). Focus moves to
  * its heading, since the form the visitor submitted is gone.
  *
  * With the payment adapter (plan.md Task 16): the way to pay is a link to the
@@ -37,6 +38,9 @@ const HELD: HeldBooking = {
 
 const NOTICE = 'The booking fee is non-refundable if you cancel.'
 
+/** The photographer's policy unless a test says otherwise: no cut-off, the fee kept (R1.8). */
+const POLICY = { cutoffHours: 0, bookingFeeRefundable: false }
+
 /** Every term and its value, in the order they render. */
 function lines(): [string, string][] {
   return Array.from(document.querySelectorAll('dt')).map((term) => [term.textContent ?? '', term.nextElementSibling?.textContent ?? ''])
@@ -44,7 +48,7 @@ function lines(): [string, string][] {
 
 describe('the held booking', () => {
   it('lists the reference, the service, when, each line and the amounts, in that order', () => {
-    render(<BookingHeld booking={HELD} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={HELD} />)
 
     expect(lines()).toEqual([
       ['Booking reference', 'BKY-2610-7K3QX'],
@@ -59,7 +63,7 @@ describe('the held booking', () => {
   })
 
   it('has a level-1 heading that takes focus on arrival', () => {
-    render(<BookingHeld booking={HELD} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={HELD} />)
 
     const heading = screen.getByRole('heading', { level: 1, name: 'Your time is held' })
     expect(heading).toHaveFocus()
@@ -70,6 +74,7 @@ describe('the held booking', () => {
     // Deliberately inconsistent: a browser recomputing anything would show other numbers.
     render(
       <BookingHeld
+        cancellationPolicy={POLICY}
         booking={{ ...HELD, packagePriceRwf: 41_111, addons: [{ name: 'Extra hour', priceRwf: 2_222 }], totalRwf: 12_345, bookingFeeRwf: 6_789, sessionFeeRwf: 1_111 }}
       />,
     )
@@ -90,7 +95,7 @@ describe('the held booking', () => {
     [0, '0%'],
     [1, '100%'],
   ])('reads the fee rate %s as %s', (bookingFeeRate, percent) => {
-    render(<BookingHeld booking={{ ...HELD, bookingFeeRate }} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={{ ...HELD, bookingFeeRate }} />)
 
     expect(screen.getByText(`Booking fee (${percent}), paid now to secure your date`)).toBeInTheDocument()
   })
@@ -98,6 +103,7 @@ describe('the held booking', () => {
   it('lists every add-on, including two with the same name, and none when there are none', () => {
     const { unmount } = render(
       <BookingHeld
+        cancellationPolicy={POLICY}
         booking={{ ...HELD, addons: [{ name: 'Print', priceRwf: 1_000 }, { name: 'Print', priceRwf: 2_000 }, { name: 'Rush edit', priceRwf: 5_000 }] }}
       />,
     )
@@ -109,7 +115,7 @@ describe('the held booking', () => {
     ])
     unmount()
 
-    render(<BookingHeld booking={{ ...HELD, addons: [] }} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={{ ...HELD, addons: [] }} />)
     expect(lines().map(([term]) => term)).toEqual([
       'Booking reference',
       'Service',
@@ -122,7 +128,7 @@ describe('the held booking', () => {
   })
 
   it('says until when the time is held, in Kigali time, and what to pay by then', () => {
-    render(<BookingHeld booking={HELD} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={HELD} />)
 
     expect(
       screen.getByText(
@@ -132,7 +138,7 @@ describe('the held booking', () => {
   })
 
   it('still says the time is held, without a clock time, when the API gives no expiry', () => {
-    render(<BookingHeld booking={{ ...HELD, holdExpiresAt: null }} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={{ ...HELD, holdExpiresAt: null }} />)
 
     expect(
       screen.getByText('We are holding this time for you for a short while. Pay the booking fee of 20,000 RWF to confirm your booking.'),
@@ -140,15 +146,30 @@ describe('the held booking', () => {
     expect(screen.queryByText(/until/)).not.toBeInTheDocument()
   })
 
+  it('states a refundable policy as information, with its cut-off, and never the non-refundable warning', () => {
+    render(<BookingHeld cancellationPolicy={{ cutoffHours: 12, bookingFeeRefundable: true }} booking={HELD} />)
+
+    expect(screen.getByText('The booking fee is refunded if you cancel at least 12 hours before the shoot.')).toBeInTheDocument()
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
+  })
+
+  it('states a cut-off beside a fee that is kept', () => {
+    render(<BookingHeld cancellationPolicy={{ cutoffHours: 24, bookingFeeRefundable: false }} booking={HELD} />)
+
+    expect(
+      screen.getByText('The booking fee is non-refundable if you cancel. You can cancel up to 24 hours before the shoot.'),
+    ).toBeInTheDocument()
+  })
+
   it('states the booking fee is non-refundable', () => {
-    render(<BookingHeld booking={HELD} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={HELD} />)
 
     expect(screen.getByText(NOTICE)).toBeInTheDocument()
   })
 
   it('reads the date on the Kigali calendar when the UTC date is still the day before', () => {
     // 22:30Z on the 7th is 00:30 on Thursday the 8th in Kigali.
-    render(<BookingHeld booking={{ ...HELD, startsAt: '2026-10-07T22:30:00.000Z', endsAt: '2026-10-08T00:00:00.000Z', holdExpiresAt: '2026-10-07T21:50:00.000Z' }} />)
+    render(<BookingHeld cancellationPolicy={POLICY} booking={{ ...HELD, startsAt: '2026-10-07T22:30:00.000Z', endsAt: '2026-10-08T00:00:00.000Z', holdExpiresAt: '2026-10-07T21:50:00.000Z' }} />)
 
     expect(lines()[2]).toEqual(['When', 'Thursday, 8 October 2026, 00:30 to 02:00, Kigali time'])
     expect(screen.getByText(/until 23:50, Kigali time/)).toBeInTheDocument()
@@ -158,7 +179,7 @@ describe('the held booking', () => {
     const original = process.env.TZ
     process.env.TZ = 'America/New_York'
     try {
-      render(<BookingHeld booking={HELD} />)
+      render(<BookingHeld cancellationPolicy={POLICY} booking={HELD} />)
 
       expect(lines()[2]).toEqual(['When', 'Wednesday, 7 October 2026, 09:30 to 11:00, Kigali time'])
       expect(screen.getByText(/until 08:30, Kigali time/)).toBeInTheDocument()
@@ -175,10 +196,10 @@ describe('the way to pay (plan.md Task 16)', () => {
   function renderInRouter(booking: HeldBooking) {
     const router = createMemoryRouter(
       [
-        { path: '/services/portraits', element: <BookingHeld booking={booking} /> },
+        { path: '/p/kigali-lens/portraits', element: <BookingHeld cancellationPolicy={POLICY} booking={booking} /> },
         { path: '/checkout/:reference/:token', element: <h1>Checkout page</h1> },
       ],
-      { initialEntries: ['/services/portraits'] },
+      { initialEntries: ['/p/kigali-lens/portraits'] },
     )
     render(<RouterProvider router={router} />)
     return router

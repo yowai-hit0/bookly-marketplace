@@ -17,7 +17,8 @@ export const BOOKING_STATUSES = [
   'no_show',
   'expired',
   'cancelled_by_client',
-  'cancelled_by_admin',
+  'cancelled_by_photographer',
+  'cancelled_by_platform',
 ] as const
 
 export type BookingStatus = (typeof BOOKING_STATUSES)[number]
@@ -37,7 +38,8 @@ export const BOOKING_STAGES = [
   'no_show',
   'expired',
   'cancelled_by_client',
-  'cancelled_by_admin',
+  'cancelled_by_photographer',
+  'cancelled_by_platform',
 ] as const
 
 export type BookingStage = (typeof BOOKING_STAGES)[number]
@@ -97,7 +99,7 @@ export type AdminBooking = {
   status: string
   stage: BookingStage
   locale: string
-  client: { id: string; fullName: string; email: string; phone: string | null; anonymized: boolean }
+  /** Who to reach about this booking. The shared client row is never exposed to a photographer (Phase 1.4). */
   contact: { name: string; email: string; phone: string }
   service: { id: string; name: string }
   package: { id: string; name: string; priceRwf: number; durationMinutes: number; photoCount: number }

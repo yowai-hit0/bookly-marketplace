@@ -1,4 +1,5 @@
 import { env } from '@/env'
+import type { CancellationTerms } from '@/lib/cancellation'
 import { type PaymentMethod, type StartPaymentResult, PaymentApiError } from './payments'
 
 /**
@@ -27,7 +28,8 @@ export const CLIENT_STAGES = [
   'no_show',
   'expired',
   'cancelled_by_client',
-  'cancelled_by_admin',
+  'cancelled_by_photographer',
+  'cancelled_by_platform',
 ] as const
 
 export type ClientStage = (typeof CLIENT_STAGES)[number]
@@ -78,6 +80,8 @@ export type ClientBooking = {
   bookingFeeRwf: number
   payments: ClientBookingPayment[]
   canCancel: boolean
+  /** The cancellation terms this booking was made under; `deadline` is null once nothing is left to cancel. */
+  cancellation: CancellationTerms
   cancellationReason: string | null
   cancelledAt: string | null
   sessionFee: { outstandingRwf: number; waitingPayment: { ourRef: string } | null } | null

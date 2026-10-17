@@ -30,7 +30,6 @@ const BOOKING = {
   status: 'confirmed',
   stage: 'confirmed',
   locale: 'en',
-  client: { id: 'cl1', fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000', anonymized: false },
   contact: { name: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
   service: { id: 's1', name: 'Portraits' },
   package: { id: 'p1', name: 'Standard', priceRwf: 40_000, durationMinutes: 90, photoCount: 25 },
@@ -114,9 +113,9 @@ describe('bookingsApi.list', () => {
   it('repeats status rather than joining it, in the order given', async () => {
     const mock = stubFetch(() => json({ bookings: [], total: 0, page: 1, pageSize: 25, pageCount: 1 }))
 
-    await bookingsApi.list({ statuses: ['confirmed', 'no_show', 'cancelled_by_admin'] })
+    await bookingsApi.list({ statuses: ['confirmed', 'no_show', 'cancelled_by_photographer'] })
 
-    expect(sent(mock).url).toBe('/api/admin/bookings?status=confirmed&status=no_show&status=cancelled_by_admin')
+    expect(sent(mock).url).toBe('/api/admin/bookings?status=confirmed&status=no_show&status=cancelled_by_photographer')
   })
 
   it('sends every status the API knows, unchanged', async () => {

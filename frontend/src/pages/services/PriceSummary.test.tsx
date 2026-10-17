@@ -8,7 +8,8 @@ import { PriceSummary } from './PriceSummary'
  *
  * What is proven: the two plan.md baskets render their total, booking fee with
  * its percentage and session fee; nothing is priced before a package is chosen;
- * the non-refundable notice is there in every state and precedes anything
+ * the cancellation notice (the photographer's policy; non-refundable here unless
+ * a test says otherwise) is there in every state and precedes anything
  * rendered after it -- where a payment control will go; and no processing-fee
  * line appears in any state.
  */
@@ -18,6 +19,9 @@ const EXTRA_HOUR = { id: 'a1', nameEn: 'Extra hour', priceRwf: 10_000 }
 const RUSH_EDIT = { id: 'a2', nameEn: 'Rush edit', priceRwf: 5_000 }
 
 const NOTICE = 'The booking fee is non-refundable if you cancel.'
+
+/** The photographer's policy unless a test says otherwise: no cut-off, the fee kept (R1.8). */
+const POLICY = { cutoffHours: 0, bookingFeeRefundable: false }
 const PROMPT = 'Choose a package to see your total.'
 
 function summary(): HTMLElement {
@@ -40,7 +44,7 @@ function lines(): [string, string][] {
 
 describe('PriceSummary', () => {
   it('shows a 40,000 package plus a 10,000 add-on at 40% as 50,000 total, 20,000 now and 30,000 after', () => {
-    render(<PriceSummary pkg={STANDARD} addons={[EXTRA_HOUR]} bookingFeeRate={0.4} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[EXTRA_HOUR]} bookingFeeRate={0.4} />)
 
     expect(lines()).toEqual([
       ['Standard', '40,000 RWF'],
@@ -53,7 +57,7 @@ describe('PriceSummary', () => {
   })
 
   it('shows 15,000 at 30% and 35,000 after on the same 50,000 basket for a service overriding the rate to 0.300', () => {
-    render(<PriceSummary pkg={STANDARD} addons={[EXTRA_HOUR]} bookingFeeRate={0.3} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[EXTRA_HOUR]} bookingFeeRate={0.3} />)
 
     expect(amount('Total')).toBe('50,000 RWF')
     expect(amount('Booking fee (30%), paid now to secure your date')).toBe('15,000 RWF')
@@ -62,14 +66,14 @@ describe('PriceSummary', () => {
 
   it('shows a fractional percentage and rounds the fee half-up in exact arithmetic', () => {
     // 92,500 × 37.5% is exactly 34,687.5: half-up is 34,688.
-    render(<PriceSummary pkg={{ id: 'p', nameEn: 'Signature', priceRwf: 80_000 }} addons={[{ id: 'a', nameEn: 'Prints', priceRwf: 12_500 }]} bookingFeeRate={0.375} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={{ id: 'p', nameEn: 'Signature', priceRwf: 80_000 }} addons={[{ id: 'a', nameEn: 'Prints', priceRwf: 12_500 }]} bookingFeeRate={0.375} />)
 
     expect(amount('Booking fee (37.5%), paid now to secure your date')).toBe('34,688 RWF')
     expect(amount('Session fee, due after the shoot')).toBe('57,812 RWF')
   })
 
   it('prices the float-trap basket exactly: 5,500 at 17.5% is 963 now, not 962', () => {
-    render(<PriceSummary pkg={{ id: 'p', nameEn: 'Mini', priceRwf: 5_000 }} addons={[{ id: 'a', nameEn: 'Print', priceRwf: 500 }]} bookingFeeRate={0.175} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={{ id: 'p', nameEn: 'Mini', priceRwf: 5_000 }} addons={[{ id: 'a', nameEn: 'Print', priceRwf: 500 }]} bookingFeeRate={0.175} />)
 
     expect(amount('Total')).toBe('5,500 RWF')
     expect(amount('Booking fee (17.5%), paid now to secure your date')).toBe('963 RWF')
@@ -77,7 +81,7 @@ describe('PriceSummary', () => {
   })
 
   it('shows a package alone, and lists several add-ons in the order given', () => {
-    const { rerender } = render(<PriceSummary pkg={STANDARD} addons={[]} bookingFeeRate={0.4} />)
+    const { rerender } = render(<PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[]} bookingFeeRate={0.4} />)
 
     expect(lines().map(([term]) => term)).toEqual([
       'Standard',
@@ -87,7 +91,7 @@ describe('PriceSummary', () => {
     ])
     expect(amount('Total')).toBe('40,000 RWF')
 
-    rerender(<PriceSummary pkg={STANDARD} addons={[RUSH_EDIT, EXTRA_HOUR]} bookingFeeRate={0.4} />)
+    rerender(<PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[RUSH_EDIT, EXTRA_HOUR]} bookingFeeRate={0.4} />)
 
     expect(lines().slice(0, 3)).toEqual([
       ['Standard', '40,000 RWF'],
@@ -99,7 +103,7 @@ describe('PriceSummary', () => {
   })
 
   it('shows the prompt and no amounts before a package is chosen, even with add-ons ticked', () => {
-    render(<PriceSummary pkg={null} addons={[EXTRA_HOUR]} bookingFeeRate={0.4} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={null} addons={[EXTRA_HOUR]} bookingFeeRate={0.4} />)
 
     expect(within(summary()).getByText(PROMPT)).toBeInTheDocument()
     expect(summary().querySelectorAll('dt')).toHaveLength(0)
@@ -108,11 +112,29 @@ describe('PriceSummary', () => {
   })
 
   it('announces changes to the amounts politely', () => {
-    render(<PriceSummary pkg={STANDARD} addons={[]} bookingFeeRate={0.4} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[]} bookingFeeRate={0.4} />)
 
     const live = summary().querySelector('[aria-live]')
     expect(live).toHaveAttribute('aria-live', 'polite')
     expect(live).toHaveTextContent('40,000 RWF')
+  })
+})
+
+// --- The cancellation policy (R1.8) -----------------------------------------------------------
+
+describe('the cancellation policy', () => {
+  it.each([
+    [{ cutoffHours: 0, bookingFeeRefundable: true }, 'The booking fee is refunded if you cancel before the shoot.'],
+    [{ cutoffHours: 48, bookingFeeRefundable: true }, 'The booking fee is refunded if you cancel at least 48 hours before the shoot.'],
+    [
+      { cutoffHours: 24, bookingFeeRefundable: false },
+      'The booking fee is non-refundable if you cancel. You can cancel up to 24 hours before the shoot.',
+    ],
+  ])('states the photographer’s policy %o, not a fixed notice', (policy, sentence) => {
+    render(<PriceSummary pkg={STANDARD} addons={[]} bookingFeeRate={0.4} cancellationPolicy={policy} />)
+
+    expect(within(summary()).getByText(sentence)).toBeVisible()
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
   })
 })
 
@@ -126,14 +148,14 @@ describe('the non-refundable notice', () => {
     ['at a 0% booking fee', STANDARD, [EXTRA_HOUR], 0],
     ['at a 100% booking fee', STANDARD, [EXTRA_HOUR], 1],
   ] as const)('is shown %s', (_state, pkg, addons, bookingFeeRate) => {
-    render(<PriceSummary pkg={pkg} addons={addons} bookingFeeRate={bookingFeeRate} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={pkg} addons={addons} bookingFeeRate={bookingFeeRate} />)
 
     expect(within(summary()).getByText(NOTICE)).toBeVisible()
   })
 
   it('comes after the amounts and before anything passed as children, such as a payment control', () => {
     render(
-      <PriceSummary pkg={STANDARD} addons={[EXTRA_HOUR]} bookingFeeRate={0.4}>
+      <PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[EXTRA_HOUR]} bookingFeeRate={0.4}>
         <button type="button">Pay booking fee</button>
       </PriceSummary>,
     )
@@ -151,7 +173,7 @@ describe('the non-refundable notice', () => {
 
   it('precedes children in the no-package state too', () => {
     render(
-      <PriceSummary pkg={null} addons={[]} bookingFeeRate={0.4}>
+      <PriceSummary cancellationPolicy={POLICY} pkg={null} addons={[]} bookingFeeRate={0.4}>
         <a href="#pay">Continue to payment</a>
       </PriceSummary>,
     )
@@ -163,7 +185,7 @@ describe('the non-refundable notice', () => {
 
   it('is reached before a child control when tabbing through the page', () => {
     render(
-      <PriceSummary pkg={STANDARD} addons={[]} bookingFeeRate={0.4}>
+      <PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[]} bookingFeeRate={0.4}>
         <button type="button">Pay booking fee</button>
       </PriceSummary>,
     )
@@ -191,7 +213,7 @@ describe('processing fees', () => {
     ['the plan.md basket', STANDARD, [EXTRA_HOUR], 0.4],
     ['an overridden rate', STANDARD, [EXTRA_HOUR, RUSH_EDIT], 0.3],
   ] as const)('never appear, with %s', (_state, pkg, addons, bookingFeeRate) => {
-    const { container } = render(<PriceSummary pkg={pkg} addons={addons} bookingFeeRate={bookingFeeRate} />)
+    const { container } = render(<PriceSummary cancellationPolicy={POLICY} pkg={pkg} addons={addons} bookingFeeRate={bookingFeeRate} />)
 
     expect(container).not.toHaveTextContent(/processing/i)
     expect(container.innerHTML).not.toMatch(/processing/i)
@@ -199,7 +221,7 @@ describe('processing fees', () => {
   })
 
   it('leave the total as the package plus add-ons, with nothing added on top', () => {
-    render(<PriceSummary pkg={STANDARD} addons={[EXTRA_HOUR, RUSH_EDIT]} bookingFeeRate={0.4} />)
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[EXTRA_HOUR, RUSH_EDIT]} bookingFeeRate={0.4} />)
 
     expect(summary().querySelectorAll('dt')).toHaveLength(6)
     expect(amount('Total')).toBe('55,000 RWF')

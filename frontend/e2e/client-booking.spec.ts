@@ -62,6 +62,8 @@ function bookingBody(mock: Mock) {
       bookingFeeRwf: 20_000,
       payments: [{ kind: 'booking_fee', status: 'succeeded', amountRwf: 20_000, settledAt: '2026-10-01T06:05:00.000Z' }],
       canCancel: !mock.cancelled,
+      // The booking's own terms (R1.8): open until the start, the fee kept.
+      cancellation: { deadline: mock.cancelled ? null : WHEN.startsAt, bookingFeeRefundable: false },
       cancellationReason: null,
       cancelledAt: mock.cancelled ? '2026-10-01T06:05:00.000Z' : null,
       sessionFee: mock.cancelled ? null : { outstandingRwf: 30_000, waitingPayment: null },

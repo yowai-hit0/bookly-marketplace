@@ -354,7 +354,7 @@ export function AdminBookings() {
 }
 
 /**
- * "Status: All" or "Status: 3 selected", opening the ten stages as checkboxes.
+ * "Status: All" or "Status: 3 selected", opening the eleven stages as checkboxes.
  * It filters the moment a box changes, as the chips it replaced did.
  */
 function StatusFilter({

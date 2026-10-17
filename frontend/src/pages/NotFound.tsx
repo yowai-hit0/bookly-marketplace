@@ -10,9 +10,10 @@ import { container, pageY, statusTitle } from '@/pages/client/classes'
  * it stays self-contained and never assumes it is a top-level route.
  *
  * Restyled by client-front.md 8.5: a large mono "404" eyebrow replaces the
- * icon, and a Home / Browse services pair of links replaces the old "All
+ * icon, and a Home / Browse photographers pair of links replaces the old "All
  * services" back link -- so nothing on the page is named "All services"
- * except the service page's own back link (2026-09-27).
+ * except the service page's own back link (2026-09-27). It is also what an
+ * unknown or unbookable photographer's handle renders (brief decision 9).
  */
 export function NotFound() {
   const { t } = useTranslation()
@@ -29,7 +30,7 @@ export function NotFound() {
           <Link to="/">{t('shell:footer.home')}</Link>
         </Button>
         <Button asChild variant="outline">
-          <Link to="/services">{t('shell:footer.services')}</Link>
+          <Link to="/photographers">{t('shell:footer.photographers')}</Link>
         </Button>
       </div>
     </main>

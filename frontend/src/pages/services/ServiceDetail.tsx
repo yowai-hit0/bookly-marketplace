@@ -1,9 +1,15 @@
-import { Check, CircleAlert, Clock } from 'lucide-react'
+import { Camera, Check, CircleAlert, Clock } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
-import { type PublicServiceDetail, fetchService } from '@/catalogue/api'
+import {
+  type PublicPhotographerProfile,
+  type PublicServiceDetail,
+  fetchPhotographer,
+  fetchService,
+  photographerPath,
+} from '@/catalogue/api'
 import {
   DETAIL_FIELDS,
   type DetailField,
@@ -29,52 +35,66 @@ import { stepNumber } from './step-number'
  * One service's packages and add-ons, with a total that updates as they are
  * chosen (plan.md Task 11, spec §3.1 steps 2, 3 and 7; restyled per
  * design-system/bookly/client-front.md §8.3, the board's booking components).
+ * It lives at `/p/:handle/:slug`, under the photographer who sells it
+ * (marketplace brief decision 9).
  *
  * An unknown or deactivated slug is the not-found page: the API answers 404
  * for both, so a retired service does not exist to the public (spec §6.14).
+ * So is an unknown handle, or one whose photographer cannot be booked. The
+ * photographer's profile is read alongside the service for their name and
+ * their cancellation policy, which the summary and the held booking state
+ * before anything is paid (R1.8).
  * Nothing is preselected -- the visitor picks the package they are buying.
  * Once a package is chosen, the slot picker offers its bookable starts
  * (plan.md Task 12), and the booking form below it creates the booking once a
  * start is chosen (Task 13); the page then becomes the held booking's summary.
  */
 
-type Loaded =
-  | { slug: string; status: 'ok'; service: PublicServiceDetail }
-  | { slug: string; status: 'missing' }
-  | { slug: string; status: 'failed' }
+type Loaded = { key: string } & (
+  | { status: 'ok'; photographer: PublicPhotographerProfile; service: PublicServiceDetail }
+  | { status: 'missing' }
+  | { status: 'failed' }
+)
 
 export function ServiceDetail() {
   const { t } = useTranslation()
-  const { slug = '' } = useParams()
+  const { handle = '', slug = '' } = useParams()
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const key = `${handle}/${slug}`
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchService(slug, controller.signal)
-      .then((service) => {
+    Promise.all([fetchPhotographer(handle, controller.signal), fetchService(handle, slug, controller.signal)])
+      .then(([photographer, service]) => {
         if (controller.signal.aborted) return
-        setLoaded(service === null ? { slug, status: 'missing' } : { slug, status: 'ok', service })
+        setLoaded(
+          photographer === null || service === null
+            ? { key, status: 'missing' }
+            : { key, status: 'ok', photographer, service },
+        )
       })
-      .catch(() => !controller.signal.aborted && setLoaded({ slug, status: 'failed' }))
+      .catch(() => !controller.signal.aborted && setLoaded({ key, status: 'failed' }))
     return () => controller.abort()
-  }, [slug, attempt])
+  }, [handle, slug, key, attempt])
 
   function retry() {
     setLoaded(null)
     setAttempt((n) => n + 1)
   }
 
-  // A load for another slug is stale: moving between services shows loading,
-  // not the previous service.
-  const current = loaded?.slug === slug ? loaded : null
+  // A load for another service is stale: moving between services shows
+  // loading, not the previous service.
+  const current = loaded?.key === key ? loaded : null
 
   if (current?.status === 'missing') return <NotFound />
-  if (current?.status === 'ok') return <ServiceView key={current.service.id} service={current.service} />
+  if (current?.status === 'ok') {
+    return <ServiceView key={current.service.id} handle={handle} photographer={current.photographer} service={current.service} />
+  }
 
   return (
     <main className={cn(container, pageY, 'flex flex-col gap-6')}>
-      <AllServicesLink />
+      <AllServicesLink handle={handle} />
       {current === null ? (
         <p className="text-subtle-foreground text-sm" role="status">
           {t('services:loading')}
@@ -98,7 +118,13 @@ export function ServiceDetail() {
   )
 }
 
-function ServiceView({ service }: { service: PublicServiceDetail }) {
+type ViewProps = {
+  handle: string
+  photographer: PublicPhotographerProfile
+  service: PublicServiceDetail
+}
+
+function ServiceView({ handle, photographer, service }: ViewProps) {
   const { t } = useTranslation()
   const [packageId, setPackageId] = useState<string | null>(null)
   const [addonIds, setAddonIds] = useState<ReadonlySet<string>>(new Set())
@@ -181,14 +207,14 @@ function ServiceView({ service }: { service: PublicServiceDetail }) {
   if (held !== null) {
     return (
       <main className={cn(container, pageY, 'flex flex-col gap-6')}>
-        <BookingHeld booking={held} />
+        <BookingHeld booking={held} cancellationPolicy={photographer.cancellationPolicy} />
       </main>
     )
   }
 
   return (
     <main className={cn(container, pageY, 'flex flex-col gap-8')}>
-      <AllServicesLink />
+      <AllServicesLink handle={handle} />
       <header className="flex flex-col gap-4">
         {service.coverImageUrl !== null && (
           <img
@@ -199,6 +225,11 @@ function ServiceView({ service }: { service: PublicServiceDetail }) {
           />
         )}
         <div className="flex flex-col gap-3">
+          {/* Whose service this is: on a marketplace, the one fact a visitor must not have to guess. */}
+          <p className={eyebrow}>
+            <Camera aria-hidden="true" />
+            {photographer.displayName}
+          </p>
           <h1 className={pageTitle}>{service.nameEn}</h1>
           {service.descriptionEn !== null && (
             <p className="text-subtle-foreground max-w-2xl whitespace-pre-line">{service.descriptionEn}</p>
@@ -312,7 +343,12 @@ function ServiceView({ service }: { service: PublicServiceDetail }) {
 
           {/* Below lg it is the last thing on the page, the closing step, so it is spaced like the steps above it. */}
           <div className="max-lg:mt-2 lg:sticky lg:top-6">
-            <PriceSummary pkg={chosenPackage} addons={chosenAddons} bookingFeeRate={service.bookingFeeRate}>
+            <PriceSummary
+              pkg={chosenPackage}
+              addons={chosenAddons}
+              bookingFeeRate={service.bookingFeeRate}
+              cancellationPolicy={photographer.cancellationPolicy}
+            >
               {chosenPackage !== null &&
                 (startsAt === null ? (
                   <p className="text-subtle-foreground text-sm">{t('services:booking.chooseTimeFirst')}</p>
@@ -343,9 +379,10 @@ function ServiceView({ service }: { service: PublicServiceDetail }) {
   )
 }
 
-function AllServicesLink() {
+/** Back to the photographer's own list: on a marketplace, "all services" are theirs. */
+function AllServicesLink({ handle }: { handle: string }) {
   const { t } = useTranslation()
-  return <BackLink to="/services">{t('services:allServices')}</BackLink>
+  return <BackLink to={photographerPath(handle)}>{t('services:allServices')}</BackLink>
 }
 
 /** `90` → `1 h 30 min`; `120` → `2 hours`; `45` → `45 min`. */

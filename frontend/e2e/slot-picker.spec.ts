@@ -29,6 +29,18 @@ const PORTRAITS = {
   bookingFeeRate: 0.4,
 }
 
+/** The photographer the catalogue belongs to (brief decision 9): no cut-off, the booking fee kept. */
+const PROFILE = {
+  handle: 'kigali-lens',
+  displayName: 'Kigali Lens',
+  coverImageUrl: null,
+  bio: null,
+  contactPhone: null,
+  whatsappPhone: null,
+  email: null,
+  cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+}
+
 /**
  * October's starts, in Kigali wall time. Friday 30th is an evening opened by
  * a dated override: 18:00 Kigali is already 01:00 on Saturday 31st in Tokyo.
@@ -55,7 +67,11 @@ async function mockApi(page: Page) {
     async (route) => {
       const request = route.request()
       const url = new URL(request.url())
-      if (request.method() === 'GET' && url.pathname === `/api/services/${PORTRAITS.slug}`) {
+      if (request.method() === 'GET' && url.pathname === '/api/photographers/kigali-lens') {
+        await route.fulfill({ json: { photographer: PROFILE } })
+        return
+      }
+      if (request.method() === 'GET' && url.pathname === `/api/photographers/kigali-lens/services/${PORTRAITS.slug}`) {
         await route.fulfill({ json: { service: PORTRAITS } })
         return
       }
@@ -112,7 +128,7 @@ test.beforeEach(async ({ page }) => {
 
 test('chooses a package, a date and a start by keyboard alone', async ({ page }) => {
   const { requests } = await mockApi(page)
-  await page.goto('/services/portraits')
+  await page.goto('/p/kigali-lens/portraits')
   await expect(page.getByRole('heading', { level: 1, name: 'Portraits' })).toBeVisible()
   await expect(page.getByText('Choose a package to see available times.')).toBeVisible()
 
@@ -170,7 +186,7 @@ test('chooses a package, a date and a start by keyboard alone', async ({ page })
 
 test('says a start was just taken, refreshes the calendar and selects nothing', async ({ page }) => {
   const { requests, taken } = await mockApi(page)
-  await page.goto('/services/portraits')
+  await page.goto('/p/kigali-lens/portraits')
   await page.getByRole('radio', { name: /^Standard/ }).check()
   await day(page, 'Wednesday, 7 October 2026, 3 times available').click()
   await expect(startTimes(page)).toHaveText(['09:00', '09:30', '10:00'])
@@ -197,7 +213,7 @@ test('says a start was just taken, refreshes the calendar and selects nothing', 
 
 test('says no times are left when the only start on a day is taken', async ({ page }) => {
   const { taken } = await mockApi(page)
-  await page.goto('/services/portraits')
+  await page.goto('/p/kigali-lens/portraits')
   await page.getByRole('radio', { name: /^Mini/ }).check()
   await day(page, 'Thursday, 1 October 2026, 1 time available').click()
 
@@ -219,7 +235,7 @@ for (const [timezoneId, localMonthAtNow, localHourAtNow] of [
 
     test('opens on the Kigali month and shows Kigali times on Kigali dates', async ({ page }) => {
       const { requests } = await mockApi(page)
-      await page.goto('/services/portraits')
+      await page.goto('/p/kigali-lens/portraits')
       await page.getByRole('radio', { name: /^Standard/ }).check()
 
       // The emulation is real: the browser's own clock reads another month or hour.

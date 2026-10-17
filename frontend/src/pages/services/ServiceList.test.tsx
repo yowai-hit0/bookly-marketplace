@@ -3,20 +3,35 @@ import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
-import type { PublicService, PublicServiceDetail } from '@/catalogue/api'
+import type { PublicPhotographerProfile, PublicService, PublicServiceDetail } from '@/catalogue/api'
 import { routes } from '@/routes'
 
 /**
- * The public service list (plan.md Task 11; spec §3.1 step 1), rendered through
- * the real routes with `fetch` stubbed.
+ * One photographer's service list (plan.md Task 11; spec §3.1 step 1; brief
+ * decision 9) at `/p/:handle`, rendered through the real routes with `fetch`
+ * stubbed.
  *
- * What is proven: it loads anonymously from `/api/services`; each service
- * renders its name as a link to its page and its lowest package price; what the
- * API lists is what renders, in its order; an empty catalogue and a failed load
- * each say so, and a failed load can be retried.
+ * What is proven: it loads anonymously from the photographer's profile and
+ * `/api/photographers/:handle/services`; the photographer's name is the page's
+ * heading; each service renders its name as a link to its page under the
+ * handle, and its lowest package price; what the API lists is what renders, in
+ * its order; an unknown handle is the not-found page; an empty catalogue and a
+ * failed load each say so, and a failed load can be retried.
  */
 
-const SERVICES_API = '/api/services'
+const PROFILE_API = '/api/photographers/kigali-lens'
+const SERVICES_API = `${PROFILE_API}/services`
+
+const PROFILE: PublicPhotographerProfile = {
+  handle: 'kigali-lens',
+  displayName: 'Kigali Lens',
+  coverImageUrl: null,
+  bio: 'Portraits and weddings in natural light.',
+  contactPhone: null,
+  whatsappPhone: null,
+  email: null,
+  cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+}
 
 // --- Fixtures ---------------------------------------------------------------
 
@@ -75,6 +90,7 @@ function stubApi(routes: Record<string, Route> = {}, services: PublicService[] =
     sent.push({ url, init })
     const route = routes[url]
     if (route !== undefined) return route()
+    if (url === PROFILE_API) return json({ photographer: PROFILE })
     if (url === SERVICES_API) return json({ services })
     if (url === `${SERVICES_API}/portraits`) return json({ service: PORTRAITS_DETAIL })
     return json({ error: 'not_found' }, 404)
@@ -83,7 +99,7 @@ function stubApi(routes: Record<string, Route> = {}, services: PublicService[] =
   return sent
 }
 
-function renderAt(path = '/services') {
+function renderAt(path = '/p/kigali-lens') {
   const router = createMemoryRouter(routes, { initialEntries: [path] })
   render(<RouterProvider router={router} />)
   return router
@@ -100,6 +116,13 @@ function user() {
  */
 function main() {
   return within(screen.getByRole('main'))
+}
+
+/** The service links on the page, without the "All photographers" back link. */
+function serviceLinks() {
+  return main()
+    .queryAllByRole('link')
+    .filter((link) => link.textContent !== 'All photographers')
 }
 
 /** The card of a listed service, found by its heading link. */
@@ -122,14 +145,39 @@ describe('the service list', () => {
     stubApi({ [SERVICES_API]: () => new Promise<Response>((resolve) => (answer = resolve)) })
     renderAt()
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Services' })).toBeInTheDocument()
     expect(await screen.findByRole('status')).toHaveTextContent('Loading…')
-    expect(main().queryByRole('link')).not.toBeInTheDocument()
+    // The name is not known yet, so no heading claims one.
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    expect(serviceLinks()).toEqual([])
 
     answer(json({ services: [PORTRAITS] }))
 
     expect(await screen.findByRole('link', { name: 'Portraits' })).toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('heads the page with the photographer’s name and bio, and leads back to every photographer', async () => {
+    stubApi()
+    renderAt()
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Kigali Lens' })).toBeInTheDocument()
+    expect(main().getByText('Portraits and weddings in natural light.')).toBeInTheDocument()
+    expect(main().getByRole('link', { name: 'All photographers' })).toHaveAttribute('href', '/photographers')
+  })
+
+  it('falls back to the generic intro when the photographer has no bio', async () => {
+    stubApi({ [PROFILE_API]: () => json({ photographer: { ...PROFILE, bio: null } }) })
+    renderAt()
+
+    await screen.findByRole('heading', { level: 1, name: 'Kigali Lens' })
+    expect(main().getByText('Choose a service to see its packages and prices.')).toBeInTheDocument()
+  })
+
+  it('is the not-found page for a handle the API does not know, or cannot book', async () => {
+    stubApi({ [PROFILE_API]: () => json({ error: 'not_found' }, 404), [SERVICES_API]: () => json({ error: 'not_found' }, 404) })
+    renderAt()
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument()
   })
 
   it('shows placeholder cards while loading, hidden from assistive technology, then the real cards (2026-09-25)', async () => {
@@ -156,9 +204,9 @@ describe('the service list', () => {
     stubApi()
     renderAt()
 
-    expect(await screen.findByRole('link', { name: 'Portraits' })).toHaveAttribute('href', '/services/portraits')
-    expect(screen.getByRole('link', { name: 'Weddings' })).toHaveAttribute('href', '/services/weddings')
-    expect(screen.getByRole('link', { name: 'Product shots' })).toHaveAttribute('href', '/services/products')
+    expect(await screen.findByRole('link', { name: 'Portraits' })).toHaveAttribute('href', '/p/kigali-lens/portraits')
+    expect(screen.getByRole('link', { name: 'Weddings' })).toHaveAttribute('href', '/p/kigali-lens/weddings')
+    expect(screen.getByRole('link', { name: 'Product shots' })).toHaveAttribute('href', '/p/kigali-lens/products')
 
     expect(card('Portraits')).toHaveTextContent('Studio portraits.')
     expect(within(card('Portraits')).getByText('From 25,000 RWF')).toBeInTheDocument()
@@ -180,7 +228,7 @@ describe('the service list', () => {
 
     await screen.findByRole('link', { name: 'Portraits' })
     expect(main().getAllByRole('listitem')).toHaveLength(3)
-    expect(main().getAllByRole('link').map((link) => link.textContent)).toEqual(['Weddings', 'Product shots', 'Portraits'])
+    expect(serviceLinks().map((link) => link.textContent)).toEqual(['Weddings', 'Product shots', 'Portraits'])
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
       'Weddings',
       'Product shots',
@@ -190,7 +238,7 @@ describe('the service list', () => {
 
   it('loads the first cover image eagerly and the rest lazily', async () => {
     stubApi()
-    const { container } = render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: ['/services'] })} />)
+    const { container } = render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: ['/p/kigali-lens'] })} />)
 
     await screen.findByRole('link', { name: 'Portraits' })
     const images = Array.from(container.querySelectorAll('img'))
@@ -224,18 +272,19 @@ describe('the service list', () => {
 // --- The request -----------------------------------------------------------------------------
 
 describe('loading the list', () => {
-  it('fetches /api/services once, anonymously, asking for JSON', async () => {
+  it('fetches the profile and the services once each, anonymously, asking for JSON', async () => {
     const sent = stubApi()
     renderAt()
 
     await screen.findByRole('link', { name: 'Portraits' })
-    expect(sent.map((request) => request.url)).toEqual([SERVICES_API])
-    const [request] = sent
-    const headers = new Headers(request?.init.headers)
-    expect(headers.get('Accept')).toBe('application/json')
-    expect(headers.has('Authorization')).toBe(false)
-    expect(request?.init.method ?? 'GET').toBe('GET')
-    expect(request?.init.signal).toBeInstanceOf(AbortSignal)
+    expect(sent.map((request) => request.url)).toEqual([PROFILE_API, SERVICES_API])
+    for (const request of sent) {
+      const headers = new Headers(request.init.headers)
+      expect(headers.get('Accept')).toBe('application/json')
+      expect(headers.has('Authorization')).toBe(false)
+      expect(request.init.method ?? 'GET').toBe('GET')
+      expect(request.init.signal).toBeInstanceOf(AbortSignal)
+    }
   })
 
   it('shows an alert when the API fails, and loads again on "Try again"', async () => {
@@ -247,7 +296,8 @@ describe('loading the list', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Could not load services. Check your connection and try again.')
-    expect(main().queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Services' })).toBeInTheDocument()
+    expect(serviceLinks()).toEqual([])
 
     await user().click(within(alert).getByRole('button', { name: 'Try again' }))
 
@@ -292,8 +342,8 @@ describe('from the list', () => {
     await user().click(await screen.findByRole('link', { name: 'Portraits' }))
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Portraits' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/services/portraits')
-    expect(sent.map((request) => request.url)).toEqual([SERVICES_API, `${SERVICES_API}/portraits`])
+    expect(router.state.location.pathname).toBe('/p/kigali-lens/portraits')
+    expect(sent.map((request) => request.url)).toEqual([PROFILE_API, SERVICES_API, PROFILE_API, `${SERVICES_API}/portraits`])
     expect(screen.getByRole('radio', { name: /^Mini/ })).toBeInTheDocument()
   })
 })

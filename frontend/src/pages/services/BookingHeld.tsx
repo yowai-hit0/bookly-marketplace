@@ -1,12 +1,14 @@
-import { Clock, Hourglass, TriangleAlert } from 'lucide-react'
+import { Clock, Hourglass, TriangleAlert, Undo2 } from 'lucide-react'
 import { type ReactNode, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { kigaliDateOf } from '@/admin/calendar-dates'
+import type { CancellationPolicy } from '@/catalogue/api'
 import type { HeldBooking } from '@/catalogue/bookings'
 import { checkoutPath } from '@/catalogue/payments'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { policySentence } from '@/lib/cancellation'
 import { formatDate, formatMoney, formatTime } from '@/lib/format'
 import { feePercent } from '@/lib/quote'
 import { cn } from '@/lib/utils'
@@ -26,9 +28,19 @@ import { panel } from '@/pages/client/classes'
  *
  * Paying the booking fee is the next step (spec §3.1 step 9): the checkout
  * link, addressed by the booking's checkout token (plan.md Task 16).
+ *
+ * The cancellation notice states the photographer's policy (R1.8) -- the one
+ * the booking has just been made under. A fee kept on cancelling is the
+ * warning it always was; a refundable one is information, not a warning.
  */
 
-export function BookingHeld({ booking }: { booking: HeldBooking }) {
+type Props = {
+  booking: HeldBooking
+  /** The photographer's policy, from their public profile: the terms this booking was just made under. */
+  cancellationPolicy: CancellationPolicy
+}
+
+export function BookingHeld({ booking, cancellationPolicy }: Props) {
   const { t } = useTranslation()
   const headingRef = useRef<HTMLHeadingElement>(null)
 
@@ -115,7 +127,7 @@ export function BookingHeld({ booking }: { booking: HeldBooking }) {
         </div>
       </dl>
 
-      {/* The hold is time-critical, so it is a callout of its own, above the non-refundable notice. */}
+      {/* The hold is time-critical, so it is a callout of its own, above the cancellation notice. */}
       <div className="flex flex-col gap-2">
         <Callout variant="console" tone="info" icon={Clock}>
           <p>
@@ -124,9 +136,15 @@ export function BookingHeld({ booking }: { booking: HeldBooking }) {
               : t('services:booking.held.holdUntil', { time: formatTime(booking.holdExpiresAt), fee })}
           </p>
         </Callout>
-        <Callout variant="console" tone="warning" icon={TriangleAlert}>
-          <p className="font-medium">{t('services:summary.nonRefundable')}</p>
-        </Callout>
+        {cancellationPolicy.bookingFeeRefundable ? (
+          <Callout variant="console" tone="info" icon={Undo2}>
+            <p>{policySentence(t, cancellationPolicy)}</p>
+          </Callout>
+        ) : (
+          <Callout variant="console" tone="warning" icon={TriangleAlert}>
+            <p className="font-medium">{policySentence(t, cancellationPolicy)}</p>
+          </Callout>
+        )}
       </div>
 
       {booking.checkoutToken !== undefined && (

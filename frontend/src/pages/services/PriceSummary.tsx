@@ -1,5 +1,7 @@
 import { type ReactNode, useId } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { CancellationPolicy } from '@/catalogue/api'
+import { policySentence } from '@/lib/cancellation'
 import { formatMoney } from '@/lib/format'
 import { feePercent, quoteBasket } from '@/lib/quote'
 import { cn } from '@/lib/utils'
@@ -17,9 +19,12 @@ import { ContactLine } from '@/pages/client/ContactLine'
  * the basket again from the catalogue before any money is taken (plan.md
  * Task 11).
  *
- * The non-refundable notice is always shown, whatever is selected. `children`
- * is where a later step toward payment plugs in, and it renders after the
- * notice, so no control leading to payment can be reached before it. The
+ * The photographer's cancellation policy is always stated, whatever is
+ * selected: whether the booking fee is refunded and how long before the shoot
+ * a client may cancel, as their profile says (R1.8), never a fixed
+ * "non-refundable". `children` is where a later step toward payment plugs in,
+ * and it renders after the notice, so no control leading to payment can be
+ * reached before it. The
  * `dl > div > dt + dd` markup below is exactly what `services.spec.ts` reads
  * by `dt` text: only classes change here, never a row.
  */
@@ -33,10 +38,12 @@ type Props = {
   addons: readonly Line[]
   /** This service's booking-fee rate, 0 to 1. */
   bookingFeeRate: number
+  /** The photographer's current policy, from their public profile. */
+  cancellationPolicy: CancellationPolicy
   children?: ReactNode
 }
 
-export function PriceSummary({ pkg, addons, bookingFeeRate, children }: Props) {
+export function PriceSummary({ pkg, addons, bookingFeeRate, cancellationPolicy, children }: Props) {
   const { t } = useTranslation()
   const headingId = useId()
 
@@ -83,7 +90,7 @@ export function PriceSummary({ pkg, addons, bookingFeeRate, children }: Props) {
         )}
       </div>
 
-      <p className="text-subtle-foreground text-[0.8125rem] leading-relaxed">{t('services:summary.nonRefundable')}</p>
+      <p className="text-subtle-foreground text-[0.8125rem] leading-relaxed">{policySentence(t, cancellationPolicy)}</p>
       {children}
       <ContactLine />
     </section>

@@ -1,4 +1,4 @@
-import { CircleCheck, Clock, Hourglass, Lock, Smartphone, TriangleAlert, Unlink, type LucideIcon } from 'lucide-react'
+import { CircleCheck, Clock, Hourglass, Lock, Smartphone, TriangleAlert, Undo2, Unlink, type LucideIcon } from 'lucide-react'
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router'
@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { StatusIcon } from '@/components/ui/status-icon'
+import { termsSentence } from '@/lib/cancellation'
 import { formatMoney, formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { pageTitle, pageY, statusTitle } from '@/pages/client/classes'
@@ -32,6 +33,10 @@ import { PaymentFields } from './PaymentFields'
  *
  * Addressed by the booking's reference and checkout token, so a reload lands
  * back here with nothing lost.
+ *
+ * The cancellation notice states the booking's own terms, as it kept them when
+ * it was made (R1.8): whether cancelling refunds the booking fee, and until
+ * when the client can cancel.
  *
  * Restyled per design-system/bookly/client-front.md §8.4: the facts as
  * metadata rows, the notices as console callouts before the form, and the
@@ -137,7 +142,7 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
     return (
       <Notice icon={Hourglass} tone="neutral" title={t('checkout:expired.title')} body={t('checkout:expired.body')}>
         <Button asChild variant="link" className="-ml-2.5 self-start">
-          <Link to="/services">{t('checkout:expired.link')}</Link>
+          <Link to="/photographers">{t('checkout:expired.link')}</Link>
         </Button>
       </Notice>
     )
@@ -219,9 +224,16 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
             <p>{t('checkout:holdUntil', { time: formatTime(checkout.holdExpiresAt) })}</p>
           </Callout>
         )}
-        <Callout variant="console" tone="warning" icon={TriangleAlert}>
-          <p className="font-medium">{t('checkout:nonRefundable')}</p>
-        </Callout>
+        {/* A fee kept on cancelling is a warning; a refundable one is information. */}
+        {checkout.cancellation.bookingFeeRefundable ? (
+          <Callout variant="console" tone="info" icon={Undo2}>
+            <p>{termsSentence(t, checkout.cancellation)}</p>
+          </Callout>
+        ) : (
+          <Callout variant="console" tone="warning" icon={TriangleAlert}>
+            <p className="font-medium">{termsSentence(t, checkout.cancellation)}</p>
+          </Callout>
+        )}
 
         {checkout.waitingPayment !== null && (
           <Callout

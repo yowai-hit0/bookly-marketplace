@@ -601,10 +601,23 @@ describe('findPublicPhotographer', () => {
         whatsappPhone: '+250788000002',
         email: 'hello@kigalilens.example',
         coverImageUrl: 'https://images.example.com/kigali.jpg',
+        cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
       },
     });
     const json = JSON.stringify(found?.profile);
     for (const hidden of [PHOTOGRAPHER_EMAIL, 'approved', 'status', 'userId', 'bookingFeeRate', 'createdAt']) {
+      expect(json).not.toContain(hidden);
+    }
+  });
+
+  it('carries the photographer’s current cancellation policy, and none of their other settings', async () => {
+    await updatePhotographerSettings(photographerId, { clientCancelCutoffHours: 48, bookingFeeRefundableOnClientCancel: true, bufferMinutes: 45 }, prisma);
+
+    const found = await findPublicPhotographer(prisma, PHOTOGRAPHER_HANDLE);
+
+    expect(found?.profile.cancellationPolicy).toStrictEqual({ cutoffHours: 48, bookingFeeRefundable: true });
+    const json = JSON.stringify(found?.profile);
+    for (const hidden of ['bufferMinutes', 'minLeadTimeMinutes', 'deliveryExpiryDays', 'clientCancelCutoffHours']) {
       expect(json).not.toContain(hidden);
     }
   });

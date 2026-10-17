@@ -19,7 +19,7 @@ function renderShell(path = '/') {
         element: <ClientShell />,
         children: [
           { path: '/', element: <main><h1>A page</h1></main> },
-          { path: '/services', element: <main><h1>Services</h1></main> },
+          { path: '/photographers', element: <main><h1>Photographers</h1></main> },
         ],
       },
     ],
@@ -60,18 +60,19 @@ describe('the client shell', () => {
     expect(target).toHaveAttribute('tabindex', '-1')
   })
 
-  it('carries the service list, how booking works, My booking and the admin login, and nothing else', () => {
+  it('carries the photographers list, how booking works, My booking and the admin login, and nothing else', () => {
     renderShell()
 
     const banner = screen.getByRole('banner')
     expect(within(banner).getByRole('link', { name: 'Bookly' })).toHaveAttribute('href', '/')
-    expect(within(banner).getByRole('link', { name: 'Book now' })).toHaveAttribute('href', '/services')
+    expect(within(banner).getByRole('link', { name: 'Book now' })).toHaveAttribute('href', '/photographers')
     // Added 2026-09-25: the photographer's way into admin from the site.
     expect(within(banner).getByRole('link', { name: 'Admin login' })).toHaveAttribute('href', '/admin/login')
     // Added 2026-09-25, now that a public resend exists (item 4).
     expect(within(banner).getByRole('link', { name: 'My booking' })).toBeInTheDocument()
     // Added 2026-09-27 (client front redesign): the two page links of the board.
-    expect(within(banner).getByRole('link', { name: 'Services' })).toHaveAttribute('href', '/services')
+    // The catalogue is per photographer since brief decision 9, so the first leads to them.
+    expect(within(banner).getByRole('link', { name: 'Photographers' })).toHaveAttribute('href', '/photographers')
     expect(within(banner).getByRole('link', { name: 'How booking works' })).toHaveAttribute('href', '/#how')
     expect(within(banner).getAllByRole('link')).toHaveLength(6)
   })
@@ -80,7 +81,7 @@ describe('the client shell', () => {
     renderShell()
 
     const links = within(screen.getByRole('banner')).getAllByRole('link').map((link) => link.textContent)
-    expect(links).toEqual(['Bookly', 'Services', 'How booking works', 'My booking', 'Admin login', 'Book now'])
+    expect(links).toEqual(['Bookly', 'Photographers', 'How booking works', 'My booking', 'Admin login', 'Book now'])
   })
 
   it('moves the admin login to the footer below sm, where the bar has no room for it (2026-09-25)', () => {
@@ -118,7 +119,7 @@ describe('the client shell', () => {
 
     expect(screen.queryByRole('link', { name: /all services/i })).not.toBeInTheDocument()
     const footer = screen.getByRole('contentinfo')
-    expect(within(footer).getByRole('link', { name: 'Browse services' })).toHaveAttribute('href', '/services')
+    expect(within(footer).getByRole('link', { name: 'Browse photographers' })).toHaveAttribute('href', '/photographers')
     expect(within(footer).getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/')
   })
 
@@ -164,11 +165,11 @@ describe('the client shell', () => {
   })
 
   it('wraps every client page, not just the landing page', () => {
-    renderShell('/services')
+    renderShell('/photographers')
 
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(screen.getByRole('contentinfo')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { level: 1, name: 'Services' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Photographers' })).toBeInTheDocument()
   })
 })
 

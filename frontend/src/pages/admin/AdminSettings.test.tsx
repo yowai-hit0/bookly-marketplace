@@ -11,10 +11,11 @@ import { routes } from '@/routes'
  * The settings page (plan.md Task 8, spec P-30), rendered through the real
  * routes with `fetch` stubbed.
  *
- * What is proven: the five stored values arrive in the form; the fee is typed
- * as a percentage and sent as a rate; a value the column could not hold never
- * leaves the browser; the API's own refusal lands on the field it names; and a
- * save redraws the form from what was stored rather than what was typed.
+ * What is proven: the stored values arrive in the form, the cancellation
+ * policy included and the hold time gone (it is the platform's now); the fee is
+ * typed as a percentage and sent as a rate; a value the column could not hold
+ * never leaves the browser; the API's own refusal lands on the field it names;
+ * and a save redraws the form from what was stored rather than what was typed.
  */
 
 const NOW = new Date('2026-10-07T08:00:00.000Z')
@@ -24,9 +25,10 @@ const SETTINGS_API = '/api/admin/settings'
 const STORED: Settings = {
   bookingFeeRate: 0.4,
   minLeadTimeMinutes: 120,
-  holdMinutes: 30,
   bufferMinutes: 15,
   deliveryExpiryDays: 90,
+  clientCancelCutoffHours: 24,
+  bookingFeeRefundableOnClientCancel: false,
 }
 
 type Sent = { method: string; url: string; body: unknown }
@@ -100,9 +102,22 @@ describe('AdminSettings', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument()
     expect(field('Booking fee (%)')).toHaveValue('40')
     expect(field('Minimum notice (minutes)')).toHaveValue('120')
-    expect(field('Hold time (minutes)')).toHaveValue('30')
     expect(field('Buffer between shoots (minutes)')).toHaveValue('15')
     expect(field('Photo link lasts (days)')).toHaveValue('90')
+    expect(field('Client cancellation cut-off (hours)')).toHaveValue('24')
+    expect(screen.getByRole('checkbox', { name: 'Refund the booking fee when a client cancels' })).not.toBeChecked()
+    // The hold is the platform's to set (brief decision 5), so it is not on the page.
+    expect(screen.queryByLabelText('Hold time (minutes)')).not.toBeInTheDocument()
+  })
+
+  it('says under the refund checkbox that a cancellation by the photographer always refunds in full', async () => {
+    stubApi()
+    renderPage()
+
+    const checkbox = await screen.findByRole('checkbox', { name: 'Refund the booking fee when a client cancels' })
+    expect(checkbox).toHaveAccessibleDescription(
+      'Clients see this before they book. When you cancel, the client is always refunded in full.',
+    )
   })
 
   it('says the change applies to new bookings only', async () => {
@@ -113,42 +128,60 @@ describe('AdminSettings', () => {
     expect(screen.getByText(/anything already booked keeps the fee and buffer it was sold/i)).toBeInTheDocument()
   })
 
-  it('sends all five values, the fee as a rate rather than a percentage', async () => {
+  it('sends every value, the fee as a rate rather than a percentage, and never a hold time', async () => {
     const api = stubApi()
     renderPage()
 
     await screen.findByRole('heading', { name: 'Settings' })
     await retype('Booking fee (%)', '37.5')
-    await retype('Hold time (minutes)', '45')
+    await retype('Client cancellation cut-off (hours)', '48')
+    await user().click(screen.getByRole('checkbox', { name: 'Refund the booking fee when a client cancels' }))
     await save()
 
     await waitFor(() => expect(writes(api)).toHaveLength(1))
-    expect(writes(api)[0]).toMatchObject({
+    // Exactly these keys: the API answers a `holdMinutes` with a 400.
+    expect(writes(api)[0]).toEqual({
       method: 'PATCH',
       url: SETTINGS_API,
       body: {
         bookingFeeRate: 0.375,
         minLeadTimeMinutes: 120,
-        holdMinutes: 45,
         bufferMinutes: 15,
         deliveryExpiryDays: 90,
+        clientCancelCutoffHours: 48,
+        bookingFeeRefundableOnClientCancel: true,
       },
     })
+  })
+
+  it('sends the refund setting unticked when he unticks it', async () => {
+    const api = stubApi({}, { ...STORED, bookingFeeRefundableOnClientCancel: true })
+    renderPage()
+
+    const checkbox = await screen.findByRole('checkbox', { name: 'Refund the booking fee when a client cancels' })
+    expect(checkbox).toBeChecked()
+    await user().click(checkbox)
+    await save()
+
+    await waitFor(() => expect(writes(api)).toHaveLength(1))
+    expect(writes(api)[0]?.body).toMatchObject({ bookingFeeRefundableOnClientCancel: false })
   })
 
   it('confirms the save and redraws the form from what the API stored', async () => {
     const api = stubApi({
       // The API answers with a value of its own, which is what must be shown.
-      'PATCH /api/admin/settings': () => json({ settings: { ...STORED, holdMinutes: 25 } }),
+      'PATCH /api/admin/settings': () =>
+        json({ settings: { ...STORED, clientCancelCutoffHours: 12, bookingFeeRefundableOnClientCancel: true } }),
     })
     renderPage()
 
     await screen.findByRole('heading', { name: 'Settings' })
-    await retype('Hold time (minutes)', '45')
+    await retype('Client cancellation cut-off (hours)', '48')
     await save()
 
     expect(await screen.findByText('Settings saved.')).toBeInTheDocument()
-    expect(field('Hold time (minutes)')).toHaveValue('25')
+    expect(field('Client cancellation cut-off (hours)')).toHaveValue('12')
+    expect(screen.getByRole('checkbox', { name: 'Refund the booking fee when a client cancels' })).toBeChecked()
     expect(writes(api)).toHaveLength(1)
   })
 
@@ -160,7 +193,9 @@ describe('AdminSettings', () => {
       '37.55',
       'Enter a percentage from 0 to 100, with at most one decimal place.',
     ],
-    ['a hold of zero', 'Hold time (minutes)', '0', 'Enter a whole number of minutes, 1 or more.'],
+    ['a negative cut-off', 'Client cancellation cut-off (hours)', '-1', 'Enter a whole number of hours, 0 or more.'],
+    ['a fractional cut-off', 'Client cancellation cut-off (hours)', '1.5', 'Enter a whole number of hours, 0 or more.'],
+    ['a delivery window of zero', 'Photo link lasts (days)', '0', 'Enter a whole number of days, 1 or more.'],
     ['a fractional buffer', 'Buffer between shoots (minutes)', '15.5', 'Enter a whole number of minutes, 0 or more.'],
   ])('refuses %s in the browser, marking the field and sending nothing', async (_label, label, value, message) => {
     const api = stubApi()

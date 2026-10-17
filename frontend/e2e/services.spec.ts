@@ -2,9 +2,11 @@ import { type Page, expect, test } from '@playwright/test'
 
 /**
  * Public service browsing in Chromium (plan.md Task 11; spec §3.1 steps 1-3
- * and 7, §6.14). `/api/*` is answered here by a small catalogue that behaves
- * like the API: the list, each active service by slug with its booking-fee
- * rate, and a 404 for anything else -- a deactivated service included.
+ * and 7, §6.14), under one photographer's handle (brief decision 9).
+ * `/api/*` is answered here by a small catalogue that behaves like the API:
+ * the photographer's profile, their list, each active service by slug with its
+ * booking-fee rate, and a 404 for anything else -- a deactivated service
+ * included.
  *
  * The selection is completed with the keyboard alone: Tab to move between
  * controls, arrow keys within the package group, Space to tick an add-on.
@@ -43,6 +45,18 @@ const INACTIVE_SLUG = 'events'
 
 const NOTICE = 'The booking fee is non-refundable if you cancel.'
 
+/** The photographer the catalogue belongs to (brief decision 9): no cut-off, the booking fee kept. */
+const PROFILE = {
+  handle: 'kigali-lens',
+  displayName: 'Kigali Lens',
+  coverImageUrl: null,
+  bio: null,
+  contactPhone: null,
+  whatsappPhone: null,
+  email: null,
+  cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+}
+
 type Sent = { method: string; path: string; authorization: string | null }
 
 /** Answers `/api/*` in the page; returns the requests as they arrive. */
@@ -55,12 +69,16 @@ async function mockApi(page: Page) {
       const path = new URL(request.url()).pathname
       sent.push({ method: request.method(), path, authorization: await request.headerValue('authorization') })
 
-      if (request.method() === 'GET' && path === '/api/services') {
+      if (request.method() === 'GET' && path === '/api/photographers/kigali-lens') {
+        await route.fulfill({ json: { photographer: PROFILE } })
+        return
+      }
+      if (request.method() === 'GET' && path === '/api/photographers/kigali-lens/services') {
         const services = [PORTRAITS, WEDDINGS].map(({ bookingFeeRate: _rate, ...service }) => service)
         await route.fulfill({ json: { services } })
         return
       }
-      const service = [PORTRAITS, WEDDINGS].find((candidate) => path === `/api/services/${candidate.slug}`)
+      const service = [PORTRAITS, WEDDINGS].find((candidate) => path === `/api/photographers/kigali-lens/services/${candidate.slug}`)
       if (request.method() === 'GET' && service !== undefined) {
         await route.fulfill({ json: { service } })
         return
@@ -91,11 +109,11 @@ async function expectTotals(page: Page, totals: { total: string; bookingFee: str
 
 test('lists the active services and opens one from the keyboard', async ({ page }) => {
   const sent = await mockApi(page)
-  await page.goto('/services')
+  await page.goto('/p/kigali-lens')
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Services' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Portraits' })).toHaveAttribute('href', '/services/portraits')
-  await expect(page.getByRole('link', { name: 'Weddings' })).toHaveAttribute('href', '/services/weddings')
+  await expect(page.getByRole('heading', { level: 1, name: 'Kigali Lens' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Portraits' })).toHaveAttribute('href', '/p/kigali-lens/portraits')
+  await expect(page.getByRole('link', { name: 'Weddings' })).toHaveAttribute('href', '/p/kigali-lens/weddings')
   await expect(page.getByText('From 25,000 RWF')).toBeVisible()
   await expect(page.getByText('From 40,000 RWF')).toBeVisible()
 
@@ -106,24 +124,28 @@ test('lists the active services and opens one from the keyboard', async ({ page 
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused()
   await page.keyboard.press('Enter')
 
+  // The page's own back link to every photographer comes first, then the cards.
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('link', { name: 'All photographers' })).toBeFocused()
   await page.keyboard.press('Tab')
   await expect(page.getByRole('link', { name: 'Portraits' })).toBeFocused()
   await page.keyboard.press('Enter')
 
-  await expect(page).toHaveURL(/\/services\/portraits$/)
+  await expect(page).toHaveURL(/\/p\/kigali-lens\/portraits$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Portraits' })).toBeVisible()
   // Anonymous: nothing sent a credential. (StrictMode in the dev server runs
   // each effect twice, so each GET may arrive twice; the paths are what count.)
   expect([...new Set(sent.map(({ method, path }) => `${method} ${path}`))]).toEqual([
-    'GET /api/services',
-    'GET /api/services/portraits',
+    'GET /api/photographers/kigali-lens',
+    'GET /api/photographers/kigali-lens/services',
+    'GET /api/photographers/kigali-lens/services/portraits',
   ])
   expect(sent.every(({ authorization }) => authorization === null)).toBe(true)
 })
 
 test('chooses a package and an add-on by keyboard alone, and the summary follows', async ({ page }) => {
   await mockApi(page)
-  await page.goto('/services/portraits')
+  await page.goto('/p/kigali-lens/portraits')
   await expect(page.getByRole('heading', { level: 1, name: 'Portraits' })).toBeVisible()
 
   const mini = page.getByRole('radio', { name: /^Mini/ })
@@ -195,7 +217,7 @@ test('chooses a package and an add-on by keyboard alone, and the summary follows
 
 test('charges a service’s own rate: 15,000 now at 30% on a 50,000 basket', async ({ page }) => {
   await mockApi(page)
-  await page.goto('/services/weddings')
+  await page.goto('/p/kigali-lens/weddings')
   await expect(page.getByRole('heading', { level: 1, name: 'Weddings' })).toBeVisible()
 
   // The client shell (2026-09-21) puts a header above every page, so the first
@@ -221,7 +243,7 @@ test('shows not-found for a deactivated service and for an unknown slug', async 
   await mockApi(page)
 
   for (const slug of [INACTIVE_SLUG, 'nothing-here']) {
-    await page.goto(`/services/${slug}`)
+    await page.goto(`/p/kigali-lens/${slug}`)
     await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
     await expect(page.locator('main').getByText(NOTICE)).toHaveCount(0)
     await expect(page.locator('main').getByRole('radio')).toHaveCount(0)

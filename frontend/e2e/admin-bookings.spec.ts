@@ -39,7 +39,6 @@ function booking(id: string, reference: string, status: string, startsAt: string
     // Every fixture shoot is ahead of NOW, so the stage is the status's own (booking/stage.ts).
     stage: status === 'pending_payment' ? 'awaiting_payment' : status,
     locale: 'en',
-    client: { id: 'cl1', fullName: contactName, email: 'aline@example.com', phone: '+250788000000', anonymized: false },
     contact: { name: contactName, email: 'aline@example.com', phone: '+250788000000' },
     service: { id: 's1', name: 'Portraits' },
     package: { id: 'p1', name: 'Standard', priceRwf: 40_000, durationMinutes: 90, photoCount: 25 },
@@ -224,8 +223,8 @@ async function mockApi(page: Page, options: { completed?: boolean } = {}) {
         return
       }
       if (entry !== undefined && action?.[2] === 'cancel') {
-        entry.status = 'cancelled_by_admin'
-        entry.stage = 'cancelled_by_admin'
+        entry.status = 'cancelled_by_photographer'
+        entry.stage = 'cancelled_by_photographer'
         entry.lifecycle = { confirmedAt: '2026-10-01T06:05:00.000Z', completedAt: null, cancelledAt: NOW.toISOString(), cancellationReason: String(body?.reason ?? '') }
         entry.payments = [{ ...(entry.payments as Record<string, unknown>[])[0], status: 'refund_due', canRecordRefund: true }]
         entry.money = {

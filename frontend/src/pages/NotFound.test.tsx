@@ -9,7 +9,7 @@ function renderNotFound() {
   const router = createMemoryRouter(
     [
       { path: '/', element: <p>home page</p> },
-      { path: '/services', element: <p>services list</p> },
+      { path: '/photographers', element: <p>photographers list</p> },
       { path: '*', element: <NotFound /> },
     ],
     { initialEntries: ['/nowhere'] },
@@ -27,23 +27,23 @@ describe('NotFound', () => {
   })
 
   // client-front.md 8.5, 2026-09-27: the redesign replaces the old "All services"
-  // back link with a Home / Browse services pair, so nothing on this page is
-  // named "All services" any more -- that name now belongs only to the service
-  // page's own back link.
-  it('offers a Home link and a Browse services link, and no button', async () => {
+  // back link with a Home / Browse pair, so nothing on this page is named "All
+  // services" any more -- that name now belongs only to the service page's own
+  // back link. The pair leads to the photographers since brief decision 9.
+  it('offers a Home link and a Browse photographers link, and no button', async () => {
     const router = renderNotFound()
 
     expect(screen.queryByRole('link', { name: 'All services' })).not.toBeInTheDocument()
     const home = screen.getByRole('link', { name: 'Home' })
-    const services = screen.getByRole('link', { name: 'Browse services' })
+    const photographers = screen.getByRole('link', { name: 'Browse photographers' })
     expect(home).toHaveAttribute('href', '/')
-    expect(services).toHaveAttribute('href', '/services')
+    expect(photographers).toHaveAttribute('href', '/photographers')
     expect(screen.getAllByRole('link')).toHaveLength(2)
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
 
-    await userEvent.setup({ delay: null }).click(services)
+    await userEvent.setup({ delay: null }).click(photographers)
 
-    expect(router.state.location.pathname).toBe('/services')
-    expect(screen.getByText('services list')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/photographers')
+    expect(screen.getByText('photographers list')).toBeInTheDocument()
   })
 })

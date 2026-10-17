@@ -12,7 +12,9 @@ import { addonIds, parseOrReject } from './validation.js';
  *
  *   GET  /photographers                          the bookable photographers:
  *                                                handle, display name, cover
- *   GET  /photographers/:handle                  one photographer's public profile
+ *   GET  /photographers/:handle                  one photographer's public profile,
+ *                                                with the cancellation policy a
+ *                                                new booking would be made under
  *   GET  /photographers/:handle/services         their active services with their
  *                                                active packages and add-ons
  *   GET  /photographers/:handle/services/:slug   one active service, plus the

@@ -15,6 +15,7 @@ import { EmailConfirmPage } from '@/pages/booking/EmailConfirmPage'
 import { MyBookingPage } from '@/pages/booking/MyBookingPage'
 import { CheckoutPage } from '@/pages/checkout/CheckoutPage'
 import { PaymentProgressPage } from '@/pages/checkout/PaymentProgressPage'
+import { PhotographerList } from '@/pages/photographers/PhotographerList'
 import { ServiceDetail } from '@/pages/services/ServiceDetail'
 import { ServiceList } from '@/pages/services/ServiceList'
 
@@ -30,8 +31,15 @@ export const routes: RouteObject[] = [
     element: <ClientShell />,
     children: [
       { path: '/', element: <Home /> },
-      { path: '/services', element: <ServiceList /> },
-      { path: '/services/:slug', element: <ServiceDetail /> },
+      // The public catalogue is per photographer (marketplace brief decision 9):
+      // the photographers, then one photographer's services, then one service.
+      { path: '/photographers', element: <PhotographerList /> },
+      { path: '/p/:handle', element: <ServiceList /> },
+      { path: '/p/:handle/:slug', element: <ServiceDetail /> },
+      // The single-photographer catalogue's old address. The list moved, so it
+      // redirects; a service has no address without its photographer, so
+      // `/services/:slug` falls through to `*` and is not found.
+      { path: '/services', element: <Navigate to="/photographers" replace /> },
       // The booking fee (plan.md Task 16): pay, then follow the payment until it settles.
       { path: '/checkout/:reference/:token', element: <CheckoutPage /> },
       { path: '/checkout/:reference/:token/payments/:ourRef', element: <PaymentProgressPage /> },

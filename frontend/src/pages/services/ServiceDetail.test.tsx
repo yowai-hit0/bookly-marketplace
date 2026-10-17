@@ -3,13 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
-import type { PublicServiceDetail } from '@/catalogue/api'
+import type { PublicPhotographerProfile, PublicServiceDetail } from '@/catalogue/api'
 import type { HeldBooking } from '@/catalogue/bookings'
 import { routes } from '@/routes'
 
 /**
  * One service's page (plan.md Task 11; spec §3.1 steps 2, 3 and 7, §6.14),
- * rendered through the real routes with `fetch` stubbed.
+ * at `/p/:handle/:slug` under its photographer (brief decision 9), rendered
+ * through the real routes with `fetch` stubbed.
+ *
+ * The photographer's profile is read with the service: it names whose service
+ * this is, an unknown handle is the not-found page, and its cancellation policy
+ * is what the summary and the held page state (R1.8) -- non-refundable in the
+ * fixtures below unless a test says otherwise.
  *
  * What is proven: nothing is preselected; choosing a package and ticking or
  * unticking add-ons updates the total, booking fee and session fee live, at the
@@ -32,7 +38,19 @@ import { routes } from '@/routes'
  * can be retried; and a double press sends one request.
  */
 
-const API = '/api/services'
+const PROFILE_API = '/api/photographers/kigali-lens'
+const API = `${PROFILE_API}/services`
+
+const PROFILE: PublicPhotographerProfile = {
+  handle: 'kigali-lens',
+  displayName: 'Kigali Lens',
+  coverImageUrl: null,
+  bio: null,
+  contactPhone: null,
+  whatsappPhone: null,
+  email: null,
+  cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+}
 
 // --- Fixtures ---------------------------------------------------------------
 
@@ -121,6 +139,7 @@ function stubApi(routes: Record<string, Route> = {}) {
       const query = new URLSearchParams(url.slice(url.indexOf('?') + 1))
       return json({ days: availabilityFor(query.get('packageId') ?? '', query.get('month') ?? '') })
     }
+    if (url === PROFILE_API) return json({ photographer: PROFILE })
     if (url === API) return json({ services: [PORTRAITS, WEDDINGS, PRODUCTS] })
     const service = [PORTRAITS, WEDDINGS, PRODUCTS].find((candidate) => url === `${API}/${candidate.slug}`)
     if (service !== undefined) return json({ service })
@@ -137,7 +156,7 @@ function renderAt(path: string) {
 }
 
 async function renderLoaded(service: PublicServiceDetail = PORTRAITS) {
-  const router = renderAt(`/services/${service.slug}`)
+  const router = renderAt(`/p/kigali-lens/${service.slug}`)
   await screen.findByRole('heading', { level: 1, name: service.nameEn })
   return router
 }
@@ -194,39 +213,47 @@ afterEach(() => {
 // --- Loading ---------------------------------------------------------------------------------
 
 describe('loading a service', () => {
-  it('shows a loading status, then the service, fetched from /api/services/<slug>', async () => {
+  it('shows a loading status, then the service, fetched with its photographer’s profile', async () => {
     let answer: (res: Response) => void = () => {}
     const sent = stubApi({ [`${API}/portraits`]: () => new Promise<Response>((resolve) => (answer = resolve)) })
-    renderAt('/services/portraits')
+    renderAt('/p/kigali-lens/portraits')
 
     expect(await screen.findByRole('status')).toHaveTextContent('Loading…')
-    expect(screen.getByRole('link', { name: 'All services' })).toHaveAttribute('href', '/services')
+    expect(screen.getByRole('link', { name: 'All services' })).toHaveAttribute('href', '/p/kigali-lens')
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
 
     answer(json({ service: PORTRAITS }))
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Portraits' })).toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    expect(sent).toEqual([`${API}/portraits`])
+    expect(sent).toEqual([PROFILE_API, `${API}/portraits`])
+  })
+
+  it('renders the not-found page for a handle the API answers 404 -- unknown, or not bookable', async () => {
+    stubApi({ [PROFILE_API]: () => json({ error: 'not_found' }, 404), [`${API}/portraits`]: () => json({ error: 'not_found' }, 404) })
+    renderAt('/p/kigali-lens/portraits')
+
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
   })
 
   it('renders the not-found page for a slug the API answers 404 -- unknown or deactivated', async () => {
     const sent = stubApi()
-    renderAt('/services/events')
+    renderAt('/p/kigali-lens/events')
 
     expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
     expect(screen.getByText('That page does not exist.')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
-    expect(sent).toEqual([`${API}/events`])
+    expect(sent).toEqual([PROFILE_API, `${API}/events`])
   })
 
   it('encodes the slug into the request path', async () => {
     const sent = stubApi()
-    renderAt('/services/a%3Fb')
+    renderAt('/p/kigali-lens/a%3Fb')
 
     await screen.findByRole('heading', { name: 'Page not found' })
-    expect(sent).toEqual([`${API}/a%3Fb`])
+    expect(sent).toEqual([PROFILE_API, `${API}/a%3Fb`])
   })
 
   it('shows an alert when the API fails, and loads again on "Try again"', async () => {
@@ -234,7 +261,7 @@ describe('loading a service', () => {
     const sent = stubApi({
       [`${API}/portraits`]: () => (++calls === 1 ? json({ error: 'internal_error' }, 500) : json({ service: PORTRAITS })),
     })
-    renderAt('/services/portraits')
+    renderAt('/p/kigali-lens/portraits')
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Could not load this service. Check your connection and try again.')
@@ -245,12 +272,12 @@ describe('loading a service', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Portraits' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(sent).toEqual([`${API}/portraits`, `${API}/portraits`])
+    expect(sent).toEqual([PROFILE_API, `${API}/portraits`, PROFILE_API, `${API}/portraits`])
   })
 
   it('shows the alert when the network is down', async () => {
     stubApi({ [`${API}/portraits`]: () => Promise.reject(new TypeError('Failed to fetch')) })
-    renderAt('/services/portraits')
+    renderAt('/p/kigali-lens/portraits')
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load this service.')
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
@@ -262,7 +289,7 @@ describe('loading a service', () => {
     const router = await renderLoaded(PORTRAITS)
     await user().click(packageRadio('Standard'))
 
-    await router.navigate('/services/weddings')
+    await router.navigate('/p/kigali-lens/weddings')
 
     expect(await screen.findByRole('status')).toHaveTextContent('Loading…')
     expect(screen.queryByRole('heading', { level: 1, name: 'Portraits' })).not.toBeInTheDocument()
@@ -354,14 +381,31 @@ describe('the service page', () => {
     expect(screen.getAllByRole('radio')).toHaveLength(1)
   })
 
-  it('links back to the list', async () => {
+  it('links back to the photographer’s own list', async () => {
     stubApi()
     const router = await renderLoaded()
 
     await user().click(screen.getByRole('link', { name: 'All services' }))
 
     expect(await screen.findByRole('link', { name: 'Weddings' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/services')
+    expect(router.state.location.pathname).toBe('/p/kigali-lens')
+  })
+
+  it('names the photographer whose service it is', async () => {
+    stubApi()
+    await renderLoaded()
+
+    expect(screen.getByRole('main')).toHaveTextContent('Kigali Lens')
+  })
+
+  it('states a refundable policy with its cut-off, rather than the non-refundable notice', async () => {
+    stubApi({ [PROFILE_API]: () => json({ photographer: { ...PROFILE, cancellationPolicy: { cutoffHours: 24, bookingFeeRefundable: true } } }) })
+    await renderLoaded()
+
+    expect(
+      within(summary()).getByText('The booking fee is refunded if you cancel at least 24 hours before the shoot.'),
+    ).toBeVisible()
+    expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
   })
 
   it('never mentions a processing fee, whatever is chosen', async () => {

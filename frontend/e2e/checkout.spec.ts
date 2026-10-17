@@ -63,6 +63,8 @@ async function mockApi(page: Page, methods: string[] = ['momo_mtn']): Promise<Mo
               bookingFeeRwf: 20_000,
               state: mock.paid ? 'paid' : 'payable',
               waitingPayment: null,
+              // The booking's own terms (R1.8): no cut-off, so the deadline is the start; the fee is kept.
+              cancellation: { deadline: WHEN.startsAt, bookingFeeRefundable: false },
             },
           },
         })

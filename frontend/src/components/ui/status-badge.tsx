@@ -9,6 +9,7 @@ import {
   CircleX,
   Clock,
   Hourglass,
+  ShieldX,
   UserX,
   type LucideIcon,
 } from "lucide-react"
@@ -19,9 +20,9 @@ import { StatusBadgeVariantContext } from "./status-badge-context"
 type Treatment = { icon: LucideIcon | null; className: string }
 
 /**
- * The seven booking statuses, one look for the client's pill and (in a later
+ * The eight booking statuses, one look for the client's pill and (in a later
  * section) the admin's badges and calendar events (design-system MASTER.md
- * section 7). The label is always shown and the icon only repeats it. The seven
+ * section 7). The label is always shown and the icon only repeats it. The eight
  * stay apart in greyscale: a dashed edge, a dotted edge, a tinted fill, a plain
  * muted fill and no fill, and a different icon each. Tinted fills are mixed into
  * the card's white in oklab, never laid over the page and never mixed in oklch
@@ -37,7 +38,9 @@ const TREATMENTS = new Map<string, Treatment>([
   // A hold that lapsed.
   ["expired", { icon: Hourglass, className: "border-dotted border-muted-foreground bg-transparent text-muted-foreground" }],
   ["cancelled_by_client", { icon: CircleX, className: "border-destructive/40 bg-transparent text-destructive" }],
-  ["cancelled_by_admin", { icon: Ban, className: "border-input bg-transparent text-muted-foreground" }],
+  ["cancelled_by_photographer", { icon: Ban, className: "border-input bg-transparent text-muted-foreground" }],
+  // Cancelled by the platform, not by either side of the booking: an edge and a fill together set it apart.
+  ["cancelled_by_platform", { icon: ShieldX, className: "border-input bg-muted text-foreground" }],
   // The display stages (2026-09-25, `backend/src/booking/stage.ts`): each keeps
   // the rule above -- apart in greyscale by edge, fill and icon.
   // `awaiting_payment` is `pending_payment` under its stage name.
@@ -82,7 +85,9 @@ const CONSOLE_TREATMENTS = new Map<string, ConsoleTreatment>([
   ["closed", { shape: "earlier", icon: "text-muted-foreground", className: "border-border bg-transparent text-muted-foreground" }],
   ["no_show", { shape: "failed", icon: "text-destructive", className: "border-transparent bg-console-danger-tint text-destructive" }],
   ["cancelled_by_client", { shape: "failed", icon: "text-destructive", className: "border-destructive/40 bg-transparent text-destructive" }],
-  ["cancelled_by_admin", { shape: "failed", icon: "text-destructive", className: "border-border bg-transparent text-muted-foreground" }],
+  ["cancelled_by_photographer", { shape: "failed", icon: "text-destructive", className: "border-border bg-transparent text-muted-foreground" }],
+  // On the chip fill, so it stays apart from the photographer's in greyscale; muted text never sits on the chip (client-front.md decision 8).
+  ["cancelled_by_platform", { shape: "failed", icon: "text-destructive", className: "border-transparent bg-console-chip text-foreground" }],
   ["expired", { shape: "failed", icon: "text-muted-foreground", className: "border-dotted border-input bg-transparent text-muted-foreground" }],
 ])
 

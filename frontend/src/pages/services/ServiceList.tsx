@@ -1,56 +1,95 @@
 import { ArrowRight, Camera, CalendarCheck, CircleAlert, Info } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
-import { type PublicService, fetchServices } from '@/catalogue/api'
+import { Link, useParams } from 'react-router'
+import {
+  type PublicPhotographerProfile,
+  type PublicService,
+  fetchPhotographer,
+  fetchServices,
+  servicePath,
+} from '@/catalogue/api'
+import { BackLink } from '@/components/ui/back-link'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { container, eyebrow, lead, pageTitle, pageY } from '@/pages/client/classes'
+import { NotFound } from '@/pages/NotFound'
 
 /**
- * The public service list (plan.md Task 11, spec §3.1 step 1). What is listed
- * is what the API lists -- active services only; nothing is filtered or hidden
- * here (spec §2.2: no permission is enforced by hiding UI alone).
+ * One photographer's services (plan.md Task 11, spec §3.1 step 1; marketplace
+ * brief decision 9), at `/p/:handle` under the photographer's name. What is
+ * listed is what the API lists -- that photographer's active services only;
+ * nothing is filtered or hidden here (spec §2.2: no permission is enforced by
+ * hiding UI alone).
+ *
+ * An unknown handle, and a photographer who cannot be booked, are the
+ * not-found page: the API answers 404 for both, and says nothing more.
  */
 
-type Loaded = { status: 'ok'; services: PublicService[] } | { status: 'failed' }
+type Loaded = { handle: string } & (
+  | { status: 'ok'; photographer: PublicPhotographerProfile; services: PublicService[] }
+  | { status: 'missing' }
+  | { status: 'failed' }
+)
 
 /** Placeholder cards while the list loads: one row at the widest breakpoint. */
 const SKELETON_COUNT = 3
 
 export function ServiceList() {
   const { t } = useTranslation()
+  const { handle = '' } = useParams()
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchServices(controller.signal)
-      .then((services) => !controller.signal.aborted && setLoaded({ status: 'ok', services }))
-      .catch(() => !controller.signal.aborted && setLoaded({ status: 'failed' }))
+    Promise.all([fetchPhotographer(handle, controller.signal), fetchServices(handle, controller.signal)])
+      .then(([photographer, services]) => {
+        if (controller.signal.aborted) return
+        setLoaded(
+          photographer === null || services === null
+            ? { handle, status: 'missing' }
+            : { handle, status: 'ok', photographer, services },
+        )
+      })
+      .catch(() => !controller.signal.aborted && setLoaded({ handle, status: 'failed' }))
     return () => controller.abort()
-  }, [attempt])
+  }, [handle, attempt])
 
   function retry() {
     setLoaded(null)
     setAttempt((n) => n + 1)
   }
 
+  // A load for another handle is stale: moving between photographers shows
+  // loading, not the previous one's services.
+  const current = loaded?.handle === handle ? loaded : null
+
+  if (current?.status === 'missing') return <NotFound />
+
   return (
     <main className={cn(container, pageY, 'flex flex-col gap-8')}>
+      <BackLink to="/photographers">{t('photographers:all')}</BackLink>
       <header className="flex flex-col gap-3">
         <p className={eyebrow}>
           <CalendarCheck aria-hidden="true" />
-          {t('services:title')}
+          {t('photographers:servicesEyebrow')}
         </p>
-        <h1 className={pageTitle}>{t('services:title')}</h1>
-        <p className={lead}>{t('services:intro')}</p>
+        {current === null ? (
+          // The name is not known yet: a bar the size of the title, so nothing jumps when it arrives.
+          <Skeleton aria-hidden="true" className="h-9 w-64 max-w-full md:h-10" />
+        ) : (
+          <h1 className={pageTitle}>{current.status === 'ok' ? current.photographer.displayName : t('services:title')}</h1>
+        )}
+        {current?.status === 'ok' && (
+          <p className={cn(lead, 'max-w-2xl whitespace-pre-line')}>{current.photographer.bio ?? t('services:intro')}</p>
+        )}
       </header>
 
-      {loaded === null && (
+      {current === null && (
         <div aria-busy="true">
           {/* The wait is announced once, in words; the cards are decoration. */}
           <p className="sr-only" role="status">
@@ -60,7 +99,7 @@ export function ServiceList() {
         </div>
       )}
 
-      {loaded?.status === 'failed' && (
+      {current?.status === 'failed' && (
         <Callout
           variant="console"
           tone="destructive"
@@ -76,16 +115,16 @@ export function ServiceList() {
         </Callout>
       )}
 
-      {loaded?.status === 'ok' &&
-        (loaded.services.length === 0 ? (
+      {current?.status === 'ok' &&
+        (current.services.length === 0 ? (
           <Callout variant="console" tone="info" icon={Info}>
             <p>{t('services:empty')}</p>
           </Callout>
         ) : (
           <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {loaded.services.map((service, index) => (
+            {current.services.map((service, index) => (
               <li key={service.id}>
-                <ServiceCard service={service} priority={index === 0} />
+                <ServiceCard handle={handle} service={service} priority={index === 0} />
               </li>
             ))}
           </ul>
@@ -95,15 +134,18 @@ export function ServiceList() {
 }
 
 /**
- * Exported so the landing page's preview shows the same card, not a copy of it.
- * `headingLevel` is 3 under a section's `h2` (Home) and 2 under the list's
- * `h1`, so the outline never skips a level.
+ * One service, linking to its page under its photographer's handle.
+ * `headingLevel` is 3 under a section's `h2` and 2 under the list's `h1`, so
+ * the outline never skips a level.
  */
 export function ServiceCard({
+  handle,
   service,
   priority,
   headingLevel = 2,
 }: {
+  /** The photographer the service belongs to: its page lives under their handle. */
+  handle: string
   service: PublicService
   priority: boolean
   headingLevel?: 2 | 3
@@ -136,7 +178,7 @@ export function ServiceCard({
       <div className="flex flex-1 flex-col gap-3.5 p-6">
         <Heading className="text-[1.375rem] leading-tight font-medium tracking-[-0.01em] text-balance">
           <Link
-            to={`/services/${service.slug}`}
+            to={servicePath(handle, service.slug)}
             data-focus-ring="parent"
             className="outline-none after:absolute after:inset-0"
           >

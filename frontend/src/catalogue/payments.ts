@@ -1,4 +1,5 @@
 import { env } from '@/env'
+import type { CancellationTerms } from '@/lib/cancellation'
 
 /**
  * Paying the booking fee (plan.md Task 16, spec §3.1 steps 9-10): the methods
@@ -34,6 +35,8 @@ export type Checkout = {
   state: CheckoutState
   /** An earlier attempt still waiting on the payer's phone. */
   waitingPayment: { ourRef: string } | null
+  /** The cancellation terms the booking was made under, stated before the client pays. */
+  cancellation: CancellationTerms
 }
 
 export type PaymentStatus = 'initiated' | 'pending' | 'succeeded' | 'failed' | 'refund_due' | 'refunded'

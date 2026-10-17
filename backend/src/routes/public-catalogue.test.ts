@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { listPublicCatalogue } from '../catalogue/public.js';
 import { createPrismaClient } from '../db/client.js';
+import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
 
@@ -862,10 +863,19 @@ describe('GET /api/photographers/:handle', () => {
         whatsappPhone: '+250788000002',
         email: 'hello@kigalilens.example',
         coverImageUrl: 'https://images.example.com/kigali.jpg',
+        cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
       },
     });
     expect(res.text).not.toContain(PHOTOGRAPHER_EMAIL);
     expect(res.text).not.toContain(photographerId);
+  });
+
+  it('states the cancellation policy as the photographer has it set now', async () => {
+    await updatePhotographerSettings(photographerId, { clientCancelCutoffHours: 24, bookingFeeRefundableOnClientCancel: true }, prisma);
+
+    const body = bodyOf<{ photographer: { cancellationPolicy: unknown } }>(await request(app).get(PROFILE), 200);
+
+    expect(body.photographer.cancellationPolicy).toStrictEqual({ cutoffHours: 24, bookingFeeRefundable: true });
   });
 
   it('404s an unknown handle, a pending or suspended photographer and a malformed handle alike', async () => {

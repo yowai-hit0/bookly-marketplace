@@ -56,7 +56,6 @@ const BOOKING: AdminBooking = {
   status: 'confirmed',
   stage: 'confirmed',
   locale: 'en',
-  client: { id: 'cl1', fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000', anonymized: false },
   contact: { name: 'Aline Uwase', email: 'aline@example.com', phone: '+250788000000' },
   service: { id: 's1', name: 'Portraits' },
   package: { id: 'p1', name: 'Standard', priceRwf: 40_000, durationMinutes: 90, photoCount: 25 },
@@ -115,8 +114,8 @@ const STARTED: AdminBooking = {
 
 const CANCELLED: AdminBooking = {
   ...BOOKING,
-  status: 'cancelled_by_admin',
-  stage: 'cancelled_by_admin',
+  status: 'cancelled_by_photographer',
+  stage: 'cancelled_by_photographer',
   lifecycle: { ...BOOKING.lifecycle, cancelledAt: '2026-10-02T09:00:00.000Z', cancellationReason: 'Studio flooded.' },
   money: { ...BOOKING.money, totals: { ...BOOKING.money.totals, collectedRwf: 0, refundDueRwf: 20_000, outstandingRwf: 0 } },
   payments: [{ ...BOOKING_FEE, status: 'refund_due', canRecordRefund: true }],

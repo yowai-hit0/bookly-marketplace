@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SETTINGS_FIELDS, settingsFormSchema, settingsFormValues } from './settings'
+import { SETTINGS_FIELDS, SETTINGS_TOGGLES, settingsFormSchema, settingsFormValues } from './settings'
 
 /**
  * The settings form's own rules (plan.md Task 8, spec P-30). The API
@@ -11,9 +11,10 @@ import { SETTINGS_FIELDS, settingsFormSchema, settingsFormValues } from './setti
 const input = {
   bookingFeePercent: '40',
   minLeadTimeMinutes: '120',
-  holdMinutes: '30',
   bufferMinutes: '15',
   deliveryExpiryDays: '90',
+  clientCancelCutoffHours: '24',
+  bookingFeeRefundableOnClientCancel: false,
 }
 
 function badFields(result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }): string[] {
@@ -21,17 +22,24 @@ function badFields(result: { success: boolean; error?: { issues: { path: Propert
 }
 
 describe('the settings form schema', () => {
-  it('turns the five typed values into the payload the API takes', () => {
+  it('turns the typed values into the payload the API takes, with no hold time in it', () => {
     const result = settingsFormSchema.safeParse(input)
 
     expect(result.success).toBe(true)
     expect(result.data).toEqual({
       bookingFeeRate: 0.4,
       minLeadTimeMinutes: 120,
-      holdMinutes: 30,
       bufferMinutes: 15,
       deliveryExpiryDays: 90,
+      clientCancelCutoffHours: 24,
+      bookingFeeRefundableOnClientCancel: false,
     })
+  })
+
+  it('passes the refund setting through as a boolean', () => {
+    const result = settingsFormSchema.safeParse({ ...input, bookingFeeRefundableOnClientCancel: true })
+
+    expect(result.data).toMatchObject({ bookingFeeRefundableOnClientCancel: true })
   })
 
   it.each([
@@ -58,13 +66,15 @@ describe('the settings form schema', () => {
     ['a fee above 100%', { bookingFeePercent: '101' }, ['bookingFeePercent']],
     ['a negative fee', { bookingFeePercent: '-5' }, ['bookingFeePercent']],
     ['a blank fee', { bookingFeePercent: '' }, ['bookingFeePercent']],
-    ['a hold of zero minutes', { holdMinutes: '0' }, ['holdMinutes']],
+    ['a negative cut-off', { clientCancelCutoffHours: '-1' }, ['clientCancelCutoffHours']],
+    ['a fractional cut-off', { clientCancelCutoffHours: '2.5' }, ['clientCancelCutoffHours']],
+    ['a blank cut-off', { clientCancelCutoffHours: '' }, ['clientCancelCutoffHours']],
     ['a delivery window of zero days', { deliveryExpiryDays: '0' }, ['deliveryExpiryDays']],
     ['exponent notation', { minLeadTimeMinutes: '1e3' }, ['minLeadTimeMinutes']],
     ['a thousands separator', { minLeadTimeMinutes: '40,000' }, ['minLeadTimeMinutes']],
     ['a decimal where only whole minutes fit', { bufferMinutes: '15.5' }, ['bufferMinutes']],
     ['a blank field', { bufferMinutes: '' }, ['bufferMinutes']],
-    ['a value past int4', { holdMinutes: '2147483648' }, ['holdMinutes']],
+    ['a value past int4', { clientCancelCutoffHours: '2147483648' }, ['clientCancelCutoffHours']],
   ])('refuses %s and blames that field', (_label, patch, expected) => {
     const result = settingsFormSchema.safeParse({ ...input, ...patch })
 
@@ -75,7 +85,8 @@ describe('the settings form schema', () => {
   it.each([
     ['minLeadTimeMinutes'],
     ['bufferMinutes'],
-  ])('allows %s to be zero, because no notice and no buffer are real choices', (field) => {
+    ['clientCancelCutoffHours'],
+  ])('allows %s to be zero, because no notice, no buffer and no cut-off are real choices', (field) => {
     const result = settingsFormSchema.safeParse({ ...input, [field]: '0' })
 
     expect(result.success).toBe(true)
@@ -88,17 +99,19 @@ describe('settings form values', () => {
     const values = settingsFormValues({
       bookingFeeRate: 0.375,
       minLeadTimeMinutes: 120,
-      holdMinutes: 30,
       bufferMinutes: 15,
       deliveryExpiryDays: 90,
+      clientCancelCutoffHours: 24,
+      bookingFeeRefundableOnClientCancel: true,
     })
 
     expect(values).toEqual({
       bookingFeePercent: '37.5',
       minLeadTimeMinutes: '120',
-      holdMinutes: '30',
       bufferMinutes: '15',
       deliveryExpiryDays: '90',
+      clientCancelCutoffHours: '24',
+      bookingFeeRefundableOnClientCancel: true,
     })
   })
 
@@ -106,9 +119,10 @@ describe('settings form values', () => {
     const values = settingsFormValues({
       bookingFeeRate: 0.4,
       minLeadTimeMinutes: 0,
-      holdMinutes: 1,
       bufferMinutes: 0,
       deliveryExpiryDays: 1,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
     })
 
     expect(values.bookingFeePercent).toBe('40')
@@ -118,23 +132,25 @@ describe('settings form values', () => {
     const stored = {
       bookingFeeRate: 0.375,
       minLeadTimeMinutes: 1440,
-      holdMinutes: 45,
       bufferMinutes: 30,
       deliveryExpiryDays: 365,
+      clientCancelCutoffHours: 72,
+      bookingFeeRefundableOnClientCancel: true,
     }
 
     expect(settingsFormSchema.safeParse(settingsFormValues(stored)).data).toEqual(stored)
   })
 
-  it('renders every field the page asks for', () => {
+  it('renders every field and checkbox the page asks for', () => {
     const values = settingsFormValues({
       bookingFeeRate: 0.4,
       minLeadTimeMinutes: 120,
-      holdMinutes: 30,
       bufferMinutes: 15,
       deliveryExpiryDays: 90,
+      clientCancelCutoffHours: 0,
+      bookingFeeRefundableOnClientCancel: false,
     })
 
-    expect(Object.keys(values).sort()).toEqual([...SETTINGS_FIELDS].sort())
+    expect(Object.keys(values).sort()).toEqual([...SETTINGS_FIELDS, ...SETTINGS_TOGGLES].sort())
   })
 })

@@ -52,6 +52,7 @@ const BOOKING: ClientBooking = {
   bookingFeeRwf: 20_000,
   payments: [{ kind: 'booking_fee', status: 'succeeded', amountRwf: 20_000, settledAt: '2026-10-01T06:05:00.000Z' }],
   canCancel: true,
+  cancellation: { deadline: '2026-10-07T07:30:00.000Z', bookingFeeRefundable: false },
   cancellationReason: null,
   cancelledAt: null,
   sessionFee: { outstandingRwf: 30_000, waitingPayment: null },

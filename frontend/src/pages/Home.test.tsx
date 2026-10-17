@@ -6,28 +6,30 @@ import { Home } from './Home'
 
 /**
  * The landing page replaced an API-status stub on 2026-09-21, so none of the
- * old assertions survived. What matters now: it sends people to `/services`,
- * it shows the API's own services rather than any of its own, it says the
- * unfavourable term out loud, and a failed fetch leaves a working page.
+ * old assertions survived. What matters now: it sends people to
+ * `/photographers` (brief decision 9), it shows the API's own photographers
+ * rather than any of its own, it says each photographer sets their own
+ * cancellation terms rather than promising one, and a failed fetch leaves a
+ * working page.
  */
 
-const SERVICES = [
-  { id: 's1', slug: 'portraits', nameEn: 'Portraits', descriptionEn: null, coverImageUrl: null, packages: [{ id: 'p1', nameEn: 'Mini', priceRwf: 25_000, durationMinutes: 60, photoCount: 10 }] },
-  { id: 's2', slug: 'weddings', nameEn: 'Weddings', descriptionEn: null, coverImageUrl: null, packages: [{ id: 'p2', nameEn: 'Full', priceRwf: 40_000, durationMinutes: 240, photoCount: 80 }] },
-  { id: 's3', slug: 'events', nameEn: 'Events', descriptionEn: null, coverImageUrl: null, packages: [] },
-  { id: 's4', slug: 'products', nameEn: 'Products', descriptionEn: null, coverImageUrl: null, packages: [] },
+const PHOTOGRAPHERS = [
+  { handle: 'kigali-lens', displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg' },
+  { handle: 'nyamirambo-light', displayName: 'Nyamirambo Light', coverImageUrl: null },
+  { handle: 'umuganda-studio', displayName: 'Umuganda Studio', coverImageUrl: 'javascript:alert(1)' },
+  { handle: 'lake-kivu-frames', displayName: 'Lake Kivu Frames', coverImageUrl: null },
 ]
 
-function stubServices(services: unknown[] = SERVICES) {
+function stubPhotographers(photographers: unknown[] = PHOTOGRAPHERS) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify({ services }))),
+    vi.fn(async () => new Response(JSON.stringify({ photographers }))),
   )
 }
 
-/** The services preview; the hero's chips name the services too (2026-09-27). */
+/** The photographers preview; the hero's chips name them too. */
 async function previewSection(): Promise<HTMLElement> {
-  const heading = await screen.findByRole('heading', { name: 'What you can book' })
+  const heading = await screen.findByRole('heading', { name: 'Who you can book' })
   return heading.closest('section') as HTMLElement
 }
 
@@ -40,7 +42,7 @@ function renderHome() {
 }
 
 beforeEach(() => {
-  stubServices()
+  stubPhotographers()
 })
 
 afterEach(() => {
@@ -48,7 +50,7 @@ afterEach(() => {
 })
 
 describe('the landing page', () => {
-  it('leads with one h1 and a call to action into the service list', async () => {
+  it('leads with one h1 and a call to action into the photographers list', async () => {
     renderHome()
 
     const headings = await screen.findAllByRole('heading', { level: 1 })
@@ -58,66 +60,75 @@ describe('the landing page', () => {
     // "Book now" is in the hero and the closing band; both go to the same place.
     const bookNow = screen.getAllByRole('link', { name: 'Book now' })
     expect(bookNow).toHaveLength(2)
-    for (const link of bookNow) expect(link).toHaveAttribute('href', '/services')
+    for (const link of bookNow) expect(link).toHaveAttribute('href', '/photographers')
   })
 
-  it('previews the first three services the API lists, and nothing of its own', async () => {
+  it('previews the first three photographers the API lists, and nothing of its own', async () => {
     renderHome()
 
     const preview = within(await previewSection())
-    expect(await preview.findByRole('link', { name: 'Portraits' })).toHaveAttribute('href', '/services/portraits')
-    expect(preview.getByRole('link', { name: 'Weddings' })).toBeInTheDocument()
-    expect(preview.getByRole('link', { name: 'Events' })).toBeInTheDocument()
+    expect(await preview.findByRole('link', { name: 'Kigali Lens' })).toHaveAttribute('href', '/p/kigali-lens')
+    expect(preview.getByRole('link', { name: 'Nyamirambo Light' })).toBeInTheDocument()
+    expect(preview.getByRole('link', { name: 'Umuganda Studio' })).toBeInTheDocument()
     // The fourth is the list page's job, not the preview's.
-    expect(preview.queryByRole('link', { name: 'Products' })).not.toBeInTheDocument()
-    expect(preview.getByText('From 25,000 RWF')).toBeInTheDocument()
+    expect(preview.queryByRole('link', { name: 'Lake Kivu Frames' })).not.toBeInTheDocument()
+    expect(preview.getByRole('link', { name: 'Browse photographers' })).toHaveAttribute('href', '/photographers')
   })
 
-  it('offers every service the API lists as a chip in the hero, and no chip of its own (2026-09-27)', async () => {
-    renderHome()
+  it('shows only an https cover, never a pasted link of another kind', async () => {
+    const { container } = renderHome()
 
-    const need = await screen.findByText('What do you need?')
-    const chips = within(need.parentElement as HTMLElement)
-    await waitFor(() => expect(chips.getAllByRole('link')).toHaveLength(4))
-    expect(chips.getAllByRole('link').map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-      ['Portraits', '/services/portraits'],
-      ['Weddings', '/services/weddings'],
-      ['Events', '/services/events'],
-      ['Products', '/services/products'],
+    await within(await previewSection()).findByRole('link', { name: 'Kigali Lens' })
+    expect(Array.from(container.querySelectorAll('img')).map((image) => image.getAttribute('src'))).toEqual([
+      'https://images.example.com/kigali.jpg',
     ])
   })
 
-  it('reaches the same endpoint the service list uses', async () => {
+  it('offers every photographer the API lists as a chip in the hero, and no chip of its own', async () => {
     renderHome()
 
-    await within(await previewSection()).findByRole('link', { name: 'Portraits' })
-    expect(fetch).toHaveBeenCalledWith('/api/services', expect.anything())
+    const label = await screen.findByText('Photographers you can book')
+    const chips = within(label.parentElement as HTMLElement)
+    await waitFor(() => expect(chips.getAllByRole('link')).toHaveLength(4))
+    expect(chips.getAllByRole('link').map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['Kigali Lens', '/p/kigali-lens'],
+      ['Nyamirambo Light', '/p/nyamirambo-light'],
+      ['Umuganda Studio', '/p/umuganda-studio'],
+      ['Lake Kivu Frames', '/p/lake-kivu-frames'],
+    ])
   })
 
-  it('never names a service the API did not send', async () => {
-    stubServices([])
+  it('reaches the same endpoint the photographers list uses', async () => {
+    renderHome()
+
+    await within(await previewSection()).findByRole('link', { name: 'Kigali Lens' })
+    expect(fetch).toHaveBeenCalledWith('/api/photographers', expect.anything())
+  })
+
+  it('never names a photographer the API did not send', async () => {
+    stubPhotographers([])
     renderHome()
 
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
     // The section shows placeholders while loading, then goes when there is nothing.
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'What you can book' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Who you can book' })).not.toBeInTheDocument())
     expect(screen.queryByTestId('service-skeletons')).not.toBeInTheDocument()
   })
 
-  it('shows placeholder cards in the preview while the services load (2026-09-25)', async () => {
+  it('shows placeholder cards in the preview while the photographers load (2026-09-25)', async () => {
     let answer: (res: Response) => void = () => {}
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => (answer = resolve))))
     renderHome()
 
-    expect(screen.getByRole('heading', { name: 'What you can book' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Who you can book' })).toBeInTheDocument()
     const skeletons = screen.getByTestId('service-skeletons')
     expect(skeletons).toHaveAttribute('aria-hidden', 'true')
     expect(skeletons.querySelectorAll('li')).toHaveLength(3)
     expect(screen.getByRole('status')).toHaveTextContent('Loading…')
 
-    answer(new Response(JSON.stringify({ services: SERVICES })))
+    answer(new Response(JSON.stringify({ photographers: PHOTOGRAPHERS })))
 
-    expect(await within(await previewSection()).findByRole('link', { name: 'Portraits' })).toBeInTheDocument()
+    expect(await within(await previewSection()).findByRole('link', { name: 'Kigali Lens' })).toBeInTheDocument()
     expect(screen.queryByTestId('service-skeletons')).not.toBeInTheDocument()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
@@ -130,20 +141,21 @@ describe('the landing page', () => {
     renderHome()
 
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'What you can book' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Who you can book' })).not.toBeInTheDocument())
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
     expect(screen.queryByTestId('service-skeletons')).not.toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Book now' })).toHaveLength(2)
   })
 
-  it('explains the booking fee is not refunded, rather than leaving it to checkout', async () => {
+  it('says each photographer sets their own cancellation terms, and never promises one for all (R1.8)', async () => {
     renderHome()
 
     const trust = (await screen.findByRole('heading', { name: 'What you can count on' })).closest('section')
     expect(trust).not.toBeNull()
-    expect(within(trust as HTMLElement).getByRole('heading', { name: 'The booking fee is not refunded' })).toBeInTheDocument()
-    expect(within(trust as HTMLElement).getByText(/the booking fee stays with the photographer/i)).toBeInTheDocument()
+    expect(within(trust as HTMLElement).getByRole('heading', { name: 'Cancellation terms, up front' })).toBeInTheDocument()
+    expect(within(trust as HTMLElement).getByText(/Each photographer sets whether the booking fee is refunded/)).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('The booking fee is not refunded')
   })
 
   it('lays the four booking steps out in order, as a list', async () => {

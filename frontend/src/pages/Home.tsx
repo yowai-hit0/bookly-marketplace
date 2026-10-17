@@ -14,28 +14,31 @@ import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router'
 import { kigaliDateOf } from '@/admin/calendar-dates'
-import { type PublicService, fetchServices } from '@/catalogue/api'
+import { type PublicPhotographerSummary, fetchPhotographers, photographerPath } from '@/catalogue/api'
 import { kigaliMonthOf, monthGrid } from '@/catalogue/availability'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatDate, formatMonth } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { container, eyebrow, sectionTitle, sectionY } from '@/pages/client/classes'
-import { ServiceCard, ServiceGridSkeleton } from '@/pages/services/ServiceList'
+import { PhotographerCard } from '@/pages/photographers/PhotographerList'
+import { ServiceGridSkeleton } from '@/pages/services/ServiceList'
 
 /**
  * The public entry point (`design-system/bookly/pages/home.md`, restyled by
  * `client-front.md` section 8.1).
  *
- * Nothing here is invented. There is no photographer name, logo, portfolio,
- * testimonial or review to show, so none appears. The service names and prices
- * are the API's, fetched with the same call `/services` makes, and every claim
- * is a rule the code enforces -- including the unfavourable one, that the
- * booking fee is not refunded. The hero's calendar is decoration built from
- * today's date and the first real service, so it never shows a stale date.
+ * Nothing here is invented. There is no logo, portfolio, testimonial or review
+ * to show, so none appears. The photographers are the API's, fetched with the
+ * same call `/photographers` makes (marketplace brief decision 9), and every
+ * claim is a rule the code enforces. Whether the booking fee is refunded is
+ * each photographer's own policy now (R1.8), so the page promises only that
+ * the terms are shown before booking and again before paying. The hero's
+ * calendar is decoration built from today's date, so it never shows a stale
+ * date.
  */
 
-/** How many services the preview shows before sending people to the full list. */
+/** How many photographers the preview shows before sending people to the full list. */
 const PREVIEW_COUNT = 3
 
 /** The hero's entrance, 80ms apart (client-front.md section 6). */
@@ -49,21 +52,21 @@ export function Home() {
   // Null while loading. The API can take close to a minute to wake (Render's
   // free tier), so the preview shows placeholder cards meanwhile (decided
   // 2026-09-25, reversing `home.md`'s "render nothing while loading").
-  const [services, setServices] = useState<PublicService[] | null>(null)
+  const [photographers, setPhotographers] = useState<PublicPhotographerSummary[] | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchServices(controller.signal)
-      .then((all) => !controller.signal.aborted && setServices(all))
+    fetchPhotographers(controller.signal)
+      .then((all) => !controller.signal.aborted && setPhotographers(all))
       // Deliberately quiet: this is a marketing page, not the funnel. A
-      // failure here renders nothing, and `/services` shows the real error
-      // with the real retry.
-      .catch(() => !controller.signal.aborted && setServices([]))
+      // failure here renders nothing, and `/photographers` shows the real
+      // error with the real retry.
+      .catch(() => !controller.signal.aborted && setPhotographers([]))
     return () => controller.abort()
   }, [])
 
-  const loading = services === null
-  const preview = services?.slice(0, PREVIEW_COUNT) ?? []
+  const loading = photographers === null
+  const preview = photographers?.slice(0, PREVIEW_COUNT) ?? []
   const hasPreview = loading || preview.length > 0
 
   // The header's "How booking works" is `/#how`. React Router does not scroll
@@ -105,10 +108,10 @@ export function Home() {
               {t('landing:hero.body')}
             </p>
 
-            {(loading || (services?.length ?? 0) > 0) && (
+            {(loading || (photographers?.length ?? 0) > 0) && (
               <div className={cn('flex w-full flex-col gap-2.5', fadeUp)} style={stagger(3)}>
                 <p className="text-muted-foreground font-mono text-xs font-medium tracking-[0.1em] uppercase">
-                  {t('landing:hero.need')}
+                  {t('landing:hero.photographers')}
                 </p>
                 {loading ? (
                   <div aria-hidden="true" className="flex flex-wrap gap-2">
@@ -118,13 +121,13 @@ export function Home() {
                   </div>
                 ) : (
                   <ul className="flex flex-wrap gap-2">
-                    {services.map((service) => (
-                      <li key={service.id}>
+                    {photographers.map((photographer) => (
+                      <li key={photographer.handle}>
                         <Link
-                          to={`/services/${service.slug}`}
+                          to={photographerPath(photographer.handle)}
                           className="bg-background hover:border-ring hover:text-console-link inline-flex min-h-11 items-center rounded-xs border px-4 text-[0.9375rem] motion-safe:transition-colors motion-safe:duration-150"
                         >
-                          {service.nameEn}
+                          {photographer.displayName}
                         </Link>
                       </li>
                     ))}
@@ -135,7 +138,7 @@ export function Home() {
 
             <div className={cn('flex flex-col items-start gap-5', fadeUp)} style={stagger(4)}>
               <Button asChild variant="brand" size="lg">
-                <Link to="/services">
+                <Link to="/photographers">
                   <CalendarDays aria-hidden="true" className="size-4.5" />
                   {t('landing:hero.cta')}
                 </Link>
@@ -152,26 +155,26 @@ export function Home() {
             </div>
           </div>
 
-          <HeroMockup serviceName={services?.[0]?.nameEn ?? null} />
+          <HeroMockup />
         </div>
       </section>
 
-      {/* Services ------------------------------------------------------- */}
+      {/* Photographers -------------------------------------------------- */}
       {hasPreview && (
-        <section id="services" className={cn(container, sectionY, 'flex flex-col gap-10')}>
+        <section id="photographers" className={cn(container, sectionY, 'flex flex-col gap-10')}>
           <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
             <div className="flex flex-col gap-3.5">
               <p className={eyebrow}>
                 <CalendarCheck aria-hidden="true" />
-                {t('landing:preview.eyebrow')}
+                {t('landing:photographers.eyebrow')}
               </p>
-              <h2 className={sectionTitle}>{t('landing:preview.title')}</h2>
+              <h2 className={sectionTitle}>{t('landing:photographers.title')}</h2>
             </div>
             <Link
-              to="/services"
+              to="/photographers"
               className="group/more text-console-link hover:text-console-link-hover inline-flex min-h-11 shrink-0 items-center gap-2 self-start rounded-xs text-base md:self-auto"
             >
-              {t('landing:preview.more')}
+              {t('landing:photographers.more')}
               <ArrowRight
                 aria-hidden="true"
                 className="size-4 motion-safe:transition-transform motion-safe:duration-250 motion-safe:group-hover/more:translate-x-1.25"
@@ -181,15 +184,15 @@ export function Home() {
           {loading ? (
             <div aria-busy="true">
               <p className="sr-only" role="status">
-                {t('services:loading')}
+                {t('photographers:loading')}
               </p>
               <ServiceGridSkeleton count={PREVIEW_COUNT} />
             </div>
           ) : (
             <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {preview.map((service, index) => (
-                <li key={service.id}>
-                  <ServiceCard service={service} priority={index === 0} headingLevel={3} />
+              {preview.map((photographer, index) => (
+                <li key={photographer.handle}>
+                  <PhotographerCard photographer={photographer} priority={index === 0} headingLevel={3} />
                 </li>
               ))}
             </ul>
@@ -241,9 +244,9 @@ export function Home() {
         <ul className="bg-border grid gap-px border md:grid-cols-2">
           <Fact icon={Tag} name="price" />
           <Fact icon={CalendarCheck} name="hold" />
-          {/* The one unfavourable term, said here rather than only at checkout,
-              at the same weight as the others: it is a fact, not an error. */}
-          <Fact icon={Info} name="fee" />
+          {/* Each photographer sets their own cancellation terms (R1.8), so the
+              promise is that they are shown, said at the same weight as the others. */}
+          <Fact icon={Info} name="policy" />
           <Fact icon={Link2} name="link" />
         </ul>
       </section>
@@ -282,7 +285,7 @@ export function Home() {
               <Link to="/my-booking">{t('landing:booked.cta')}</Link>
             </Button>
             <Button asChild size="lg" className="bg-band-foreground text-band hover:bg-band-foreground/85">
-              <Link to="/services">
+              <Link to="/photographers">
                 {t('landing:closing.cta')}
                 <ArrowRight aria-hidden="true" />
               </Link>
@@ -317,9 +320,10 @@ function Fact({ icon: Icon, name }: { icon: LucideIcon; name: string }) {
  * The hero's calendar (decorative, `aria-hidden`, pure HTML and CSS): the
  * current Kigali month, the two weeks from today's, today chosen, the days
  * after it that are not Sundays marked open, three start times, and a small
- * "held" card with the first real service and today's date. Nothing loops.
+ * "held" card with a generic shoot and today's date -- there is no one
+ * service to name across photographers. Nothing loops.
  */
-function HeroMockup({ serviceName }: { serviceName: string | null }) {
+function HeroMockup() {
   const { t } = useTranslation()
   const now = new Date()
   const today = kigaliDateOf(now)
@@ -388,7 +392,7 @@ function HeroMockup({ serviceName }: { serviceName: string | null }) {
           </span>
           <span className="text-[0.9375rem] font-semibold">{t('landing:hero.mockup.held')}</span>
         </div>
-        <span className="text-sm font-medium">{serviceName ?? t('landing:hero.mockup.service')}</span>
+        <span className="text-sm font-medium">{t('landing:hero.mockup.service')}</span>
         <span className="text-muted-foreground font-mono text-xs">{formatDate(today)} · 10:00</span>
       </div>
     </div>

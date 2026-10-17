@@ -1,11 +1,12 @@
 import { Check, CircleAlert, Settings as SettingsIcon } from 'lucide-react'
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { ApiError, UnauthenticatedError } from '@/admin/api'
 import {
   FORM_FIELD_FOR,
   SETTINGS_FIELDS,
+  SETTINGS_TOGGLES,
   type SettingsFormValues,
   settingsApi,
   settingsFormSchema,
@@ -14,25 +15,30 @@ import {
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { AdminField } from './AdminField'
-import { FIELD, META, PAGE } from './console/classes'
+import { CHECKBOX, FIELD, META, PAGE } from './console/classes'
 import { Skeleton } from '@/components/ui/skeleton'
 import { LoadingRegion, Line as SkeletonLine } from './console/Skeletons'
 import { PageHeader } from './console/PageHeader'
 
 /**
- * The five operating values (plan.md Task 8, spec P-30): the booking-fee rate,
- * the minimum notice, how long a hold lasts, the buffer between shoots, and how
- * long a photo link keeps working.
+ * The operating values (plan.md Task 8, spec P-30): the booking-fee rate, the
+ * minimum notice, the buffer between shoots, and how long a photo link keeps
+ * working; then the client cancellation policy (R1.8): the cut-off before a
+ * shoot, and whether a client's own cancellation refunds the booking fee. How
+ * long a checkout hold lasts is the platform's to set, not the photographer's
+ * (marketplace brief decision 5).
  *
  * The fee is typed as a percentage and stored as a rate, because "37.5%" is how
  * the photographer thinks about it and `0.375` is how the column stores it.
  *
- * A save sends all five. Changing one value does not disturb the others, and
- * nothing already booked moves: a booking snapshots its own fee and buffer when
- * it is created.
+ * A save sends every value. Changing one does not disturb the others, and
+ * nothing already booked moves: a booking snapshots its own fee, buffer and
+ * cancellation policy when it is created.
  */
 
 export function AdminSettings() {
@@ -45,6 +51,7 @@ export function AdminSettings() {
   const [formError, setFormError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const idPrefix = useId()
 
   useEffect(() => {
     let cancelled = false
@@ -67,7 +74,11 @@ export function AdminSettings() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
-    const input = Object.fromEntries(SETTINGS_FIELDS.map((field) => [field, String(data.get(field) ?? '')]))
+    const input = {
+      ...Object.fromEntries(SETTINGS_FIELDS.map((field) => [field, String(data.get(field) ?? '')])),
+      // A checked Radix checkbox submits `on`; an unchecked one submits nothing.
+      ...Object.fromEntries(SETTINGS_TOGGLES.map((toggle) => [toggle, data.get(toggle) === 'on'])),
+    }
 
     setFormError(null)
     setSaved(false)
@@ -101,8 +112,8 @@ export function AdminSettings() {
 
   return (
     // At 1280x720 and up the whole page fits without scrolling (item 3,
-    // 2026-09-27): the five fields sit three to a row from `lg`, in a wider
-    // column, so they take two rows instead of three.
+    // 2026-09-27): the five typed fields sit three to a row from `lg`, in a
+    // wider column, so they take two rows, with the refund checkbox below.
     <main className={cn(PAGE, 'max-w-5xl lg:gap-8 lg:py-8')}>
       <PageHeader eyebrow={t('admin:nav.label')} eyebrowIcon={SettingsIcon} title={t('admin:settings.title')}>
         <p className={cn(META, 'max-w-prose text-pretty')}>{t('admin:settings.intro')}</p>
@@ -159,7 +170,7 @@ export function AdminSettings() {
                         name={field}
                         type="text"
                         inputMode="decimal"
-                        // Five short numbers: narrow inside their cell, not
+                        // Short numbers: narrow inside their cell, not
                         // full-bleed, with figures that do not shift as typed.
                         className={cn(FIELD, 'max-w-40 tabular-nums')}
                         // Keyed on the loaded values, so a save redraws the
@@ -171,6 +182,29 @@ export function AdminSettings() {
                   </AdminField>
                 ))}
               </div>
+
+              {SETTINGS_TOGGLES.map((toggle) => (
+                <div key={toggle} className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2.5">
+                    {/* The label is the 44px target on a phone; the box's own hit area reaches 46px around it. */}
+                    <Checkbox
+                      id={`${idPrefix}${toggle}`}
+                      name={toggle}
+                      className={cn(CHECKBOX, 'after:-inset-3.5')}
+                      aria-describedby={`${idPrefix}${toggle}-hint`}
+                      // Keyed like the inputs, so a save redraws it from what was stored.
+                      key={String(values[toggle])}
+                      defaultChecked={values[toggle]}
+                    />
+                    <Label htmlFor={`${idPrefix}${toggle}`} className="min-h-11 flex-1 text-base font-normal lg:min-h-8 pointer-coarse:min-h-11">
+                      {t(`admin:settings.fields.${toggle}`)}
+                    </Label>
+                  </div>
+                  <p id={`${idPrefix}${toggle}-hint`} className="text-muted-foreground text-[0.8125rem] leading-snug">
+                    {t(`admin:settings.hints.${toggle}`)}
+                  </p>
+                </div>
+              ))}
 
               {/* The saved line, the error and the button share one region under
                   a hairline, so a confirmation only ever pushes the button down:

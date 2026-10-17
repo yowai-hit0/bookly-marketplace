@@ -36,6 +36,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { StatusBadgeVariantContext } from '@/components/ui/status-badge-context'
+import { deadlineParts, deadlinePassed, termsSentence } from '@/lib/cancellation'
 import { formatDate, formatMoney, formatTime } from '@/lib/format'
 import { reportError } from '@/lib/report-error'
 import { safeHttpsUrl } from '@/lib/safe-url'
@@ -181,10 +182,24 @@ function BookingView({ token, booking: loadedBooking, methods, onMissing, onRelo
   // that replaced it instead, which is also what announces the outcome.
   const [announceCancelled, setAnnounceCancelled] = useState(false)
   const cancelledHeadingRef = useRef<HTMLHeadingElement>(null)
+  // The deadline can pass while the page is open. The API refuses a late
+  // cancellation whatever this page shows; this only stops offering one.
+  const deadline = booking.cancellation.deadline
+  const [deadlineReached, setDeadlineReached] = useState(() => deadlinePassed(deadline))
+  const cancellable = booking.canCancel && !deadlineReached
 
   useEffect(() => {
     if (announceCancelled) cancelledHeadingRef.current?.focus()
   }, [announceCancelled])
+
+  useEffect(() => {
+    if (deadline === null || !booking.canCancel) return
+    const wait = Date.parse(deadline) - Date.now()
+    // A timer cannot wait past ~24.8 days; a deadline that far off is checked again on every press instead.
+    if (wait > MAX_TIMEOUT_MS) return
+    const timer = setTimeout(() => setDeadlineReached(true), Math.max(wait, 0))
+    return () => clearTimeout(timer)
+  }, [deadline, booking.canCancel])
 
   function settle(next: ClientBooking) {
     setBooking(next)
@@ -265,14 +280,20 @@ function BookingView({ token, booking: loadedBooking, methods, onMissing, onRelo
         />
       )}
 
-      {booking.canCancel && (
+      {cancellable && (
         <Cancel
           token={token}
           booking={booking}
           onCancelled={settle}
           onRefused={() => setRefused(true)}
+          onDeadlinePassed={() => setDeadlineReached(true)}
           onMissing={onMissing}
         />
+      )}
+
+      {/* A booking still standing whose cancellation window has closed says so, and when it closed. */}
+      {!cancellable && !refused && booking.status === 'confirmed' && deadlinePassed(deadline) && (
+        <CancelClosed deadline={deadline} />
       )}
 
       {refused && (
@@ -304,6 +325,9 @@ function BookingView({ token, booking: loadedBooking, methods, onMissing, onRelo
 
 /** A booking that still stands can still have its emails redirected; the API checks again. */
 const CHANGEABLE_EMAIL_STATUSES = ['confirmed', 'completed']
+
+/** The longest delay `setTimeout` honours (2^31 - 1 ms); a longer one fires at once. */
+const MAX_TIMEOUT_MS = 2_147_483_647
 
 /**
  * Where the booking's emails go, and changing it (2026-09-25). The API only
@@ -660,14 +684,21 @@ type CancelProps = {
   onCancelled: (booking: ClientBooking) => void
   /** The API refused: said above this section, which the refusal may remove. */
   onRefused: () => void
+  /** The deadline passed before a press: the section goes, and the closed notice says when. */
+  onDeadlinePassed: () => void
   onMissing: () => void
 }
 
 /**
- * Cancelling, in two steps: the warning that the booking fee is not refunded
- * (spec §6.10) stands between the button and the request, and says the amount.
+ * Cancelling, in two steps: the warning that says what happens to the booking
+ * fee (spec §6.10; refunded or kept, as the booking's own terms say, R1.8)
+ * stands between the button and the request, and says the amount. Above the
+ * button, the terms and the deadline, so neither is a surprise.
+ *
+ * Each press checks the deadline first: once it has passed, nothing is sent
+ * and the section closes. The API enforces the same deadline regardless.
  */
-function Cancel({ token, booking, onCancelled, onRefused, onMissing }: CancelProps) {
+function Cancel({ token, booking, onCancelled, onRefused, onDeadlinePassed, onMissing }: CancelProps) {
   const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -678,8 +709,19 @@ function Cancel({ token, booking, onCancelled, onRefused, onMissing }: CancelPro
     if (confirming) confirmRef.current?.focus()
   }, [confirming])
 
+  function tooLate(): boolean {
+    if (!deadlinePassed(booking.cancellation.deadline)) return false
+    onDeadlinePassed()
+    return true
+  }
+
+  function start() {
+    if (tooLate()) return
+    setConfirming(true)
+  }
+
   async function cancel() {
-    if (cancelling) return
+    if (cancelling || tooLate()) return
     setError(null)
     setCancelling(true)
     const result = await cancelBooking(token)
@@ -704,10 +746,15 @@ function Cancel({ token, booking, onCancelled, onRefused, onMissing }: CancelPro
   return (
     <section className={cn(panel, 'flex flex-col gap-3 p-5 sm:p-6')}>
       <h2 className={panelTitle}>{t('booking:cancel.title')}</h2>
+      <p className="text-subtle-foreground text-sm">{termsSentence(t, booking.cancellation)}</p>
       {confirming ? (
         <>
           <Callout variant="console" tone="destructive" icon={TriangleAlert}>
-            <p className="font-medium">{t('booking:cancel.warning', { fee: formatMoney(booking.bookingFeeRwf) })}</p>
+            <p className="font-medium">
+              {t(booking.cancellation.bookingFeeRefundable ? 'booking:cancel.warningRefundable' : 'booking:cancel.warning', {
+                fee: formatMoney(booking.bookingFeeRwf),
+              })}
+            </p>
           </Callout>
           {/* Stacked and full width on a phone, like the pay button: equal targets whose edges line up with the notice above. */}
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -727,7 +774,7 @@ function Cancel({ token, booking, onCancelled, onRefused, onMissing }: CancelPro
           </div>
         </>
       ) : (
-        <Button variant="outline" className="self-start" onClick={() => setConfirming(true)}>
+        <Button variant="outline" className="self-start" onClick={start}>
           {t('booking:cancel.start')}
         </Button>
       )}
@@ -736,6 +783,19 @@ function Cancel({ token, booking, onCancelled, onRefused, onMissing }: CancelPro
           <p>{t(`booking:cancel.${error}`)}</p>
         </Callout>
       )}
+    </section>
+  )
+}
+
+/** Where the cancel section was: the window has closed, and when, in Kigali time. */
+function CancelClosed({ deadline }: { deadline: string | null }) {
+  const { t } = useTranslation()
+  const closedAt = deadlineParts(deadline)
+  if (closedAt === null) return null
+  return (
+    <section className={cn(panel, 'flex flex-col gap-3 p-5 sm:p-6')}>
+      <h2 className={panelTitle}>{t('booking:cancel.title')}</h2>
+      <p className="text-subtle-foreground text-sm">{t('booking:cancel.closed', closedAt)}</p>
     </section>
   )
 }

@@ -98,8 +98,8 @@ export function ClientHeader({
         {/* Below `md`, "Book now" and the Home page cover these two. */}
         <ul className="hidden flex-1 items-center gap-8 text-[0.9375rem] md:flex">
           <li>
-            <Link to="/services" className={cn(quietLink, 'text-foreground')}>
-              {t('services:title')}
+            <Link to="/photographers" className={cn(quietLink, 'text-foreground')}>
+              {t('shell:nav.photographers')}
             </Link>
           </li>
           <li>
@@ -128,7 +128,7 @@ export function ClientHeader({
           </Link>
           <ThemeButton preference={themePreference} onChange={onThemeChange} />
           <Button asChild className="ml-1 sm:ml-0">
-            <Link to="/services">
+            <Link to="/photographers">
               {t('shell:nav.bookNow')}
               <ArrowRight aria-hidden="true" className="max-sm:hidden" />
             </Link>
@@ -189,8 +189,8 @@ function ClientFooter() {
             <ul aria-labelledby="footer-book" className="flex flex-col gap-1 text-[0.9375rem] md:gap-2">
               <li>
                 {/* Never named "All services": three e2e specs match that name page-wide. */}
-                <Link to="/services" className={quietLink}>
-                  {t('shell:footer.services')}
+                <Link to="/photographers" className={quietLink}>
+                  {t('shell:footer.photographers')}
                 </Link>
               </li>
               <li>

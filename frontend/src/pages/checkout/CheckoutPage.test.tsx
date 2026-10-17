@@ -14,10 +14,11 @@ import { routes } from '@/routes'
  * endpoint lists -- with MTN MoMo direct, Airtel Money and card are not in the
  * DOM at all, not disabled -- and all three when the API lists three, with a
  * phone field only for Mobile Money; no methods is an alert, not an empty form.
- * It shows the booking, the fee from the API, the hold and the non-refundable
- * notice. A number the page cannot read is marked and focused without a request;
- * a good one is sent as typed, once however often Pay is pressed, and a started
- * or already-waiting payment moves to its progress page, where nothing claims
+ * It shows the booking, the fee from the API, the hold and the booking's own
+ * cancellation terms (R1.8), refundable or not, with the deadline. A number
+ * the page cannot read is marked and focused without a request; a good one is
+ * sent as typed, once however often Pay is pressed, and a started or
+ * already-waiting payment moves to its progress page, where nothing claims
  * success. A paid, expired or closed booking, an invalid link and a failed load
  * each have their own words; the API's refusals (rejected, unreachable, a field,
  * the network) are alerts the payer can recover from; and a booking that
@@ -40,7 +41,12 @@ const CHECKOUT: Checkout = {
   bookingFeeRwf: 19_500,
   state: 'payable',
   waitingPayment: null,
+  // No cut-off: the deadline is the start itself, and the fee is kept (R1.8).
+  cancellation: { deadline: '2026-10-07T07:30:00.000Z', bookingFeeRefundable: false },
 }
+
+const NON_REFUNDABLE =
+  'The booking fee is non-refundable if you cancel. You can cancel until Wednesday, 7 October 2026, 09:30, Kigali time.'
 
 const PENDING_PROGRESS = {
   payment: { status: 'pending', amountRwf: 19_500, failure: null },
@@ -136,9 +142,23 @@ describe('the pay page', () => {
       ['Booking fee', '19,500 RWF'],
     ])
     expect(screen.getByText('We are holding this time for you until 08:30, Kigali time.')).toBeInTheDocument()
-    expect(screen.getByText('The booking fee is non-refundable if you cancel.')).toBeInTheDocument()
+    expect(screen.getByText(NON_REFUNDABLE)).toBeInTheDocument()
     expect(payButton()).toHaveTextContent('Pay 19,500 RWF')
     expect(calls.sort()).toEqual([`GET ${CHECKOUT_API}`, 'GET /api/payment-methods'])
+  })
+
+  it('states the booking’s own terms when they refund the fee, with the deadline, and no non-refundable warning', async () => {
+    stubApi({
+      checkout: () =>
+        json({ checkout: { ...CHECKOUT, cancellation: { deadline: '2026-10-06T07:30:00.000Z', bookingFeeRefundable: true } } }),
+    })
+    renderAt()
+
+    await screen.findByRole('heading', { level: 1, name: 'Pay the booking fee' })
+    expect(
+      screen.getByText('The booking fee is refunded if you cancel before Tuesday, 6 October 2026, 09:30, Kigali time.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/non-refundable/)).not.toBeInTheDocument()
   })
 
   it('never says the booking is confirmed or paid before a payment has even started', async () => {
@@ -450,18 +470,20 @@ describe('a booking that cannot be paid', () => {
     expect(screen.queryByRole('button', { name: /^Pay / })).not.toBeInTheDocument()
   })
 
-  it('links an expired hold back to the services to book again', async () => {
+  it('links an expired hold back to the photographers to book again', async () => {
     stubApi({ checkout: () => json({ checkout: { ...CHECKOUT, state: 'expired' } }) })
     renderAt()
 
-    expect(await screen.findByRole('link', { name: 'Choose a time' })).toHaveAttribute('href', '/services')
+    expect(await screen.findByRole('link', { name: 'Choose a time' })).toHaveAttribute('href', '/photographers')
   })
 
   it('says the link is not valid when the API does not know it', async () => {
     stubApi({ checkout: () => json({ error: 'not_found' }, 404) })
     renderAt()
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'This payment link is not valid' })).toHaveFocus()
+    // Focused in an effect after it renders: wait for the focus, as above (the same race under a loaded full run).
+    const heading = await screen.findByRole('heading', { level: 1, name: 'This payment link is not valid' })
+    await waitFor(() => expect(heading).toHaveFocus())
     expect(screen.getByText('Check that you opened the whole link. If your booking has ended, you are welcome to book again.')).toBeInTheDocument()
   })
 

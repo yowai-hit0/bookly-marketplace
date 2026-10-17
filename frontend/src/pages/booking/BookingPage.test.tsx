@@ -16,9 +16,12 @@ import { routes } from '@/routes'
  * any booking. Every amount on the page is the API's own: change the API's
  * numbers and the page follows, because nothing here adds anything up. A
  * booking with money outstanding shows the payment control and a fully paid one
- * does not. Cancelling takes two steps: the warning naming the forfeited
- * booking fee stands between the button and the request, backing out sends
- * nothing, and confirming shows the cancelled booking with any refund owed. The
+ * does not. Cancelling takes two steps: the warning naming the booking fee --
+ * forfeited or refunded, as the booking's own terms say (R1.8) -- stands
+ * between the button and the request, backing out sends nothing, and
+ * confirming shows the cancelled booking with any refund owed. The terms and
+ * the deadline are stated above the button, and once the deadline has passed
+ * nothing is offered or sent: the window's close is said instead. The
  * delivery link appears once the photos are sent and turns into the expired
  * notice after its date. A failed load offers Try again; the session-fee form's
  * refusals are the checkout's, word for word.
@@ -29,6 +32,12 @@ const OUR_REF = '3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8'
 const REFERENCE = 'BKY-2610-7K3QX'
 const PATH = `/booking/${TOKEN}`
 const BOOKING_API = `/api/booking/${TOKEN}`
+
+/**
+ * A week from the real clock, so the shared fixture's cancel window is open
+ * whenever the suite runs. Tests about the deadline itself fake the date.
+ */
+const OPEN_DEADLINE = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString()
 
 const BOOKING: ClientBooking = {
   reference: REFERENCE,
@@ -52,6 +61,7 @@ const BOOKING: ClientBooking = {
   bookingFeeRwf: 20_000,
   payments: [{ kind: 'booking_fee', status: 'succeeded', amountRwf: 20_000, settledAt: '2026-10-01T06:05:00.000Z' }],
   canCancel: true,
+  cancellation: { deadline: OPEN_DEADLINE, bookingFeeRefundable: false },
   cancellationReason: null,
   cancelledAt: null,
   sessionFee: { outstandingRwf: 30_000, waitingPayment: null },
@@ -238,7 +248,8 @@ describe('a valid link', () => {
     ['completed', 'completed', 'Completed'],
     ['completed', 'closed', 'Closed'],
     ['no_show', 'no_show', 'Recorded as missed'],
-    ['cancelled_by_admin', 'cancelled_by_admin', 'Cancelled by the photographer'],
+    ['cancelled_by_photographer', 'cancelled_by_photographer', 'Cancelled by the photographer'],
+    ['cancelled_by_platform', 'cancelled_by_platform', 'Cancelled by Bookly'],
     ['cancelled_by_client', 'cancelled_by_client', 'Cancelled by you'],
     ['expired', 'expired', 'Expired'],
   ])('names a %s booking at stage %s in words', async (status, stage, words) => {
@@ -842,7 +853,7 @@ describe('cancelling (spec §6.10)', () => {
   it('shows the photographer’s reason when they were the one who cancelled', async () => {
     stubApi({
       booking: () =>
-        json({ booking: { ...CANCELLED, status: 'cancelled_by_admin', stage: 'cancelled_by_admin', cancellationReason: 'The photographer is unwell.' } }),
+        json({ booking: { ...CANCELLED, status: 'cancelled_by_photographer', stage: 'cancelled_by_photographer', cancellationReason: 'The photographer is unwell.' } }),
     })
     await renderLoaded()
 
@@ -1135,5 +1146,106 @@ describe('the address', () => {
     await screen.findByRole('heading', { level: 1, name: 'The payment did not go through' })
 
     expect(screen.getByRole('link', { name: 'Try again' })).toHaveAttribute('href', PATH)
+  })
+})
+
+describe('the cancellation terms and deadline (R1.8)', () => {
+  // Monday 5 October 2026, 10:00 in Kigali; the window closes Tuesday at 09:30.
+  const NOW = new Date('2026-10-05T08:00:00.000Z')
+  const DEADLINE = '2026-10-06T07:30:00.000Z'
+  const CLOSED = 'Cancelling closed on Tuesday, 6 October 2026, 09:30, Kigali time. Contact the photographer if you need to change this booking.'
+
+  function withTerms(bookingFeeRefundable: boolean, deadline: string = DEADLINE): ClientBooking {
+    return { ...BOOKING, cancellation: { deadline, bookingFeeRefundable } }
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('states the booking’s own terms and deadline above the button, in Kigali time', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    stubApi({ booking: () => json({ booking: withTerms(false) }) })
+    await renderLoaded()
+
+    expect(
+      screen.getByText('The booking fee is non-refundable if you cancel. You can cancel until Tuesday, 6 October 2026, 09:30, Kigali time.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel this booking' })).toBeInTheDocument()
+  })
+
+  it('warns that the fee is refunded, not kept, when the booking’s terms refund it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    stubApi({ booking: () => json({ booking: withTerms(true) }) })
+    await renderLoaded()
+
+    expect(screen.getByText('The booking fee is refunded if you cancel before Tuesday, 6 October 2026, 09:30, Kigali time.')).toBeInTheDocument()
+    await user().click(screen.getByRole('button', { name: 'Cancel this booking' }))
+
+    expect(
+      screen.getByText('If you cancel, your booking fee of 20,000 RWF is refunded to you, and the time is released for someone else to book.'),
+    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('is not refunded')
+  })
+
+  it('offers nothing, and says when it closed, once the deadline has passed even though the API allowed it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T07:30:00.000Z'))
+    stubApi({ booking: () => json({ booking: withTerms(false) }) })
+    await renderLoaded()
+
+    expect(screen.queryByRole('button', { name: 'Cancel this booking' })).not.toBeInTheDocument()
+    expect(screen.getByText(CLOSED)).toBeInTheDocument()
+  })
+
+  it('says when it closed for a confirmed booking the API no longer lets the client cancel', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-06T12:00:00.000Z'))
+    stubApi({ booking: () => json({ booking: { ...withTerms(false), canCancel: false } }) })
+    await renderLoaded()
+
+    expect(screen.getByText(CLOSED)).toBeInTheDocument()
+  })
+
+  it('sends nothing when the deadline passes between opening the question and confirming it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    const { calls } = stubApi({ booking: () => json({ booking: withTerms(false) }) })
+    await renderLoaded()
+    await user().click(screen.getByRole('button', { name: 'Cancel this booking' }))
+
+    vi.setSystemTime(new Date('2026-10-06T07:31:00.000Z'))
+    await user().click(screen.getByRole('button', { name: 'Yes, cancel my booking' }))
+
+    expect(calls.filter((call) => call.startsWith('POST'))).toEqual([])
+    expect(screen.queryByRole('button', { name: 'Yes, cancel my booking' })).not.toBeInTheDocument()
+    expect(screen.getByText(CLOSED)).toBeInTheDocument()
+  })
+
+  it('sends nothing when the deadline passed before the first press', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    const { calls } = stubApi({ booking: () => json({ booking: withTerms(false) }) })
+    await renderLoaded()
+
+    vi.setSystemTime(new Date('2026-10-06T08:00:00.000Z'))
+    await user().click(screen.getByRole('button', { name: 'Cancel this booking' }))
+
+    expect(screen.queryByRole('button', { name: 'Yes, cancel my booking' })).not.toBeInTheDocument()
+    expect(screen.getByText(CLOSED)).toBeInTheDocument()
+    expect(calls.filter((call) => call.startsWith('POST'))).toEqual([])
+  })
+
+  it('closes the section by itself when the deadline arrives while the page is open', async () => {
+    // Real timers: the page's own timeout is what is under test.
+    const soon = new Date(Date.now() + 300).toISOString()
+    stubApi({ booking: () => json({ booking: withTerms(false, soon) }) })
+    await renderLoaded()
+    expect(screen.getByRole('button', { name: 'Cancel this booking' })).toBeInTheDocument()
+
+    expect(await screen.findByText(/^Cancelling closed on /, {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cancel this booking' })).not.toBeInTheDocument()
   })
 })

@@ -15,6 +15,17 @@ function declaredPaths(): string[] {
     .filter((path): path is string => path !== undefined)
 }
 
+const PROFILE = {
+  handle: 'kigali-lens',
+  displayName: 'Kigali Lens',
+  coverImageUrl: null,
+  bio: null,
+  contactPhone: null,
+  whatsappPhone: null,
+  email: null,
+  cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+}
+
 function renderAt(path: string) {
   return render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: [path] })} />)
 }
@@ -39,9 +50,9 @@ describe('routing', () => {
   })
 
   it('wraps the client routes in the shell, including the not-found page', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ services: [] }))))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ photographers: [] }))))
 
-    for (const path of ['/', '/services', '/nothing-here']) {
+    for (const path of ['/', '/photographers', '/nothing-here']) {
       const { unmount } = renderAt(path)
       // By the nav's name, not `banner`: pages render their own inner
       // `<header>`, which Testing Library's role engine also reports as a
@@ -101,29 +112,66 @@ describe('routing', () => {
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
   })
 
-  it('serves the public service list from /services (plan.md Task 11)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ services: [] }))))
-    renderAt('/services')
-    expect(await screen.findByRole('heading', { level: 1, name: 'Services' })).toBeInTheDocument()
-    expect(fetch).toHaveBeenCalledWith('/api/services', expect.anything())
+  it('serves the photographers list from /photographers (brief decision 9)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ photographers: [] }))))
+    renderAt('/photographers')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Photographers' })).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith('/api/photographers', expect.anything())
   })
 
-  it('serves a service page from /services/:slug (plan.md Task 11)', async () => {
+  it('serves a photographer’s services from /p/:handle, under their name', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) =>
+        input.endsWith('/services')
+          ? new Response(JSON.stringify({ services: [] }))
+          : new Response(JSON.stringify({ photographer: PROFILE })),
+      ),
+    )
+    renderAt('/p/kigali-lens')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Kigali Lens' })).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith('/api/photographers/kigali-lens', expect.anything())
+    expect(fetch).toHaveBeenCalledWith('/api/photographers/kigali-lens/services', expect.anything())
+  })
+
+  it('serves a service page from /p/:handle/:slug', async () => {
     const service = { id: 's1', slug: 'portraits', nameEn: 'Portraits', descriptionEn: null, coverImageUrl: null, packages: [], addons: [], bookingFeeRate: 0.4 }
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ service }))))
-    renderAt('/services/portraits')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) =>
+        input.includes('/services/')
+          ? new Response(JSON.stringify({ service }))
+          : new Response(JSON.stringify({ photographer: PROFILE })),
+      ),
+    )
+    renderAt('/p/kigali-lens/portraits')
     expect(await screen.findByRole('heading', { level: 1, name: 'Portraits' })).toBeInTheDocument()
-    expect(fetch).toHaveBeenCalledWith('/api/services/portraits', expect.anything())
+    expect(fetch).toHaveBeenCalledWith('/api/photographers/kigali-lens/services/portraits', expect.anything())
   })
 
-  it('has nothing below a service page — /services/portraits/extra is a 404', () => {
-    renderAt('/services/portraits/extra')
+  it('has nothing below a service page — /p/kigali-lens/portraits/extra is a 404', () => {
+    renderAt('/p/kigali-lens/portraits/extra')
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
   })
 
-  it('declares the two public service paths', () => {
-    expect(declaredPaths()).toContain('/services')
-    expect(declaredPaths()).toContain('/services/:slug')
+  it('redirects the old service list, /services, to /photographers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ photographers: [] }))))
+    const router = createMemoryRouter(routes, { initialEntries: ['/services'] })
+    render(<RouterProvider router={router} />)
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Photographers' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/photographers')
+  })
+
+  it('has no service page without its photographer — /services/:slug is a 404 and asks the API nothing', () => {
+    renderAt('/services/portraits')
+    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('declares the public catalogue paths, and no service path outside a photographer', () => {
+    expect(declaredPaths()).toEqual(expect.arrayContaining(['/photographers', '/p/:handle', '/p/:handle/:slug', '/services']))
+    expect(declaredPaths()).not.toContain('/services/:slug')
   })
 
   it('declares no route whose first segment is a locale', () => {

@@ -3367,9 +3367,29 @@
           }
         }
       },
+      "PublicCancellationPolicy": {
+        "type": "object",
+        "description": "The client cancellation terms the photographer offers new bookings, as\nset now. A booking snapshots them when it is made, so a booking's own\npages state the booking's terms (`CancellationTerms`), not these.\n",
+        "required": [
+          "cutoffHours",
+          "bookingFeeRefundable"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "cutoffHours": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "A client may cancel until this many hours before the shoot starts. 0 means any time before it."
+          },
+          "bookingFeeRefundable": {
+            "type": "boolean",
+            "description": "Whether a client's own cancellation refunds the booking fee. A photographer cancelling always refunds in full."
+          }
+        }
+      },
       "PublicPhotographerProfile": {
         "type": "object",
-        "description": "A photographer's public profile. An allowlist: no status, no login email,\nno operating settings. `email` is the contact address the photographer\nchose to publish, or null -- never their login.\n",
+        "description": "A photographer's public profile. An allowlist: no status, no login email,\nno operating settings. `email` is the contact address the photographer\nchose to publish, or null -- never their login. `cancellationPolicy` is\nthe one setting on it: the terms a new booking would be made under.\n",
         "required": [
           "handle",
           "displayName",
@@ -3377,7 +3397,8 @@
           "contactPhone",
           "whatsappPhone",
           "email",
-          "coverImageUrl"
+          "coverImageUrl",
+          "cancellationPolicy"
         ],
         "additionalProperties": false,
         "properties": {
@@ -3421,6 +3442,9 @@
               "null"
             ],
             "format": "uri"
+          },
+          "cancellationPolicy": {
+            "$ref": "#/components/schemas/PublicCancellationPolicy"
           }
         }
       },

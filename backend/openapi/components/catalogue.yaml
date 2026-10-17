@@ -17,8 +17,9 @@ schemas:
     description: |
       A photographer's public profile. An allowlist: no status, no login email,
       no operating settings. `email` is the contact address the photographer
-      chose to publish, or null -- never their login.
-    required: [handle, displayName, bio, contactPhone, whatsappPhone, email, coverImageUrl]
+      chose to publish, or null -- never their login. `cancellationPolicy` is
+      the one setting on it: the terms a new booking would be made under.
+    required: [handle, displayName, bio, contactPhone, whatsappPhone, email, coverImageUrl, cancellationPolicy]
     additionalProperties: false
     properties:
       handle: { type: string, examples: [kigali-lens] }
@@ -28,6 +29,24 @@ schemas:
       whatsappPhone: { type: [string, 'null'] }
       email: { type: [string, 'null'], format: email }
       coverImageUrl: { type: [string, 'null'], format: uri }
+      cancellationPolicy: { $ref: '#/schemas/PublicCancellationPolicy' }
+
+  PublicCancellationPolicy:
+    type: object
+    description: |
+      The client cancellation terms the photographer offers new bookings, as
+      set now. A booking snapshots them when it is made, so a booking's own
+      pages state the booking's terms (`CancellationTerms`), not these.
+    required: [cutoffHours, bookingFeeRefundable]
+    additionalProperties: false
+    properties:
+      cutoffHours:
+        type: integer
+        minimum: 0
+        description: A client may cancel until this many hours before the shoot starts. 0 means any time before it.
+      bookingFeeRefundable:
+        type: boolean
+        description: Whether a client's own cancellation refunds the booking fee. A photographer cancelling always refunds in full.
 
   PublicPackage:
     type: object

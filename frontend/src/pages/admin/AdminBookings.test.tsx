@@ -50,8 +50,8 @@ const CANCELLED: BookingListRow = {
   ...CONFIRMED,
   id: 'b2',
   reference: 'BKY-2701-00043',
-  status: 'cancelled_by_admin',
-  stage: 'cancelled_by_admin',
+  status: 'cancelled_by_photographer',
+  stage: 'cancelled_by_photographer',
   startsAt: '2027-01-05T12:00:00.000Z',
   endsAt: '2027-01-05T13:30:00.000Z',
   contactName: 'Eric Habimana',
@@ -175,6 +175,16 @@ describe('the list', () => {
     expect(first).toHaveTextContent('Confirmed')
     expect(second).toHaveTextContent('Cancelled by you')
     expect(third).toHaveTextContent('No-show')
+  })
+
+  it('names a booking the platform cancelled apart from one the photographer cancelled (brief decision 7)', async () => {
+    const platform = { ...CANCELLED, status: 'cancelled_by_platform', stage: 'cancelled_by_platform' as const }
+    stubFetch(() => json({ ...PAGE, bookings: [platform], total: 1 }))
+    renderAt()
+
+    const [only] = await rows()
+    expect(only).toHaveTextContent('Cancelled by Bookly')
+    expect(only).not.toHaveTextContent('Cancelled by you')
   })
 
   it('explains every stage, and what to do about it, beside the status filter, by click or keyboard', async () => {

@@ -399,21 +399,26 @@
         "minLeadTimeMinutes": "Minimum notice (minutes)",
         "holdMinutes": "Hold time (minutes)",
         "bufferMinutes": "Buffer between shoots (minutes)",
-        "deliveryExpiryDays": "Photo link lasts (days)"
+        "deliveryExpiryDays": "Photo link lasts (days)",
+        "clientCancelCutoffHours": "Client cancellation cut-off (hours)",
+        "bookingFeeRefundableOnClientCancel": "Refund the booking fee when a client cancels"
       },
       "hints": {
         "bookingFeePercent": "The share of the total paid now to secure a date. A service can override it.",
         "minLeadTimeMinutes": "How far ahead a client must book. 1440 is one day.",
         "holdMinutes": "How long a slot is held while a client pays the booking fee.",
         "bufferMinutes": "Packing-up time kept free after every shoot.",
-        "deliveryExpiryDays": "How long a photo link keeps working after you send it."
+        "deliveryExpiryDays": "How long a photo link keeps working after you send it.",
+        "clientCancelCutoffHours": "How long before a shoot clients can no longer cancel. 0 lets them cancel any time before it.",
+        "bookingFeeRefundableOnClientCancel": "Clients see this before they book. When you cancel, the client is always refunded in full."
       },
       "invalid": {
         "bookingFeePercent": "Enter a percentage from 0 to 100, with at most one decimal place.",
         "minLeadTimeMinutes": "Enter a whole number of minutes, 0 or more.",
         "holdMinutes": "Enter a whole number of minutes, 1 or more.",
         "bufferMinutes": "Enter a whole number of minutes, 0 or more.",
-        "deliveryExpiryDays": "Enter a whole number of days, 1 or more."
+        "deliveryExpiryDays": "Enter a whole number of days, 1 or more.",
+        "clientCancelCutoffHours": "Enter a whole number of hours, 0 or more."
       }
     },
     "bookings": {
@@ -447,7 +452,9 @@
         "no_show": "No-show",
         "expired": "Expired",
         "cancelled_by_client": "Cancelled by client",
-        "cancelled_by_admin": "Cancelled by you"
+        "cancelled_by_admin": "Cancelled by you",
+        "cancelled_by_photographer": "Cancelled by you",
+        "cancelled_by_platform": "Cancelled by Bookly"
       },
       "stage": {
         "awaiting_payment": "Waiting for payment",
@@ -459,7 +466,9 @@
         "no_show": "No-show",
         "expired": "Expired",
         "cancelled_by_client": "Cancelled by client",
-        "cancelled_by_admin": "Cancelled by you"
+        "cancelled_by_admin": "Cancelled by you",
+        "cancelled_by_photographer": "Cancelled by you",
+        "cancelled_by_platform": "Cancelled by Bookly"
       },
       "stageHelp": {
         "awaiting_payment": "Held for the client while they pay the booking fee.",
@@ -471,7 +480,9 @@
         "no_show": "You recorded that the client did not come.",
         "expired": "The hold ran out before the booking fee was paid.",
         "cancelled_by_client": "The client cancelled.",
-        "cancelled_by_admin": "You cancelled it."
+        "cancelled_by_admin": "You cancelled it.",
+        "cancelled_by_photographer": "You cancelled it.",
+        "cancelled_by_platform": "Bookly cancelled it."
       },
       "stageLegend": {
         "label": "What the statuses mean",
@@ -492,7 +503,9 @@
         "no_show": "Nothing left to do.",
         "expired": "Nothing to do: the time is free again.",
         "cancelled_by_client": "Check the payments for anything flagged to refund.",
-        "cancelled_by_admin": "Send the refund, then record it on the booking."
+        "cancelled_by_admin": "Send the refund, then record it on the booking.",
+        "cancelled_by_photographer": "Send the refund, then record it on the booking.",
+        "cancelled_by_platform": "Check the payments for anything flagged to refund."
       },
       "pager": {
         "label": "Pages",
@@ -810,7 +823,9 @@
       "no_show": "Recorded as missed",
       "expired": "Expired",
       "cancelled_by_client": "Cancelled by you",
-      "cancelled_by_admin": "Cancelled by the photographer"
+      "cancelled_by_admin": "Cancelled by the photographer",
+      "cancelled_by_photographer": "Cancelled by the photographer",
+      "cancelled_by_platform": "Cancelled by Bookly"
     },
     "labels": {
       "reference": "Booking reference",
@@ -847,7 +862,9 @@
       "keep": "Keep my booking",
       "cancelling": "Cancelling…",
       "failed": "We could not cancel your booking. Check your connection and try again.",
-      "notCancellable": "This booking can no longer be cancelled. Contact the photographer if you need to change it."
+      "notCancellable": "This booking can no longer be cancelled. Contact the photographer if you need to change it.",
+      "warningRefundable": "If you cancel, your booking fee of {{fee}} is refunded to you, and the time is released for someone else to book.",
+      "closed": "Cancelling closed on {{date}}, {{time}}, Kigali time. Contact the photographer if you need to change this booking."
     },
     "cancelled": {
       "title": "This booking is cancelled",
@@ -863,7 +880,9 @@
       "no_show": "Recorded as missed",
       "expired": "Expired",
       "cancelled_by_client": "Cancelled by you",
-      "cancelled_by_admin": "Cancelled by the photographer"
+      "cancelled_by_admin": "Cancelled by the photographer",
+      "cancelled_by_photographer": "Cancelled by the photographer",
+      "cancelled_by_platform": "Cancelled by Bookly"
     },
     "stageHelp": {
       "awaiting_payment": "Your time is held while you pay the booking fee.",
@@ -874,7 +893,9 @@
       "no_show": "The photographer recorded that the shoot did not take place.",
       "expired": "The hold ran out before the booking fee was paid.",
       "cancelled_by_client": "You cancelled this booking.",
-      "cancelled_by_admin": "The photographer cancelled this booking."
+      "cancelled_by_admin": "The photographer cancelled this booking.",
+      "cancelled_by_photographer": "The photographer cancelled this booking.",
+      "cancelled_by_platform": "Bookly cancelled this booking."
     },
     "stageLegend": {
       "label": "What the statuses mean",
@@ -914,7 +935,8 @@
       "label": "Main",
       "bookNow": "Book now",
       "adminLogin": "Admin login",
-      "myBooking": "My booking"
+      "myBooking": "My booking",
+      "photographers": "Photographers"
     },
     "footer": {
       "label": "Footer",
@@ -922,7 +944,8 @@
       "services": "Browse services",
       "note": "Booking and payment for photography sessions in Kigali.",
       "book": "Book",
-      "about": "About"
+      "about": "About",
+      "photographers": "Browse photographers"
     },
     "theme": {
       "system": "Theme: System",
@@ -951,7 +974,8 @@
         "timezone": "Kigali time",
         "service": "Photo shoot",
         "held": "Your date is held"
-      }
+      },
+      "photographers": "Photographers you can book"
     },
     "preview": {
       "title": "What you can book",
@@ -996,7 +1020,11 @@
         "title": "One private link, yours",
         "body": "Your booking lives on a link only you are emailed. You can check it, pay the balance or cancel from there."
       },
-      "eyebrow": "03 — Good to know"
+      "eyebrow": "03 — Good to know",
+      "policy": {
+        "title": "Cancellation terms, up front",
+        "body": "Each photographer sets whether the booking fee is refunded if you cancel, and until when you can. You see their terms before you book, and again before you pay."
+      }
     },
     "closing": {
       "title": "Ready when you are.",
@@ -1007,6 +1035,37 @@
       "title": "Find your booking any time.",
       "body": "Lost the email? Enter the address you booked with and we will send you a fresh link to your booking page.",
       "cta": "Find my booking"
+    },
+    "photographers": {
+      "eyebrow": "01 — Photographers",
+      "title": "Who you can book",
+      "more": "Browse photographers"
+    }
+  },
+  "photographers": {
+    "title": "Photographers",
+    "intro": "Choose a photographer to see their services and prices.",
+    "loading": "Loading…",
+    "loadFailed": "Could not load photographers. Check your connection and try again.",
+    "loadPhotographerFailed": "Could not load this photographer. Check your connection and try again.",
+    "retry": "Try again",
+    "empty": "No photographers are available to book right now.",
+    "viewServices": "See services",
+    "all": "All photographers",
+    "servicesEyebrow": "Services"
+  },
+  "cancellation": {
+    "policy": {
+      "refundable": "The booking fee is refunded if you cancel before the shoot.",
+      "refundableCutoff_one": "The booking fee is refunded if you cancel at least {{count}} hour before the shoot.",
+      "refundableCutoff_other": "The booking fee is refunded if you cancel at least {{count}} hours before the shoot.",
+      "nonRefundableCutoff_one": "The booking fee is non-refundable if you cancel. You can cancel up to {{count}} hour before the shoot.",
+      "nonRefundableCutoff_other": "The booking fee is non-refundable if you cancel. You can cancel up to {{count}} hours before the shoot."
+    },
+    "terms": {
+      "refundable": "The booking fee is refunded if you cancel.",
+      "refundableUntil": "The booking fee is refunded if you cancel before {{date}}, {{time}}, Kigali time.",
+      "nonRefundableUntil": "The booking fee is non-refundable if you cancel. You can cancel until {{date}}, {{time}}, Kigali time."
     }
   }
 }

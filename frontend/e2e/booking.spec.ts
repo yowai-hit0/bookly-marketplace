@@ -27,6 +27,18 @@ const PORTRAITS = {
   bookingFeeRate: 0.4,
 }
 
+/** The photographer the catalogue belongs to (brief decision 9): no cut-off, the booking fee kept. */
+const PROFILE = {
+  handle: 'kigali-lens',
+  displayName: 'Kigali Lens',
+  coverImageUrl: null,
+  bio: null,
+  contactPhone: null,
+  whatsappPhone: null,
+  email: null,
+  cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+}
+
 /** Wednesday 7 October's starts, Kigali wall time. No other day has any. */
 const WEDNESDAY_STARTS = ['09:00', '09:30', '10:00']
 const WEDNESDAY = 'Wednesday, 7 October 2026'
@@ -74,7 +86,11 @@ async function mockApi(page: Page, replies: ((taken: Set<string>) => BookingRepl
       const request = route.request()
       const url = new URL(request.url())
       authorizations.push(await request.headerValue('authorization'))
-      if (request.method() === 'GET' && url.pathname === `/api/services/${PORTRAITS.slug}`) {
+      if (request.method() === 'GET' && url.pathname === '/api/photographers/kigali-lens') {
+        await route.fulfill({ json: { photographer: PROFILE } })
+        return
+      }
+      if (request.method() === 'GET' && url.pathname === `/api/photographers/kigali-lens/services/${PORTRAITS.slug}`) {
         log.push('service')
         await route.fulfill({ json: { service: PORTRAITS } })
         return
@@ -140,7 +156,7 @@ const field = {
 
 /** Standard + Extra hour, Wednesday at `time`, with the mouse. */
 async function chooseByMouse(page: Page, time = '09:30') {
-  await page.goto('/services/portraits')
+  await page.goto('/p/kigali-lens/portraits')
   await page.getByRole('radio', { name: /^Standard/ }).check()
   await page.getByRole('checkbox', { name: /^Extra hour/ }).check()
   await picker(page).getByRole('button', { name: `${WEDNESDAY}, 3 times available`, exact: true }).click()
@@ -171,7 +187,7 @@ test.beforeEach(async ({ page }) => {
 
 test('books by keyboard alone: package, add-on, date, start, form, consent, Confirm, held page', async ({ page }) => {
   const { posts, authorizations } = await mockApi(page, [() => ({ status: 201, json: { booking: held(NINE_THIRTY, '2026-10-07T09:00:00.000Z') } })])
-  await page.goto('/services/portraits')
+  await page.goto('/p/kigali-lens/portraits')
   await expect(page.getByRole('heading', { level: 1, name: 'Portraits' })).toBeVisible()
 
   // The client shell (2026-09-21) puts a header above every page, so the first

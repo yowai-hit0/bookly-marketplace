@@ -1,4 +1,4 @@
-import type { Addon, Package, Photographer, Prisma, PrismaClient, Service } from '@prisma/client';
+import type { Addon, Package, Prisma, PrismaClient, Service } from '@prisma/client';
 import { BOOKABLE_PHOTOGRAPHER } from '../photographers/bookable.js';
 import { getPhotographerSettings } from '../settings/index.js';
 
@@ -28,15 +28,31 @@ export type PublicPhotographerSummary = {
 };
 
 /**
+ * The client cancellation terms a photographer offers new bookings (R1.8), so
+ * the pages before a booking can state them. A booking snapshots these at
+ * creation, so what its own pages say comes from the booking, not from here.
+ */
+export type PublicCancellationPolicy = {
+  /** A client may cancel until starts_at minus this many hours; 0 = any time before the shoot. */
+  cutoffHours: number;
+  /** Whether a client's own cancellation refunds the booking fee. */
+  bookingFeeRefundable: boolean;
+};
+
+/**
  * A photographer's public profile. `email` is the public contact address they
  * chose (`contact_email`), never their login: the login is an account
  * identifier, and publishing it would hand out half of a credential.
+ *
+ * The cancellation policy is the one setting on it: it is a term of sale the
+ * client agrees to, not an operating value.
  */
 export type PublicPhotographerProfile = PublicPhotographerSummary & {
   bio: string | null;
   contactPhone: string | null;
   whatsappPhone: string | null;
   email: string | null;
+  cancellationPolicy: PublicCancellationPolicy;
 };
 
 export type PublicPackage = {
@@ -98,6 +114,7 @@ const PROFILE_SELECT = {
   whatsappPhone: true,
   contactEmail: true,
   coverImageUrl: true,
+  setting: { select: { clientCancelCutoffHours: true, bookingFeeRefundableOnClientCancel: true } },
 } satisfies Prisma.PhotographerSelect;
 
 /** The `photographer_handle_format` CHECK: a handle it could not hold names nobody and is not looked up. */
@@ -171,7 +188,10 @@ function findSharedAddons(prisma: PrismaClient, photographerId: string): Promise
   return prisma.addon.findMany({ where: { photographerId, isActive: true, serviceId: null }, orderBy: [...CATALOGUE_ORDER] });
 }
 
-function toPublicProfile(photographer: Pick<Photographer, keyof typeof PROFILE_SELECT>): PublicPhotographerProfile {
+function toPublicProfile(photographer: Prisma.PhotographerGetPayload<{ select: typeof PROFILE_SELECT }>): PublicPhotographerProfile {
+  // The signup transaction creates the settings row with the photographer, so
+  // a missing one is a broken invariant, as getPhotographerSettings() treats it.
+  if (photographer.setting === null) throw new Error(`photographer ${photographer.id} has no settings row`);
   return {
     handle: photographer.handle,
     displayName: photographer.displayName,
@@ -180,6 +200,10 @@ function toPublicProfile(photographer: Pick<Photographer, keyof typeof PROFILE_S
     contactPhone: photographer.contactPhone,
     whatsappPhone: photographer.whatsappPhone,
     email: photographer.contactEmail,
+    cancellationPolicy: {
+      cutoffHours: photographer.setting.clientCancelCutoffHours,
+      bookingFeeRefundable: photographer.setting.bookingFeeRefundableOnClientCancel,
+    },
   };
 }
 
