@@ -605,7 +605,7 @@ describe('GET /api/availability access', () => {
   it('stays anonymous when the admin API is mounted beside it', async () => {
     const both = createApp({
       publicApi: { prisma, now: () => clock },
-      admin: { prisma, sessionSecret: 'public-availability-test-secret-at-least-32-characters', webOrigin: 'https://admin.bookly.example', now: () => clock },
+      auth: { prisma, sessionSecret: 'public-availability-test-secret-at-least-32-characters', webOrigin: 'https://admin.bookly.example', now: () => clock },
     });
 
     const res = await getAvailability(monthOf(catalogue.short), both);

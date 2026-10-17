@@ -1,14 +1,15 @@
 import type { AppUser } from '@prisma/client';
 
 /**
- * The only shape of a signed-in user that may leave the API (plan.md Task 7).
- * The studio endpoints still send it under the `admin` key in Phase 1, so the
- * frontend keeps working until Phase 2's `/api/studio/*` (brief decision 3).
+ * The only shape of a signed-in user that may leave the API (plan.md Task 7),
+ * in every area: the login and `/me` of the studio, the platform and the
+ * account all send it under the `user` key (Phase 2 decision 1).
  *
  * An explicit allowlist, never a spread with deletions: a column added to
  * `app_user` later must stay private until someone chooses to publish it.
- * `password_hash`, the reset and verification token hashes, `google_sub` and
- * the lockout state never appear.
+ * `password_hash`, the reset and verification token hashes, `google_sub`,
+ * `token_version` and the lockout state never appear. Nor does the role: a
+ * client knows it from the area it signed in to.
  */
 export type PublicUser = {
   id: string;

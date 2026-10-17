@@ -89,7 +89,9 @@ export type WorldOptions = {
 export async function seedWorld(prisma: PrismaClient, options: WorldOptions = {}): Promise<PaymentWorld> {
   await prisma.platformSetting.create({ data: { id: 1 } });
   if (options.platformAdmin ?? options.admin ?? true) {
-    await prisma.appUser.create({ data: { email: PLATFORM_ADMIN_EMAIL, role: 'platform_admin', passwordHash: 'not-a-real-hash' } });
+    await prisma.appUser.create({
+      data: { email: PLATFORM_ADMIN_EMAIL, role: 'platform_admin', passwordHash: 'not-a-real-hash', emailVerifiedAt: new Date('2026-09-01T06:00:00Z') },
+    });
   }
   const photographer = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: PHOTOGRAPHER_NAME });
   const client = await prisma.client.create({ data: { fullName: CLIENT.name, email: CLIENT.email, phone: CLIENT.phone } });

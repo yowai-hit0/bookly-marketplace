@@ -35,8 +35,6 @@ export type OutboxKind = (typeof OUTBOX_KINDS)[number];
 export const RESERVED_EMAIL_TEMPLATES = [
   'account_verify_email',
   'photographer_application_received',
-  'photographer_approved',
-  'photographer_suspended',
   'subscription_reminder',
   'subscription_receipt',
   'subscription_expired',
@@ -70,6 +68,9 @@ export const EMAIL_TEMPLATES = [
   'account_password_reset',
   /** Sign-in lockout today; a changed payout method in Phase 4 (R4.1). */
   'account_security_alert',
+  /** To a photographer: a platform admin approved or suspended their studio (Phase 2 decision 7). */
+  'photographer_approved',
+  'photographer_suspended',
   ...RESERVED_EMAIL_TEMPLATES,
 ] as const;
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];

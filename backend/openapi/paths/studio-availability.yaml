@@ -1,9 +1,9 @@
-# All require the admin bearer token (inherited from the root `security`).
+# All require the studio bearer token (inherited from the root `security`).
 
 workingHours:
   get:
     operationId: listWorkingHours
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: List working hours
     responses:
       '200':
@@ -17,18 +17,18 @@ workingHours:
               properties:
                 workingHours:
                   type: array
-                  items: { $ref: ../components/admin.yaml#/schemas/WorkingHours }
+                  items: { $ref: ../components/studio.yaml#/schemas/WorkingHours }
       '401':
         $ref: ../components/common.yaml#/responses/Unauthorized
   post:
     operationId: createWorkingHours
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: Add a weekly rule or dated override
     requestBody:
       required: true
       content:
         application/json:
-          schema: { $ref: ../components/admin.yaml#/schemas/WorkingHoursWrite }
+          schema: { $ref: ../components/studio.yaml#/schemas/WorkingHoursWrite }
     responses:
       '201':
         description: Created.
@@ -39,7 +39,7 @@ workingHours:
               required: [workingHours]
               additionalProperties: false
               properties:
-                workingHours: { $ref: ../components/admin.yaml#/schemas/WorkingHours }
+                workingHours: { $ref: ../components/studio.yaml#/schemas/WorkingHours }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -59,7 +59,7 @@ workingHours:
 workingHoursItem:
   put:
     operationId: replaceWorkingHours
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: Replace a working-hours row
     description: Replaces the whole row, so a rule can move between a weekday and a date.
     parameters:
@@ -68,7 +68,7 @@ workingHoursItem:
       required: true
       content:
         application/json:
-          schema: { $ref: ../components/admin.yaml#/schemas/WorkingHoursWrite }
+          schema: { $ref: ../components/studio.yaml#/schemas/WorkingHoursWrite }
     responses:
       '200':
         description: Replaced.
@@ -79,7 +79,7 @@ workingHoursItem:
               required: [workingHours]
               additionalProperties: false
               properties:
-                workingHours: { $ref: ../components/admin.yaml#/schemas/WorkingHours }
+                workingHours: { $ref: ../components/studio.yaml#/schemas/WorkingHours }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -99,7 +99,7 @@ workingHoursItem:
             schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
   delete:
     operationId: deleteWorkingHours
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: Delete a working-hours row
     description: Deleting a weekday rule closes that weekday; deleting an override restores the weekly rule for its date.
     parameters:
@@ -115,11 +115,11 @@ workingHoursItem:
 blocks:
   get:
     operationId: listBlocks
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: List blocks
     responses:
       '200':
-        description: Blocked time, with reasons (admin-only).
+        description: Blocked time, with reasons (studio-only).
         content:
           application/json:
             schema:
@@ -129,18 +129,18 @@ blocks:
               properties:
                 blocks:
                   type: array
-                  items: { $ref: ../components/admin.yaml#/schemas/Block }
+                  items: { $ref: ../components/studio.yaml#/schemas/Block }
       '401':
         $ref: ../components/common.yaml#/responses/Unauthorized
   post:
     operationId: createBlock
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: Block time
     requestBody:
       required: true
       content:
         application/json:
-          schema: { $ref: ../components/admin.yaml#/schemas/BlockWrite }
+          schema: { $ref: ../components/studio.yaml#/schemas/BlockWrite }
     responses:
       '201':
         description: Created.
@@ -151,7 +151,7 @@ blocks:
               required: [block]
               additionalProperties: false
               properties:
-                block: { $ref: ../components/admin.yaml#/schemas/Block }
+                block: { $ref: ../components/studio.yaml#/schemas/Block }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -160,7 +160,7 @@ blocks:
         description: "The range covers confirmed bookings; resend with `confirm: true` to save it anyway."
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/BlockConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/BlockConflict }
       '422':
         description: A range whose end is not after its start.
         content:
@@ -170,7 +170,7 @@ blocks:
 blocksItem:
   put:
     operationId: updateBlock
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: Change a block
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -178,7 +178,7 @@ blocksItem:
       required: true
       content:
         application/json:
-          schema: { $ref: ../components/admin.yaml#/schemas/BlockWrite }
+          schema: { $ref: ../components/studio.yaml#/schemas/BlockWrite }
     responses:
       '200':
         description: Updated.
@@ -189,7 +189,7 @@ blocksItem:
               required: [block]
               additionalProperties: false
               properties:
-                block: { $ref: ../components/admin.yaml#/schemas/Block }
+                block: { $ref: ../components/studio.yaml#/schemas/Block }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -200,7 +200,7 @@ blocksItem:
         description: "The range covers confirmed bookings; resend with `confirm: true`."
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/BlockConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/BlockConflict }
       '422':
         description: A range whose end is not after its start.
         content:
@@ -208,7 +208,7 @@ blocksItem:
             schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
   delete:
     operationId: deleteBlock
-    tags: [Admin availability]
+    tags: [Studio availability]
     summary: Delete a block
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -223,19 +223,19 @@ blocksItem:
 settings:
   get:
     operationId: getSettings
-    tags: [Admin settings]
+    tags: [Studio settings]
     summary: The photographer's operating values and cancellation policy
     responses:
       '200':
         description: Settings.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/SettingsEnvelope }
+            schema: { $ref: ../components/studio.yaml#/schemas/SettingsEnvelope }
       '401':
         $ref: ../components/common.yaml#/responses/Unauthorized
   patch:
     operationId: updateSettings
-    tags: [Admin settings]
+    tags: [Studio settings]
     summary: Change settings
     description: |
       Any subset of the six. Each is range-checked here, so a value out of
@@ -245,13 +245,13 @@ settings:
       required: true
       content:
         application/json:
-          schema: { $ref: ../components/admin.yaml#/schemas/SettingsPatch }
+          schema: { $ref: ../components/studio.yaml#/schemas/SettingsPatch }
     responses:
       '200':
         description: The settings as they now stand.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/SettingsEnvelope }
+            schema: { $ref: ../components/studio.yaml#/schemas/SettingsEnvelope }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -265,7 +265,7 @@ settings:
 calendar:
   get:
     operationId: getCalendar
-    tags: [Admin calendar]
+    tags: [Studio calendar]
     summary: Bookings, holds and blocks for a range
     parameters:
       - name: from
@@ -282,7 +282,7 @@ calendar:
         description: The calendar.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/Calendar }
+            schema: { $ref: ../components/studio.yaml#/schemas/Calendar }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':

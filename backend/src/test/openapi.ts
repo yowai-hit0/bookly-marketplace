@@ -36,7 +36,7 @@ export const VENDORED_SPEC_PATH = join(HERE, '..', '..', '..', 'docs-site', 'ope
 
 export type SpecOperation = {
   method: string;
-  /** The Express-style path, e.g. `/api/admin/bookings/:id`. */
+  /** The Express-style path, e.g. `/api/studio/bookings/:id`. */
   path: string;
   operationId: string;
 };
@@ -83,14 +83,15 @@ function specPathToExpress(path: string): string {
 }
 
 /**
- * Where each router function is mounted, mirroring `app.ts` and
- * `routes/admin.ts`. The key is the exported function name; the value is the
- * full prefix its `router.<method>('<subpath>')` calls hang off.
+ * Where each router function is mounted, mirroring `app.ts`, `routes/studio.ts`
+ * and `routes/platform.ts`. The key is the exported function name; the value is
+ * the full prefix its `router.<method>('<subpath>')` calls hang off -- or
+ * several, for a router mounted once per area.
  *
  * A router found in `src/routes/` whose function is not named here fails the
  * parity test, so a new router cannot be added without being placed on the map.
  */
-const MOUNTS: Record<string, string> = {
+const MOUNTS: Record<string, string | readonly string[]> = {
   healthRouter: '/api',
   publicCatalogueRouter: '/api',
   availabilityRouter: '/api/availability',
@@ -100,20 +101,23 @@ const MOUNTS: Record<string, string> = {
   emailConfirmationsRouter: '/api/email-confirmations',
   clientBookingRouter: '/api/booking',
   paymentWebhooksRouter: '/api/webhooks',
-  adminRouter: '/api/admin',
-  // Mounted inside adminRouter (routes/admin.ts).
-  workingHoursRouter: '/api/admin/working-hours',
-  blocksRouter: '/api/admin/blocks',
-  settingsRouter: '/api/admin/settings',
-  calendarRouter: '/api/admin/calendar',
-  adminBookingsRouter: '/api/admin',
-  catalogueRouter: '/api/admin',
+  studioRouter: '/api/studio',
+  platformRouter: '/api/platform',
+  // Login and password reset, mounted inside each area's router (Phase 2 decision 1).
+  areaAuthRouter: ['/api/studio/auth', '/api/platform/auth'],
+  // Mounted inside studioRouter (routes/studio.ts).
+  workingHoursRouter: '/api/studio/working-hours',
+  blocksRouter: '/api/studio/blocks',
+  settingsRouter: '/api/studio/settings',
+  calendarRouter: '/api/studio/calendar',
+  studioBookingsRouter: '/api/studio',
+  catalogueRouter: '/api/studio',
 };
 
 /**
  * Router functions found in `src/routes/` that are not themselves a mount: they
- * compose other routers. `adminRouter` is NOT here — it both composes the admin
- * sub-routers and defines `/auth/*` and `/me` directly, which must be scanned.
+ * compose other routers. `studioRouter` is NOT here — it both composes the studio
+ * sub-routers and defines `/me` directly, which must be scanned.
  */
 const NOT_A_MOUNT = new Set<string>([]);
 
@@ -133,13 +137,14 @@ export function scanRoutes(): { routes: ScannedRoute[]; unmapped: string[] } {
     const source = readFileSync(join(ROUTES_DIR, file), 'utf8');
 
     for (const segment of splitByRouterFunction(source)) {
-      const prefix = MOUNTS[segment.fn];
+      const mount = MOUNTS[segment.fn];
+      const prefixes = mount === undefined ? [] : typeof mount === 'string' ? [mount] : mount;
       for (const route of routerCalls(segment.body, segment.fn)) {
-        if (prefix === undefined) {
+        if (prefixes.length === 0) {
           unmapped.add(segment.fn);
           continue;
         }
-        routes.push({ method: route.method, path: joinPath(prefix, route.subpath), file, fn: segment.fn });
+        for (const prefix of prefixes) routes.push({ method: route.method, path: joinPath(prefix, route.subpath), file, fn: segment.fn });
       }
     }
   }

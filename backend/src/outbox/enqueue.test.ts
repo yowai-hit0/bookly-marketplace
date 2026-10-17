@@ -285,7 +285,7 @@ describe('the vocabularies and the CHECK constraints', () => {
     expect([...SENDABLE_EMAIL_TEMPLATES, ...RESERVED_EMAIL_TEMPLATES].sort()).toEqual([...EMAIL_TEMPLATES].sort());
     expect(SENDABLE_EMAIL_TEMPLATES.filter((template) => (RESERVED_EMAIL_TEMPLATES as readonly string[]).includes(template))).toEqual([]);
     expect(EMAIL_TEMPLATES).toHaveLength(24);
-    expect(SENDABLE_EMAIL_TEMPLATES).toHaveLength(16);
+    expect(SENDABLE_EMAIL_TEMPLATES).toHaveLength(18);
   });
 
   it('has retired admin_alert and admin_new_booking (marketplace-data-model.md §2.14)', () => {

@@ -8,7 +8,7 @@ import type { BookingStatus } from '../db/statuses.js';
 import { kigaliDate, parseOrReject } from './validation.js';
 
 /**
- * `/api/admin/working-hours` and `/api/admin/blocks` (plan.md Task 8, spec
+ * `/api/studio/working-hours` and `/api/studio/blocks` (plan.md Task 8, spec
  * §3.3, §6.3, §6.4, P-15, P-16). Mounted behind `requirePhotographer`, so
  * nothing here checks auth itself.
  *

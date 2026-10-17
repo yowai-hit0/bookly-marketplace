@@ -43,13 +43,19 @@ export class RequestLimiter {
 
 export type RateLimitRule = { limit: number; windowMs: number };
 
-/** The limited endpoints. Each gets its own limiter, so one cannot spend another's allowance. */
+/**
+ * The limited endpoints. Each gets its own limiter, so one cannot spend another's
+ * allowance. The three auth limits apply in every signed-in area (studio,
+ * platform, account; Phase 2 decision 8), each area counted under its own key
+ * (`areaIpKey`), so a burst at one area's login does not lock out another's.
+ */
 export type RateLimitName =
   | 'bookingsPerIp'
   | 'bookingsPerEmail'
   | 'paymentsPerIp'
   | 'loginPerIp'
   | 'passwordResetPerIp'
+  | 'passwordResetConfirmPerIp'
   | 'emailChangePerIp';
 
 const MINUTE = 60_000;
@@ -65,6 +71,9 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitName, RateLimitRule> = {
   paymentsPerIp: { limit: 10, windowMs: 10 * MINUTE },
   loginPerIp: { limit: 10, windowMs: 15 * MINUTE },
   passwordResetPerIp: { limit: 5, windowMs: 60 * MINUTE },
+  // A link's token is 256 bits, so this guards the Argon2 hash a valid one
+  // costs, not the token: room for a few typos of a too-short password.
+  passwordResetConfirmPerIp: { limit: 10, windowMs: 60 * MINUTE },
   emailChangePerIp: { limit: 10, windowMs: 60 * MINUTE },
 };
 
@@ -101,6 +110,11 @@ export function rateLimit(
     res.set('Retry-After', String(limiter.retryAfterSeconds(k, nowMs)));
     res.status(429).json({ error: 'rate_limited' });
   };
+}
+
+/** The client's address within one signed-in area: that area's own count. */
+export function areaIpKey(area: string): (req: Request) => string {
+  return (req) => `${area}:ip:${req.ip ?? 'unknown'}`;
 }
 
 /** The body's `email`, normalised as the booking route stores it; undefined when absent. */

@@ -318,7 +318,7 @@ describe('booking_confirmation', () => {
 
   it('account_password_reset carries its token only inside the reset link', () => {
     const email = renderFixture(emailFixture('account_password_reset'));
-    const resetUrl = `${FIXTURE_WEB_ORIGIN}/admin/reset-password#token=${FIXTURE_RESET_TOKEN}`;
+    const resetUrl = `${FIXTURE_WEB_ORIGIN}/studio/reset-password#token=${FIXTURE_RESET_TOKEN}`;
 
     expect(email.subject).not.toContain(FIXTURE_RESET_TOKEN);
     expect(hrefs(email.html)).toContain(resetUrl);
@@ -368,7 +368,7 @@ describe('links point at WEB_ORIGIN, never at the API host', () => {
     for (const fixture of EMAIL_FIXTURES) {
       const payload =
         fixture.name === 'account_password_reset'
-          ? { ...(fixture.payload as Payload), resetUrl: `${webOrigin}/admin/reset-password#token=${FIXTURE_RESET_TOKEN}` }
+          ? { ...(fixture.payload as Payload), resetUrl: `${webOrigin}/studio/reset-password#token=${FIXTURE_RESET_TOKEN}` }
           : fixture.payload;
       const email = renderEmail(fixture.template, payload, { webOrigin });
       for (const url of [...hrefs(email.html), ...urlsIn(email.text)]) {
@@ -379,11 +379,11 @@ describe('links point at WEB_ORIGIN, never at the API host', () => {
   });
 
   it.each([
-    ['the API host', 'http://localhost:4000/api/admin/reset-password#token=abc'],
-    ['another site', 'https://evil.example/admin/reset-password#token=abc'],
-    ['a look-alike subdomain', 'https://bookly.example.evil.example/admin/reset-password#token=abc'],
-    ['userinfo trickery', 'https://bookly.example@evil.example/admin/reset-password#token=abc'],
-    ['plain http on the same host', 'http://bookly.example/admin/reset-password#token=abc'],
+    ['the API host', 'http://localhost:4000/api/studio/reset-password#token=abc'],
+    ['another site', 'https://evil.example/studio/reset-password#token=abc'],
+    ['a look-alike subdomain', 'https://bookly.example.evil.example/studio/reset-password#token=abc'],
+    ['userinfo trickery', 'https://bookly.example@evil.example/studio/reset-password#token=abc'],
+    ['plain http on the same host', 'http://bookly.example/studio/reset-password#token=abc'],
     ['a javascript: URL', 'javascript:alert(document.cookie)'],
     ['not a URL at all', 'reset-password#token=abc'],
   ])('refuses a password_reset link on %s', (_case, resetUrl) => {
@@ -553,7 +553,7 @@ describe('payload validation', () => {
 
   it.each([
     ['photographer_alert', 'login_lockout', { failedLoginCount: 5, lockedUntil: '2026-03-14T15:00:00.000Z' }],
-    ['photographer_alert', 'password_reset', { resetUrl: `${FIXTURE_WEB_ORIGIN}/admin/reset-password#token=x`, expiresAt: '2026-12-31T22:00:00.000Z' }],
+    ['photographer_alert', 'password_reset', { resetUrl: `${FIXTURE_WEB_ORIGIN}/studio/reset-password#token=x`, expiresAt: '2026-12-31T22:00:00.000Z' }],
     ['platform_alert', 'payment_received', {}],
   ])('no longer renders %s as the old admin_alert %s', (template, variant, rest) => {
     expect(payloadError(() => render(template, { variant, ...rest })).message).toContain('variant');
@@ -1138,5 +1138,77 @@ describe('photographer_alert refund_due for cash (admin console fixes, item 7)',
     const email = renderWith('photographer_alert refund_due', { provider: 'mtn_momo_direct' });
 
     expect(email.text).toContain('Refund the client through MTN MoMo, then record the refund on the booking.');
+  });
+});
+
+/** The distinct links in an email's HTML: a button's href appears again in its fallback line. */
+function links(html: string): string[] {
+  return [...new Set(hrefs(html))];
+}
+
+describe('account_security_alert login_lockout per area (Phase 2 decision 9)', () => {
+  it.each([
+    ['studio', '/studio/login'],
+    ['platform', '/platform/login'],
+    ['account', '/account/login'],
+  ])('sends a %s login to %s', (area, path) => {
+    const email = renderWith('account_security_alert login_lockout', { area });
+
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}${path}`]);
+  });
+
+  it('reads a row enqueued before areas existed as the studio’s', () => {
+    const { template, payload } = withPayload('account_security_alert login_lockout', {});
+    delete payload.area;
+
+    expect(links(render(template, payload).html)).toEqual([`${FIXTURE_WEB_ORIGIN}/studio/login`]);
+  });
+
+  it('refuses an area that does not exist, naming the field', () => {
+    expect(payloadError(() => renderWith('account_security_alert login_lockout', { area: 'admin' })).message).toContain('area');
+  });
+});
+
+describe('photographer_approved and photographer_suspended (Phase 2 decision 7)', () => {
+  it('approved: greets the photographer, shows their public profile and opens the studio', () => {
+    const email = renderFixture(emailFixture('photographer_approved'));
+
+    expect(email.subject).toBe('Your studio is approved');
+    expect(email.text).toContain('Hello Kigali Lens,');
+    expect(email.text).toContain(`${FIXTURE_WEB_ORIGIN}/p/kigali-lens`);
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/studio`]);
+  });
+
+  it.each(['Kigali Lens', '../admin', 'UPPER', 'a', 'trailing-'])('approved: refuses the handle %j outside photographer_handle_format', (handle) => {
+    expect(payloadError(() => renderWith('photographer_approved', { handle })).message).toContain('handle');
+  });
+
+  it('suspended: gives the reason and promises existing bookings carry on', () => {
+    const email = renderFixture(emailFixture('photographer_suspended'));
+
+    expect(email.subject).toBe('Your studio has been suspended');
+    expect(email.text).toContain('Several clients reported shoots that did not happen.');
+    expect(email.text).toContain('Bookings you already have are not affected');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/studio`]);
+  });
+
+  it('suspended: escapes the reason the admin typed, and keeps it as text', () => {
+    const email = renderWith('photographer_suspended', { reason: '<script>alert(1)</script> & {{displayName}}' });
+
+    expect(email.html).not.toContain('<script>');
+    expect(email.html).toContain('&lt;script&gt;');
+    expect(email.text).toContain('<script>alert(1)</script> & {{displayName}}');
+  });
+
+  it.each([
+    ['photographer_approved', 'displayName'],
+    ['photographer_approved', 'handle'],
+    ['photographer_suspended', 'displayName'],
+    ['photographer_suspended', 'reason'],
+  ])('%s refuses a payload without %s', (name, field) => {
+    const { template, payload } = withPayload(name, {});
+    delete payload[field];
+
+    expect(payloadError(() => render(template, payload)).message).toContain(field);
   });
 });

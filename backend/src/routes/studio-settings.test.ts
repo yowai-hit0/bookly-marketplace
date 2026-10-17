@@ -5,14 +5,14 @@ import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { hashPassword } from '../auth/password.js';
-import { issueAdminToken } from '../auth/token.js';
+import { issueToken } from '../auth/token.js';
 import { createPrismaClient } from '../db/client.js';
 import { type PhotographerSettings, getPhotographerSettings, getPlatformSettings } from '../settings/index.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { type PaymentWorld, insertBooking, seedSecondPhotographer, seedWorld } from '../test/payment-fixtures.js';
 
 /**
- * `/api/admin/settings` over HTTP, against real PostgreSQL (plan.md Task 8;
+ * `/api/studio/settings` over HTTP, against real PostgreSQL (plan.md Task 8;
  * spec §3.3 step 2, P-15, P-24, P-30; data-model_v2.md §5.2, §5.9).
  *
  * The signed-in photographer's six values (brief decision 5,
@@ -41,7 +41,7 @@ let app: Express;
 const SECRET = 'admin-settings-test-secret-at-least-32-characters-long';
 const WEB_ORIGIN = 'https://admin.bookly.example';
 const NOW = new Date('2026-09-30T08:00:00Z');
-const PATH = '/api/admin/settings';
+const PATH = '/api/studio/settings';
 const INT4_MAX = 2_147_483_647;
 
 type Settings = PhotographerSettings;
@@ -75,10 +75,10 @@ beforeEach(async () => {
   await truncateAll(raw);
   world = await seedWorld(prisma);
   const user = await prisma.appUser.update({ where: { id: world.photographerUserId }, data: { passwordHash } });
-  token = (await issueAdminToken(SECRET, user, NOW)).token;
+  token = (await issueToken(SECRET, 'studio', user, NOW)).token;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
+    auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
   });
 });
 
@@ -113,7 +113,7 @@ function mine(): Promise<Settings> {
 
 // --- Auth -------------------------------------------------------------------------
 
-describe('/api/admin/settings without a valid token', () => {
+describe('/api/studio/settings without a valid token', () => {
   it.each<[string, string | null]>([
     ['no token', null],
     ['a garbage token', 'not.a.token'],
@@ -123,7 +123,7 @@ describe('/api/admin/settings without a valid token', () => {
     for (const res of responses) {
       expect(res.status).toBe(401);
       expect(res.body).toEqual({ error: 'unauthenticated' });
-      expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-admin"/);
+      expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-studio"/);
     }
     await expect(mine()).resolves.toEqual(DEFAULTS);
   });
@@ -131,7 +131,7 @@ describe('/api/admin/settings without a valid token', () => {
 
 // --- GET --------------------------------------------------------------------------
 
-describe('GET /api/admin/settings', () => {
+describe('GET /api/studio/settings', () => {
   it('returns exactly the six values a photographer sets, and not the platform’s hold', async () => {
     const res = await getRoute();
 
@@ -165,7 +165,7 @@ describe('GET /api/admin/settings', () => {
 
 // --- PATCH: values that save --------------------------------------------------------
 
-describe('PATCH /api/admin/settings', () => {
+describe('PATCH /api/studio/settings', () => {
   it.each<[keyof Settings, number | boolean]>([
     ['bookingFeeRate', 0.5],
     ['bookingFeeRate', 0],

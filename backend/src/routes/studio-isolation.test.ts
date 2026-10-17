@@ -4,7 +4,7 @@ import type pg from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { issueAdminToken } from '../auth/token.js';
+import { issueToken } from '../auth/token.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { loadSpec, scanRoutes, specOperations } from '../test/openapi.js';
@@ -59,7 +59,7 @@ let mine: { bookingId: string; reference: string; blockId: string; hoursId: stri
 const WEB_ORIGIN = 'https://admin.bookly.example';
 /** After every fixture shoot below has begun. */
 const NOW = new Date('2027-06-01T06:00:00Z');
-const ADMIN_PREFIX = '/api/admin/';
+const STUDIO_PREFIX = '/api/studio/';
 
 /** Everything of B's an id-taking route could name. */
 type TheirIds = {
@@ -101,11 +101,11 @@ beforeEach(async () => {
   mine = await seedMine(a);
 
   const user = await prisma.appUser.findUniqueOrThrow({ where: { id: a.photographerUserId } });
-  token = (await issueAdminToken(TEST_SECRET, user, NOW)).token;
+  token = (await issueToken(TEST_SECRET, 'studio', user, NOW)).token;
   // With a payment provider, so the session-fee route is mounted and swept too.
   app = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: TEST_SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
+    auth: { prisma, sessionSecret: TEST_SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
     publicApi: { prisma, now: () => NOW, payments: { provider: stubProvider(), secret: TEST_SECRET } },
   });
 });
@@ -201,57 +201,57 @@ const THEIR_BOOKING = { label: 'their booking', params: (ids: TheirIds) => ({ id
  * lookup, never by validation: a 400 or 422 here would be a failure, not a pass.
  */
 const SWEEP: Record<string, Case[]> = {
-  'PUT /api/admin/working-hours/:id': [{ label: 'their hours', params: (ids) => ({ id: ids.hoursId }), body: { weekday: 6, isOpen: false } }],
-  'DELETE /api/admin/working-hours/:id': [{ label: 'their hours', params: (ids) => ({ id: ids.hoursId }) }],
-  'PUT /api/admin/blocks/:id': [
+  'PUT /api/studio/working-hours/:id': [{ label: 'their hours', params: (ids) => ({ id: ids.hoursId }), body: { weekday: 6, isOpen: false } }],
+  'DELETE /api/studio/working-hours/:id': [{ label: 'their hours', params: (ids) => ({ id: ids.hoursId }) }],
+  'PUT /api/studio/blocks/:id': [
     {
       label: 'their block',
       params: (ids) => ({ id: ids.blockId }),
       body: { isAllDay: true, startDate: '2027-07-01', endDate: '2027-07-01', confirm: true },
     },
   ],
-  'DELETE /api/admin/blocks/:id': [{ label: 'their block', params: (ids) => ({ id: ids.blockId }) }],
-  'GET /api/admin/bookings/:id': [THEIR_BOOKING],
-  'POST /api/admin/bookings/:id/reschedule': [{ ...THEIR_BOOKING, body: { startsAt: '2027-07-05T09:00:00+02:00' } }],
-  'POST /api/admin/bookings/:id/cancel': [{ ...THEIR_BOOKING, body: { reason: 'Not mine to cancel' } }],
-  'POST /api/admin/bookings/:id/complete': [THEIR_BOOKING],
-  'POST /api/admin/bookings/:id/no-show': [THEIR_BOOKING],
-  'POST /api/admin/bookings/:id/resend-link': [THEIR_BOOKING],
-  'POST /api/admin/bookings/:id/addons': [
+  'DELETE /api/studio/blocks/:id': [{ label: 'their block', params: (ids) => ({ id: ids.blockId }) }],
+  'GET /api/studio/bookings/:id': [THEIR_BOOKING],
+  'POST /api/studio/bookings/:id/reschedule': [{ ...THEIR_BOOKING, body: { startsAt: '2027-07-05T09:00:00+02:00' } }],
+  'POST /api/studio/bookings/:id/cancel': [{ ...THEIR_BOOKING, body: { reason: 'Not mine to cancel' } }],
+  'POST /api/studio/bookings/:id/complete': [THEIR_BOOKING],
+  'POST /api/studio/bookings/:id/no-show': [THEIR_BOOKING],
+  'POST /api/studio/bookings/:id/resend-link': [THEIR_BOOKING],
+  'POST /api/studio/bookings/:id/addons': [
     { ...THEIR_BOOKING, label: 'their booking, their add-on', body: (ids) => ({ addonId: ids.sharedAddonId }) },
     { label: 'my booking, their add-on', params: () => ({ id: mine.bookingId }), body: (ids) => ({ addonId: ids.sharedAddonId }) },
   ],
-  'DELETE /api/admin/bookings/:id/addons/:addonId': [
+  'DELETE /api/studio/bookings/:id/addons/:addonId': [
     { label: 'their booking and line', params: (ids) => ({ id: ids.bookingId, addonId: ids.bookingAddonId }) },
     { label: 'my booking, their line', params: (ids) => ({ id: mine.bookingId, addonId: ids.bookingAddonId }) },
   ],
-  'POST /api/admin/bookings/:id/session-fee': [THEIR_BOOKING],
-  'POST /api/admin/bookings/:id/payments/cash': [{ ...THEIR_BOOKING, body: { amountRwf: 1_000 } }],
-  'PUT /api/admin/bookings/:id/delivery': [
+  'POST /api/studio/bookings/:id/session-fee': [THEIR_BOOKING],
+  'POST /api/studio/bookings/:id/payments/cash': [{ ...THEIR_BOOKING, body: { amountRwf: 1_000 } }],
+  'PUT /api/studio/bookings/:id/delivery': [
     { label: 'their completed booking', params: (ids) => ({ id: ids.completedBookingId }), body: { url: 'https://photos.example-host.com/s/mine' } },
   ],
-  'POST /api/admin/bookings/:id/delivery/send': [{ label: 'their completed booking', params: (ids) => ({ id: ids.completedBookingId }), body: {} }],
-  'POST /api/admin/bookings/:id/notes': [{ ...THEIR_BOOKING, body: { body: 'A note from the wrong studio', email: true } }],
-  'DELETE /api/admin/bookings/:id/notes/:noteId': [
+  'POST /api/studio/bookings/:id/delivery/send': [{ label: 'their completed booking', params: (ids) => ({ id: ids.completedBookingId }), body: {} }],
+  'POST /api/studio/bookings/:id/notes': [{ ...THEIR_BOOKING, body: { body: 'A note from the wrong studio', email: true } }],
+  'DELETE /api/studio/bookings/:id/notes/:noteId': [
     { label: 'their booking and note', params: (ids) => ({ id: ids.bookingId, noteId: ids.noteId }) },
     { label: 'my booking, their note', params: (ids) => ({ id: mine.bookingId, noteId: ids.noteId }) },
   ],
-  'POST /api/admin/payments/:id/refund': [{ label: 'their payment', params: (ids) => ({ id: ids.paymentId }), body: { reference: 'MOMO-123456' } }],
-  'PATCH /api/admin/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }), body: { nameEn: 'Mine now', isActive: false } }],
-  'DELETE /api/admin/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }) }],
-  'PATCH /api/admin/packages/:id': [{ label: 'their package', params: (ids) => ({ id: ids.packageId }), body: { priceRwf: 1 } }],
-  'DELETE /api/admin/packages/:id': [{ label: 'their package', params: (ids) => ({ id: ids.packageId }) }],
-  'PATCH /api/admin/addons/:id': [
+  'POST /api/studio/payments/:id/refund': [{ label: 'their payment', params: (ids) => ({ id: ids.paymentId }), body: { reference: 'MOMO-123456' } }],
+  'PATCH /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }), body: { nameEn: 'Mine now', isActive: false } }],
+  'DELETE /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }) }],
+  'PATCH /api/studio/packages/:id': [{ label: 'their package', params: (ids) => ({ id: ids.packageId }), body: { priceRwf: 1 } }],
+  'DELETE /api/studio/packages/:id': [{ label: 'their package', params: (ids) => ({ id: ids.packageId }) }],
+  'PATCH /api/studio/addons/:id': [
     { label: 'their own add-on', params: (ids) => ({ id: ids.ownAddonId }), body: { priceRwf: 1 } },
     { label: 'their shared add-on', params: (ids) => ({ id: ids.sharedAddonId }), body: { isActive: false } },
   ],
-  'DELETE /api/admin/addons/:id': [
+  'DELETE /api/studio/addons/:id': [
     { label: 'their own add-on', params: (ids) => ({ id: ids.ownAddonId }) },
     { label: 'their shared add-on', params: (ids) => ({ id: ids.sharedAddonId }) },
   ],
 };
 
-/** `/api/admin/bookings/:id/addons/:addonId` with its parameters filled in. */
+/** `/api/studio/bookings/:id/addons/:addonId` with its parameters filled in. */
 function fill(path: string, params: Record<string, string>): string {
   return path.replace(/:(\w+)/g, (_match, name: string) => {
     const value = params[name];
@@ -268,7 +268,7 @@ async function idTakingOperations(): Promise<string[]> {
   const spec = specOperations(await loadSpec()).map((op) => ({ method: op.method, path: op.path }));
   const code = scanRoutes().routes.map((route) => ({ method: route.method, path: route.path }));
   const keys = [...spec, ...code]
-    .filter((op) => op.path.startsWith(ADMIN_PREFIX) && op.path.includes('/:'))
+    .filter((op) => op.path.startsWith(STUDIO_PREFIX) && op.path.includes('/:'))
     .map((op) => `${op.method.toUpperCase()} ${op.path}`);
   return [...new Set(keys)].sort();
 }
@@ -310,8 +310,8 @@ describe('photographer A naming photographer B’s ids (T1.2)', () => {
 
   it('answers B’s ids exactly as it answers ids that name nothing', async () => {
     const unknown = '00000000-0000-4000-8000-000000000000';
-    const named = await request(app).get(`/api/admin/bookings/${theirs.bookingId}`).set('Authorization', `Bearer ${token}`);
-    const nothing = await request(app).get(`/api/admin/bookings/${unknown}`).set('Authorization', `Bearer ${token}`);
+    const named = await request(app).get(`/api/studio/bookings/${theirs.bookingId}`).set('Authorization', `Bearer ${token}`);
+    const nothing = await request(app).get(`/api/studio/bookings/${unknown}`).set('Authorization', `Bearer ${token}`);
 
     expect([named.status, named.body, named.headers['content-length']]).toEqual([nothing.status, nothing.body, nothing.headers['content-length']]);
   });
@@ -345,12 +345,12 @@ describe('A’s lists never hold B’s rows', () => {
   }
 
   it.each([
-    ['the bookings list', '/api/admin/bookings?pageSize=100'],
-    ['the bookings list, every stage', '/api/admin/bookings?pageSize=100&stage=confirmed&stage=in_progress&stage=needs_review&stage=completed&stage=closed'],
-    ['the calendar', '/api/admin/calendar?from=2027-05-01&to=2027-06-30'],
-    ['the blocks', '/api/admin/blocks'],
-    ['the working hours', '/api/admin/working-hours'],
-    ['the catalogue', '/api/admin/catalogue'],
+    ['the bookings list', '/api/studio/bookings?pageSize=100'],
+    ['the bookings list, every stage', '/api/studio/bookings?pageSize=100&stage=confirmed&stage=in_progress&stage=needs_review&stage=completed&stage=closed'],
+    ['the calendar', '/api/studio/calendar?from=2027-05-01&to=2027-06-30'],
+    ['the blocks', '/api/studio/blocks'],
+    ['the working hours', '/api/studio/working-hours'],
+    ['the catalogue', '/api/studio/catalogue'],
   ])('%s', async (_label, path) => {
     const res = await get(path);
 
@@ -359,21 +359,21 @@ describe('A’s lists never hold B’s rows', () => {
   });
 
   it('and they do hold A’s own, so the checks above are not vacuous', async () => {
-    expect((await get('/api/admin/bookings?pageSize=100')).text).toContain(mine.reference);
-    expect((await get('/api/admin/calendar?from=2027-05-01&to=2027-06-30')).text).toContain(mine.reference);
-    expect((await get('/api/admin/blocks')).text).toContain(mine.blockId);
-    expect((await get('/api/admin/working-hours')).text).toContain(mine.hoursId);
-    const catalogue = (await get('/api/admin/catalogue')).text;
+    expect((await get('/api/studio/bookings?pageSize=100')).text).toContain(mine.reference);
+    expect((await get('/api/studio/calendar?from=2027-05-01&to=2027-06-30')).text).toContain(mine.reference);
+    expect((await get('/api/studio/blocks')).text).toContain(mine.blockId);
+    expect((await get('/api/studio/working-hours')).text).toContain(mine.hoursId);
+    const catalogue = (await get('/api/studio/catalogue')).text;
     for (const id of [a.serviceId, a.packageId, a.ownAddonId, a.sharedAddonId]) expect(catalogue).toContain(id);
   });
 
   it('never finds B’s booking by searching for it, by reference or by the client both share', async () => {
     for (const search of [theirs.reference, theirs.reference.slice(-5).toLowerCase()]) {
-      const res = await get(`/api/admin/bookings?search=${encodeURIComponent(search)}`);
+      const res = await get(`/api/studio/bookings?search=${encodeURIComponent(search)}`);
       expect([res.status, (res.body as { total: number }).total]).toEqual([200, 0]);
     }
     // The client row is shared by both photographers: the search finds A's booking only.
-    const shared = await get(`/api/admin/bookings?search=${encodeURIComponent('aline.private@example.com')}`);
+    const shared = await get(`/api/studio/bookings?search=${encodeURIComponent('aline.private@example.com')}`);
     expect((shared.body as { bookings: { reference: string }[] }).bookings.map((row) => row.reference)).toEqual([mine.reference]);
   });
 });

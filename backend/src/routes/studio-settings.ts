@@ -6,7 +6,7 @@ import { getPhotographerSettings, updatePhotographerSettings } from '../settings
 import { INT4_MAX, feeRate, parseOrReject } from './validation.js';
 
 /**
- * `/api/admin/settings` -- the settings screen's API (plan.md Task 8, spec
+ * `/api/studio/settings` -- the settings screen's API (plan.md Task 8, spec
  * P-15, P-24, P-30). Mounted behind `requirePhotographer`, and every read and
  * write addresses the signed-in photographer's own row (marketplace-spec.md
  * R1.4): the id comes from the token, never from the request.

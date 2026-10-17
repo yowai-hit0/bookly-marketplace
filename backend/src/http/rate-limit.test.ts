@@ -29,8 +29,15 @@ describe('limited endpoints', () => {
   const tight = { limit: 1, windowMs: 10 * MINUTE };
 
   it.each([
-    ['/api/admin/auth/login', 'loginPerIp'],
-    ['/api/admin/auth/password-reset/request', 'passwordResetPerIp'],
+    ['/api/studio/auth/login', 'loginPerIp'],
+    ['/api/studio/auth/password-reset/request', 'passwordResetPerIp'],
+    ['/api/studio/auth/password-reset/confirm', 'passwordResetConfirmPerIp'],
+    ['/api/platform/auth/login', 'loginPerIp'],
+    ['/api/platform/auth/password-reset/request', 'passwordResetPerIp'],
+    ['/api/platform/auth/password-reset/confirm', 'passwordResetConfirmPerIp'],
+    ['/api/account/auth/login', 'loginPerIp'],
+    ['/api/account/auth/password-reset/request', 'passwordResetPerIp'],
+    ['/api/account/auth/password-reset/confirm', 'passwordResetConfirmPerIp'],
     ['/api/checkout/BKY-2610-AAAAA/token/payments', 'paymentsPerIp'],
     ['/api/booking/token/payments', 'paymentsPerIp'],
     ['/api/booking/token/email', 'emailChangePerIp'],
@@ -53,9 +60,19 @@ describe('limited endpoints', () => {
     expect((await request(app).post('/api/booking/token/payments').send({})).status).toBe(429);
   });
 
+  it('counts each area’s sign-in on its own: a burst at the studio login leaves the platform’s open (Phase 2 decision 8)', async () => {
+    const app = createApp({ rateLimits: { loginPerIp: tight } });
+
+    await request(app).post('/api/studio/auth/login').send({});
+    expect((await request(app).post('/api/studio/auth/login').send({})).status).toBe(429);
+
+    expect((await request(app).post('/api/platform/auth/login').send({})).status).toBe(404);
+    expect((await request(app).post('/api/account/auth/login').send({})).status).toBe(404);
+  });
+
   it('counts the address behind the trusted proxies, not the proxy', async () => {
     const app = createApp({ trustProxyHops: 1, rateLimits: { loginPerIp: tight } });
-    const from = (ip: string) => request(app).post('/api/admin/auth/login').set('X-Forwarded-For', ip).send({});
+    const from = (ip: string) => request(app).post('/api/studio/auth/login').set('X-Forwarded-For', ip).send({});
 
     await from('203.0.113.1');
 

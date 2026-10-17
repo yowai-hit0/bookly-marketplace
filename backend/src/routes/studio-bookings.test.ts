@@ -4,7 +4,7 @@ import type pg from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { issueAdminToken } from '../auth/token.js';
+import { issueToken } from '../auth/token.js';
 import { findBookingByToken } from '../booking/access.js';
 import { clientBookingView } from '../booking/client-view.js';
 import { type AdminBooking, adminBookingView, findAdminBooking } from '../booking/admin-view.js';
@@ -21,7 +21,7 @@ import {
 } from '../test/payment-fixtures.js';
 
 /**
- * `/api/admin/bookings` and `/api/admin/payments/:id/refund` over HTTP (plan.md
+ * `/api/studio/bookings` and `/api/studio/payments/:id/refund` over HTTP (plan.md
  * Task 19; spec §3.6, §6.11, §6.12, §6.16, §6.21, §7), against real PostgreSQL.
  *
  * The behaviour of each action is proven in booking/admin-actions.test.ts and
@@ -60,7 +60,7 @@ const START = new Date('2026-10-01T06:00:00Z');
 const AFTER_THE_SHOOT = new Date('2027-06-01T06:00:00Z');
 const HOUR_MS = 3_600_000;
 
-const BOOKINGS = '/api/admin/bookings';
+const BOOKINGS = '/api/studio/bookings';
 const UNKNOWN_ID = '3f1b9c2a-0000-4000-8000-00000000abcd';
 /** The external host's link, as Task 21's routes take it (spec A-7). */
 const DELIVERY_LINK = 'https://photos.example-host.com/s/abc123';
@@ -86,17 +86,17 @@ beforeEach(async () => {
   clock = START;
   world = await seedWorld(prisma);
   admin = await prisma.appUser.findUniqueOrThrow({ where: { id: world.photographerUserId } });
-  token = (await issueAdminToken(SECRET, admin, START)).token;
+  token = (await issueToken(SECRET, 'studio', admin, START)).token;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+    auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
   });
   // The same app with a payment provider configured, which is what mounts the
   // session-fee route (plan.md Task 20): without one there is nothing for the
   // client to pay through, so the route does not exist.
   paidApp = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+    auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
     publicApi: { prisma, now: () => clock, payments: { provider: stubProvider(), secret: SECRET } },
   });
 });
@@ -132,7 +132,7 @@ function postPaid(path: string, body: unknown = {}, bearer: string | null = toke
 /** Moves the injected clock, re-issuing the bearer token so it is still live. */
 async function travelTo(at: Date): Promise<void> {
   clock = at;
-  token = (await issueAdminToken(SECRET, admin, at)).token;
+  token = (await issueToken(SECRET, 'studio', admin, at)).token;
 }
 
 async function adminBooking(id: string): Promise<AdminBooking> {
@@ -191,7 +191,7 @@ describe('every route is behind requireAdmin (spec §2.2)', () => {
       { label: 'POST /bookings/:id/delivery/send', call: (bearer) => post(`${BOOKINGS}/${booking.id}/delivery/send`, {}, bearer) },
       {
         label: 'POST /payments/:id/refund',
-        call: (bearer) => post(`/api/admin/payments/${payment.id}/refund`, { reference: 'MOMO-1' }, bearer),
+        call: (bearer) => post(`/api/studio/payments/${payment.id}/refund`, { reference: 'MOMO-1' }, bearer),
       },
     ];
   }
@@ -200,12 +200,12 @@ describe('every route is behind requireAdmin (spec §2.2)', () => {
     for (const route of await everyRoute()) {
       const res = await route.call(null);
       expect([route.label, res.status, res.body]).toEqual([route.label, 401, { error: 'unauthenticated' }]);
-      expect(res.headers['www-authenticate']).toBe('Bearer realm="bookly-admin"');
+      expect(res.headers['www-authenticate']).toBe('Bearer realm="bookly-studio"');
     }
   });
 
   it('answers 401 for a token that is not one of ours', async () => {
-    const forged = (await issueAdminToken(OTHER_SECRET, admin, START)).token;
+    const forged = (await issueToken(OTHER_SECRET, 'studio', admin, START)).token;
 
     for (const route of await everyRoute()) {
       for (const bearer of ['not-a-jwt', forged]) {
@@ -216,14 +216,14 @@ describe('every route is behind requireAdmin (spec §2.2)', () => {
   });
 
   it('answers 401 for a token that has expired', async () => {
-    const stale = (await issueAdminToken(SECRET, admin, new Date(START.getTime() - 9 * HOUR_MS))).token;
+    const stale = (await issueToken(SECRET, 'studio', admin, new Date(START.getTime() - 9 * HOUR_MS))).token;
 
     for (const route of await everyRoute()) {
       const res = await route.call(stale);
       expect([route.label, res.status, res.headers['www-authenticate']]).toEqual([
         route.label,
         401,
-        'Bearer realm="bookly-admin", error="invalid_token"',
+        'Bearer realm="bookly-studio", error="invalid_token"',
       ]);
     }
   });
@@ -236,8 +236,8 @@ describe('every route is behind requireAdmin (spec §2.2)', () => {
     expect((await adminBooking(booking.id)).status).toBe('confirmed');
   });
 
-  it('answers 401, not 404, for a path under /api/admin that does not exist', async () => {
-    const res = await get('/api/admin/bookings/nope/nope/nope', null);
+  it('answers 401, not 404, for a path under /api/studio that does not exist', async () => {
+    const res = await get('/api/studio/bookings/nope/nope/nope', null);
 
     expect(res.status).toBe(401);
   });
@@ -721,7 +721,7 @@ describe('POST /payments/:id/refund', () => {
   it('records it and answers the booking the payment belongs to', async () => {
     const { booking, payment } = await flagged();
 
-    const res = await post(`/api/admin/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
+    const res = await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
 
     expect(res.status).toBe(200);
     expect(res.body).toStrictEqual({ booking: await renderedBooking(booking.id) });
@@ -737,7 +737,7 @@ describe('POST /payments/:id/refund', () => {
   it('takes the date the photographer says he sent it', async () => {
     const { payment } = await flagged();
 
-    const res = await post(`/api/admin/payments/${payment.id}/refund`, {
+    const res = await post(`/api/studio/payments/${payment.id}/refund`, {
       reference: 'BANK-0001',
       refundedAt: '2026-09-28T16:30:00+02:00',
     });
@@ -748,7 +748,7 @@ describe('POST /payments/:id/refund', () => {
   it('answers 409 not_refundable carrying the booking, for a payment that is not flagged', async () => {
     const { booking, payment } = await confirmedBooking();
 
-    const res = await post(`/api/admin/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
+    const res = await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
 
     expect([res.status, res.body.error]).toEqual([409, 'not_refundable']);
     expect(res.body.booking).toStrictEqual(await renderedBooking(booking.id));
@@ -757,22 +757,22 @@ describe('POST /payments/:id/refund', () => {
 
   it('answers 409 not_refundable on a second recording', async () => {
     const { payment } = await flagged();
-    await post(`/api/admin/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
+    await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
 
-    const res = await post(`/api/admin/payments/${payment.id}/refund`, { reference: 'ANOTHER' });
+    const res = await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'ANOTHER' });
 
     expect([res.status, res.body.error]).toEqual([409, 'not_refundable']);
     expect(res.body.booking.payments[0].refundReference).toBe('MOMO-REF-7781');
   });
 
   it('answers 404 for a payment that does not exist', async () => {
-    const res = await post(`/api/admin/payments/${UNKNOWN_ID}/refund`, { reference: 'MOMO-REF-7781' });
+    const res = await post(`/api/studio/payments/${UNKNOWN_ID}/refund`, { reference: 'MOMO-REF-7781' });
 
     expect([res.status, res.body]).toEqual([404, { error: 'not_found' }]);
   });
 
   it('answers 400 for a payment id that is not a uuid', async () => {
-    const res = await post('/api/admin/payments/not-a-uuid/refund', { reference: 'MOMO-REF-7781' });
+    const res = await post('/api/studio/payments/not-a-uuid/refund', { reference: 'MOMO-REF-7781' });
 
     expect([res.status, res.body]).toEqual([400, { error: 'invalid_request' }]);
   });
@@ -789,7 +789,7 @@ describe('POST /payments/:id/refund', () => {
   ])('refuses %s and records nothing', async (_case, body, status) => {
     const { payment } = await flagged();
 
-    const res = await post(`/api/admin/payments/${payment.id}/refund`, body);
+    const res = await post(`/api/studio/payments/${payment.id}/refund`, body);
 
     expect(res.status).toBe(status);
     expect((await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).status).toBe('refund_due');

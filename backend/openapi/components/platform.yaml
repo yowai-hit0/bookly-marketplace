@@ -1,0 +1,63 @@
+# Platform console schemas: photographers as a platform admin sees and moderates them.
+
+schemas:
+  PhotographerStatus:
+    type: string
+    enum: [pending, approved, suspended]
+    description: |
+      `pending` until a platform admin approves; `approved` is listed and
+      bookable; `suspended` is hidden and takes no new bookings, but keeps every
+      booking it already has.
+
+  PlatformPhotographer:
+    type: object
+    required: [id, handle, displayName, email, status, createdAt, approvedAt, approvedByUserId, suspendedAt, suspensionReason]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      handle: { type: string }
+      displayName: { type: string }
+      email:
+        type: string
+        format: email
+        description: The photographer's login address.
+      status: { $ref: '#/schemas/PhotographerStatus' }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      approvedAt: { type: [string, 'null'], format: date-time }
+      approvedByUserId:
+        description: The platform admin who approved them.
+        oneOf:
+          - $ref: 'common.yaml#/schemas/Uuid'
+          - type: 'null'
+      suspendedAt:
+        type: [string, 'null']
+        format: date-time
+        description: When the current suspension began. Cleared on reactivation.
+      suspensionReason:
+        type: [string, 'null']
+        description: The reason given for the current suspension, as emailed to the photographer.
+
+  PlatformPhotographerList:
+    type: object
+    required: [photographers]
+    additionalProperties: false
+    properties:
+      photographers:
+        type: array
+        description: Newest first.
+        items: { $ref: '#/schemas/PlatformPhotographer' }
+
+  PlatformPhotographerEnvelope:
+    type: object
+    required: [photographer]
+    additionalProperties: false
+    properties:
+      photographer: { $ref: '#/schemas/PlatformPhotographer' }
+
+  InvalidTransition:
+    type: object
+    required: [error, photographer]
+    additionalProperties: false
+    properties:
+      error: { const: invalid_transition }
+      photographer: { $ref: '#/schemas/PlatformPhotographer' }

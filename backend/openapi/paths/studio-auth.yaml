@@ -1,0 +1,92 @@
+login:
+  post:
+    operationId: studioLogin
+    tags: [Studio auth]
+    summary: Log in
+    description: |
+      Email and password for a photographer's studio. Returns a bearer JWT for
+      the `bookly-studio` audience, valid 8 hours, which no other area accepts.
+      Unknown email, wrong password, a locked account, an unverified address
+      and an account of another kind (a platform admin, a client) are one
+      answer — `401 invalid_credentials` — so none is disclosed; repeated
+      failures lock the account and email its holder. A pending or suspended
+      photographer can sign in. `Cache-Control: no-store`.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/LoginRequest }
+    responses:
+      '200':
+        description: Signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/auth.yaml#/responses/InvalidCredentials
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+resetRequest:
+  post:
+    operationId: requestStudioPasswordReset
+    tags: [Studio auth]
+    summary: Request a password reset
+    description: |
+      If the address is a photographer's login, a single-use reset link to
+      `/studio/reset-password`, valid 30 minutes, is emailed. The answer is
+      always `202`, whether or not it is, so the endpoint does not reveal which
+      addresses have accounts.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResetRequest }
+    responses:
+      '202':
+        description: Accepted (sent only if the address is a photographer's login).
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/ResetAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+resetConfirm:
+  post:
+    operationId: confirmStudioPasswordReset
+    tags: [Studio auth]
+    summary: Set a new password from a reset link
+    description: Consumes the emailed token and sets the new password, which revokes every token already issued. The token works once, and only here.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResetConfirm }
+    responses:
+      '204':
+        description: The password is changed.
+      '400':
+        $ref: ../components/auth.yaml#/responses/ResetConfirmRefused
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+me:
+  get:
+    operationId: getStudioMe
+    tags: [Studio auth]
+    summary: The signed-in photographer
+    responses:
+      '200':
+        description: The login and the studio it owns.
+        content:
+          application/json:
+            schema: { $ref: ../components/studio.yaml#/schemas/StudioMe }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized

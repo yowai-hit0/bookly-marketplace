@@ -5,14 +5,14 @@ import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { hashPassword } from '../auth/password.js';
-import { issueAdminToken } from '../auth/token.js';
+import { issueToken } from '../auth/token.js';
 import { findAvailability } from '../availability/query.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { createPhotographer } from '../test/payment-fixtures.js';
 
 /**
- * `/api/admin/working-hours` and `/api/admin/blocks` over HTTP, against real
+ * `/api/studio/working-hours` and `/api/studio/blocks` over HTTP, against real
  * PostgreSQL (plan.md Task 8; spec §3.3, §6.3, §6.4, P-03, P-15, P-16;
  * data-model_v2.md §5.3, §5.4, §8).
  *
@@ -52,8 +52,8 @@ const MALFORMED_IDS = [
   '00000000000040008000000000000000',
 ];
 
-const HOURS = '/api/admin/working-hours';
-const BLOCKS = '/api/admin/blocks';
+const HOURS = '/api/studio/working-hours';
+const BLOCKS = '/api/studio/blocks';
 
 const MONDAY = '2026-10-05';
 const TUESDAY = '2026-10-06';
@@ -99,10 +99,10 @@ beforeEach(async () => {
   });
   photographerId = created.photographerId;
   const user = await prisma.appUser.update({ where: { id: created.photographerUserId }, data: { passwordHash } });
-  token = (await issueAdminToken(SECRET, user, NOW)).token;
+  token = (await issueToken(SECRET, 'studio', user, NOW)).token;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
+    auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
   });
 });
 
@@ -207,7 +207,7 @@ function expectNotFound(res: Response): void {
 function expectUnauthenticated(res: Response): void {
   expect(res.status).toBe(401);
   expect(res.body).toEqual({ error: 'unauthenticated' });
-  expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-admin"/);
+  expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-studio"/);
 }
 
 /** A block's stored range as epoch ms, read straight off the columns. */
@@ -343,7 +343,7 @@ describe('working-hours and blocks routes without a valid token', () => {
 
 // --- Working hours: create --------------------------------------------------------
 
-describe('POST /api/admin/working-hours', () => {
+describe('POST /api/studio/working-hours', () => {
   it.each<[string, Record<string, unknown>]>([
     ['a Saturday rule, 09:00–17:00', { weekday: 6, opensMinute: 540, closesMinute: 1020 }],
     ['Sunday, the lowest weekday', { weekday: 0, opensMinute: 540, closesMinute: 1020 }],
@@ -489,7 +489,7 @@ describe('weekday XOR effective date, in the schema and in the database', () => 
 
 // --- Working hours: list, replace, delete ----------------------------------------------
 
-describe('GET /api/admin/working-hours', () => {
+describe('GET /api/studio/working-hours', () => {
   it('answers an empty list when there are no rows', async () => {
     const res = await send('get', HOURS);
 
@@ -510,7 +510,7 @@ describe('GET /api/admin/working-hours', () => {
   });
 });
 
-describe('PUT /api/admin/working-hours/:id', () => {
+describe('PUT /api/studio/working-hours/:id', () => {
   it('replaces the whole row, so an omitted optional field returns to its default', async () => {
     const created = await createHours({ weekday: 1, opensMinute: 540, closesMinute: 1020, note: 'seeded' });
 
@@ -616,7 +616,7 @@ describe('PUT /api/admin/working-hours/:id', () => {
   });
 });
 
-describe('DELETE /api/admin/working-hours/:id', () => {
+describe('DELETE /api/studio/working-hours/:id', () => {
   it('deletes the row with 204, and a second delete is a 404', async () => {
     const created = await createHours({ weekday: 6, opensMinute: 540, closesMinute: 1020 });
 
@@ -703,7 +703,7 @@ describe('working hours in the public availability', () => {
 
 // --- Blocks: create, list, replace, delete ------------------------------------------------
 
-describe('POST /api/admin/blocks', () => {
+describe('POST /api/studio/blocks', () => {
   it('stores a full-day block from Kigali midnight to the next Kigali midnight', async () => {
     const block = await createBlock(allDay(WEDNESDAY));
 
@@ -802,7 +802,7 @@ describe('POST /api/admin/blocks', () => {
   });
 });
 
-describe('GET /api/admin/blocks', () => {
+describe('GET /api/studio/blocks', () => {
   it('lists every block by start, reason included -- the admin may see it (P-03)', async () => {
     const later = await createBlock(allDay(FRIDAY, FRIDAY, { reason: 'Studio maintenance' }));
     const earlier = await createBlock(timed(WEDNESDAY, '14:00', '16:00', { reason: 'Dentist' }));
@@ -814,7 +814,7 @@ describe('GET /api/admin/blocks', () => {
   });
 });
 
-describe('PUT /api/admin/blocks/:id', () => {
+describe('PUT /api/studio/blocks/:id', () => {
   it('replaces the range, the all-day flag and the reason', async () => {
     const created = await createBlock(allDay(WEDNESDAY, WEDNESDAY, { reason: 'first' }));
 
@@ -852,7 +852,7 @@ describe('PUT /api/admin/blocks/:id', () => {
   });
 });
 
-describe('DELETE /api/admin/blocks/:id', () => {
+describe('DELETE /api/studio/blocks/:id', () => {
   it('deletes the block with 204, returning its time to the calendar', async () => {
     await seedWeekdayHours();
     const block = await createBlock(allDay(WEDNESDAY));

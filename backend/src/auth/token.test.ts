@@ -2,21 +2,23 @@ import { SignJWT, decodeProtectedHeader, decodeJwt } from 'jose';
 import { describe, expect, it } from 'vitest';
 import {
   TOKEN_ALGORITHM,
-  TOKEN_AUDIENCE,
+  TOKEN_AUDIENCES,
   TOKEN_ISSUER,
   TOKEN_TTL_SECONDS,
-  issueAdminToken,
-  passwordFingerprint,
+  credentialFingerprint,
+  issueToken,
   readBearerToken,
   safeEqual,
   sha256Hex,
-  verifyAdminToken,
+  verifyToken,
 } from './token.js';
+import { AREA_ROLE, AUTH_AREAS, type AuthArea } from './roles.js';
 
 /**
- * The studio bearer token (plan.md Task 7, revision 2.3), with the marketplace's
- * `{ sub: userId, role }` claims (brief decision 3). Pure: no database, no
- * HTTP. Forged tokens are signed with jose directly, so each attack is built
+ * The bearer tokens of the three signed-in areas (plan.md Task 7, revision 2.3;
+ * marketplace-spec.md R2.1; Phase 2 decision 2): `{ sub: userId, role }`, one
+ * audience and one lifetime per area, and the credential fingerprint. Pure: no
+ * database, no HTTP. Forged tokens are signed with jose directly, so each attack is built
  * exactly rather than approximated by string surgery.
  */
 
@@ -27,7 +29,20 @@ const PASSWORD_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYX
 const NOW = new Date('2026-09-14T08:00:00Z');
 const NOW_SECONDS = NOW.getTime() / 1000;
 
-const admin = { id: ADMIN_ID, role: 'photographer', passwordHash: PASSWORD_HASH };
+const GOOGLE_SUB = '109876543210987654321';
+
+/** A photographer with a password: the studio's token subject. */
+const admin = { id: ADMIN_ID, role: 'photographer', passwordHash: PASSWORD_HASH, googleSub: null, tokenVersion: 0 };
+
+/** The subject of each area: a user of the area's own role. */
+function subjectFor(area: AuthArea) {
+  return { ...admin, role: AREA_ROLE[area] };
+}
+
+/** Every role but `role`. */
+function otherRoles(role: string): string[] {
+  return Object.values(AREA_ROLE).filter((other) => other !== role);
+}
 
 function key(secret = SECRET): Uint8Array {
   return new TextEncoder().encode(secret);
@@ -52,16 +67,16 @@ async function forge(options: ForgeOptions = {}): Promise<string> {
     secret = SECRET,
     sub = ADMIN_ID,
     iss = TOKEN_ISSUER,
-    aud = TOKEN_AUDIENCE,
+    aud = TOKEN_AUDIENCES.studio,
     iat = NOW_SECONDS,
-    exp = NOW_SECONDS + TOKEN_TTL_SECONDS,
+    exp = NOW_SECONDS + TOKEN_TTL_SECONDS.studio,
     role = 'photographer',
-    fingerprint = passwordFingerprint(SECRET, PASSWORD_HASH),
+    fingerprint = credentialFingerprint(SECRET, admin),
   } = options;
 
   const claims: Record<string, unknown> = {};
   if (role !== null) claims.role = role;
-  if (fingerprint !== null) claims.pwd_fp = fingerprint;
+  if (fingerprint !== null) claims.cred_fp = fingerprint;
   const jwt = new SignJWT(claims).setProtectedHeader({ alg, typ: 'JWT' });
   if (sub !== null) jwt.setSubject(sub);
   if (iss !== null) jwt.setIssuer(iss);
@@ -79,32 +94,52 @@ function segments(token: string): [string, string, string] {
 
 // --- Issuing ------------------------------------------------------------------
 
-describe('issueAdminToken', () => {
+describe('issueToken', () => {
   it('signs HS256 and declares itself a JWT', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
     expect(decodeProtectedHeader(token)).toEqual({ alg: 'HS256', typ: 'JWT' });
   });
 
   it('names the user, their role, the issuer and the audience', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
     expect(decodeJwt(token)).toMatchObject({
       sub: ADMIN_ID,
       role: 'photographer',
       iss: 'bookly-api',
-      aud: 'bookly-admin',
+      aud: 'bookly-studio',
     });
   });
 
-  it('refuses to issue for a user without a password: there is nothing to bind the token to', async () => {
-    await expect(issueAdminToken(SECRET, { ...admin, passwordHash: null }, NOW)).rejects.toThrow(/without a password/);
+  it('refuses to issue for a user with no credential at all: there is nothing to bind the token to', async () => {
+    await expect(issueToken(SECRET, 'studio', { ...admin, passwordHash: null }, NOW)).rejects.toThrow(/without a credential/);
   });
 
-  it('refuses to issue for a role outside app_user_role_allowed', async () => {
-    await expect(issueAdminToken(SECRET, { ...admin, role: 'admin' }, NOW)).rejects.toThrow(/unknown role/);
+  it('issues an account token to a Google-only client, bound to the Google subject', async () => {
+    const google = { ...subjectFor('account'), passwordHash: null, googleSub: GOOGLE_SUB };
+    const { token } = await issueToken(SECRET, 'account', google, NOW);
+
+    await expect(verifyToken(SECRET, 'account', token, NOW)).resolves.toEqual({
+      userId: ADMIN_ID,
+      role: 'client',
+      credentialFingerprint: credentialFingerprint(SECRET, google),
+    });
+    expect(Buffer.from(segments(token)[1], 'base64url').toString()).not.toContain(GOOGLE_SUB);
+  });
+
+  it.each(['admin', 'client', 'platform_admin'])('refuses to issue a studio token to the role %s', async (role) => {
+    await expect(issueToken(SECRET, 'studio', { ...admin, role }, NOW)).rejects.toThrow(/Cannot issue a studio token/);
+  });
+
+  it.each([
+    ['platform', 'photographer'],
+    ['account', 'photographer'],
+    ['account', 'platform_admin'],
+  ] as const)('refuses to issue a %s token to a %s', async (area, role) => {
+    await expect(issueToken(SECRET, area, { ...admin, role }, NOW)).rejects.toThrow(/Cannot issue/);
   });
 
   it('expires eight hours after the injected clock, in both the claim and the result', async () => {
-    const { token, expiresAt } = await issueAdminToken(SECRET, admin, NOW);
+    const { token, expiresAt } = await issueToken(SECRET, 'studio', admin, NOW);
     const claims = decodeJwt(token);
 
     expect(claims.iat).toBe(NOW_SECONDS);
@@ -113,8 +148,9 @@ describe('issueAdminToken', () => {
   });
 
   it('floors a sub-second clock to whole seconds, as JWT NumericDate requires', async () => {
-    const { token, expiresAt } = await issueAdminToken(
+    const { token, expiresAt } = await issueToken(
       SECRET,
+      'studio',
       admin,
       new Date('2026-09-14T08:00:00.999Z'),
     );
@@ -122,82 +158,128 @@ describe('issueAdminToken', () => {
     expect(expiresAt.getTime() % 1000).toBe(0);
   });
 
-  it('carries a fingerprint of the password hash, never the hash', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
+  it('carries a fingerprint of the credentials, never the password hash', async () => {
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
     const [, payload] = segments(token);
     const decoded = Buffer.from(payload, 'base64url').toString();
 
-    expect(decodeJwt(token).pwd_fp).toBe(passwordFingerprint(SECRET, PASSWORD_HASH));
+    expect(decodeJwt(token).cred_fp).toBe(credentialFingerprint(SECRET, admin));
     expect(decoded).not.toContain(PASSWORD_HASH);
     expect(decoded).not.toContain('argon2');
     expect(decoded).not.toContain(sha256Hex(PASSWORD_HASH));
   });
 
   it('carries no claim beyond the seven it needs', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
     expect(Object.keys(decodeJwt(token)).sort()).toEqual(
-      ['aud', 'exp', 'iat', 'iss', 'pwd_fp', 'role', 'sub'].sort(),
+      ['aud', 'exp', 'iat', 'iss', 'cred_fp', 'role', 'sub'].sort(),
     );
   });
 
-  it('round-trips through verifyAdminToken', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
-    await expect(verifyAdminToken(SECRET, token, NOW)).resolves.toEqual({
+  it('round-trips through verifyToken', async () => {
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
+    await expect(verifyToken(SECRET, 'studio', token, NOW)).resolves.toEqual({
       userId: ADMIN_ID,
       role: 'photographer',
-      passwordFingerprint: passwordFingerprint(SECRET, PASSWORD_HASH),
+      credentialFingerprint: credentialFingerprint(SECRET, admin),
     });
   });
+});
 
-  it.each(['platform_admin', 'client'])('round-trips the %s role as issued', async (role) => {
-    const { token } = await issueAdminToken(SECRET, { ...admin, role }, NOW);
-    await expect(verifyAdminToken(SECRET, token, NOW)).resolves.toMatchObject({ role });
+// --- One audience and one lifetime per area (Phase 2 decision 2) ---------------------
+
+describe('the areas', () => {
+  it('give each area its own audience', () => {
+    expect(TOKEN_AUDIENCES).toEqual({ studio: 'bookly-studio', platform: 'bookly-platform', account: 'bookly-account' });
+    expect(new Set(Object.values(TOKEN_AUDIENCES)).size).toBe(AUTH_AREAS.length);
+  });
+
+  it.each([
+    ['studio', 8 * 60 * 60],
+    ['platform', 8 * 60 * 60],
+    ['account', 7 * 24 * 60 * 60],
+  ] as const)('issues %s tokens for %i seconds, in the claim and the result', async (area, seconds) => {
+    expect(TOKEN_TTL_SECONDS[area]).toBe(seconds);
+    const { token, expiresAt } = await issueToken(SECRET, area, subjectFor(area), NOW);
+
+    expect(decodeJwt(token)).toMatchObject({ aud: TOKEN_AUDIENCES[area], role: AREA_ROLE[area], exp: NOW_SECONDS + seconds });
+    expect(expiresAt.getTime()).toBe((NOW_SECONDS + seconds) * 1000);
+  });
+
+  it.each(AUTH_AREAS)('round-trips a %s token in its own area', async (area) => {
+    const { token } = await issueToken(SECRET, area, subjectFor(area), NOW);
+    await expect(verifyToken(SECRET, area, token, NOW)).resolves.toMatchObject({ userId: ADMIN_ID, role: AREA_ROLE[area] });
+  });
+
+  // Every (issued for, presented to) pair of two different areas.
+  const crossings = AUTH_AREAS.flatMap((issued) => AUTH_AREAS.filter((other) => other !== issued).map((presented) => [issued, presented] as const));
+
+  it.each(crossings)('refuses a %s token presented to the %s area', async (issued, presented) => {
+    const { token } = await issueToken(SECRET, issued, subjectFor(issued), NOW);
+    await expect(verifyToken(SECRET, presented, token, NOW)).resolves.toBeNull();
+  });
+
+  it.each(crossings)('refuses a correctly-signed %s-audience token claiming the role of the %s area', async (issued, presented) => {
+    const token = await forge({ aud: TOKEN_AUDIENCES[issued], role: AREA_ROLE[presented] });
+    await expect(verifyToken(SECRET, presented, token, NOW)).resolves.toBeNull();
+  });
+
+  it.each(AUTH_AREAS.flatMap((area) => otherRoles(AREA_ROLE[area]).map((role) => [area, role] as const)))(
+    'refuses a correctly-signed %s-audience token claiming the role %s',
+    async (area, role) => {
+      await expect(verifyToken(SECRET, area, await forge({ aud: TOKEN_AUDIENCES[area], role }), NOW)).resolves.toBeNull();
+    },
+  );
+
+  it('refuses a Phase 1 token, issued for the retired bookly-admin audience, in every area', async () => {
+    const legacy = await forge({ aud: 'bookly-admin' });
+    for (const area of AUTH_AREAS) await expect(verifyToken(SECRET, area, legacy, NOW)).resolves.toBeNull();
   });
 });
 
 // --- Verifying: expiry ------------------------------------------------------------
 
-describe('verifyAdminToken and time', () => {
+describe('verifyToken and time', () => {
   it('accepts a token one second before it expires', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
-    const oneSecondBefore = new Date((NOW_SECONDS + TOKEN_TTL_SECONDS - 1) * 1000);
-    await expect(verifyAdminToken(SECRET, token, oneSecondBefore)).resolves.not.toBeNull();
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
+    const oneSecondBefore = new Date((NOW_SECONDS + TOKEN_TTL_SECONDS.studio - 1) * 1000);
+    await expect(verifyToken(SECRET, 'studio', token, oneSecondBefore)).resolves.not.toBeNull();
   });
 
   it('refuses a token at the instant it expires', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
-    const atExpiry = new Date((NOW_SECONDS + TOKEN_TTL_SECONDS) * 1000);
-    await expect(verifyAdminToken(SECRET, token, atExpiry)).resolves.toBeNull();
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
+    const atExpiry = new Date((NOW_SECONDS + TOKEN_TTL_SECONDS.studio) * 1000);
+    await expect(verifyToken(SECRET, 'studio', token, atExpiry)).resolves.toBeNull();
   });
 
   it('refuses a token long after it expired', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
     await expect(
-      verifyAdminToken(SECRET, token, new Date('2027-01-01T00:00:00Z')),
+      verifyToken(SECRET, 'studio', token, new Date('2027-01-01T00:00:00Z')),
     ).resolves.toBeNull();
   });
 
   it('refuses a correctly-signed token with no exp, rather than honouring it forever', async () => {
-    await expect(verifyAdminToken(SECRET, await forge({ exp: null }), NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', await forge({ exp: null }), NOW)).resolves.toBeNull();
   });
 
   it('refuses a correctly-signed token with no iat', async () => {
-    await expect(verifyAdminToken(SECRET, await forge({ iat: null }), NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', await forge({ iat: null }), NOW)).resolves.toBeNull();
   });
 });
 
 // --- Verifying: forgery -------------------------------------------------------------
 
-describe('verifyAdminToken against forgery', () => {
+describe('verifyToken against forgery', () => {
   it('refuses a token signed with a different secret', async () => {
     await expect(
-      verifyAdminToken(SECRET, await forge({ secret: OTHER_SECRET }), NOW),
+      verifyToken(SECRET, 'studio', await forge({ secret: OTHER_SECRET }), NOW),
     ).resolves.toBeNull();
   });
 
   it('refuses a genuine token verified under a different secret', async () => {
-    const { token } = await issueAdminToken(SECRET, admin, NOW);
-    await expect(verifyAdminToken(OTHER_SECRET, token, NOW)).resolves.toBeNull();
+    const { token } = await issueToken(SECRET, 'studio', admin, NOW);
+    await expect(verifyToken(OTHER_SECRET, 'studio', token, NOW)).resolves.toBeNull();
   });
 
   it('refuses a token whose payload was edited after signing', async () => {
@@ -210,7 +292,7 @@ describe('verifyAdminToken against forgery', () => {
     ).toString('base64url');
 
     await expect(
-      verifyAdminToken(SECRET, `${header}.${extended}.${signature}`, NOW),
+      verifyToken(SECRET, 'studio', `${header}.${extended}.${signature}`, NOW),
     ).resolves.toBeNull();
   });
 
@@ -221,113 +303,126 @@ describe('verifyAdminToken against forgery', () => {
     ).toString('base64url');
 
     await expect(
-      verifyAdminToken(SECRET, `${header}.${swapped}.${signature}`, NOW),
+      verifyToken(SECRET, 'studio', `${header}.${swapped}.${signature}`, NOW),
     ).resolves.toBeNull();
   });
 
   it('refuses a token whose signature was altered', async () => {
     const [header, payload, signature] = segments(await forge());
     const flipped = (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1);
-    await expect(verifyAdminToken(SECRET, `${header}.${payload}.${flipped}`, NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', `${header}.${payload}.${flipped}`, NOW)).resolves.toBeNull();
   });
 
   it('refuses a token with its signature removed', async () => {
     const [header, payload] = segments(await forge());
-    await expect(verifyAdminToken(SECRET, `${header}.${payload}.`, NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', `${header}.${payload}.`, NOW)).resolves.toBeNull();
   });
 });
 
 // --- Verifying: algorithm confusion ---------------------------------------------------
 
-describe('verifyAdminToken against algorithm confusion', () => {
+describe('verifyToken against algorithm confusion', () => {
   it('refuses alg "none" with an empty signature', async () => {
     const [, payload] = segments(await forge());
     const none = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
-    await expect(verifyAdminToken(SECRET, `${none}.${payload}.`, NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', `${none}.${payload}.`, NOW)).resolves.toBeNull();
   });
 
   it.each(['None', 'NONE', 'nOnE'])('refuses alg "%s" in any casing', async (alg) => {
     const [, payload] = segments(await forge());
     const header = Buffer.from(JSON.stringify({ alg, typ: 'JWT' })).toString('base64url');
-    await expect(verifyAdminToken(SECRET, `${header}.${payload}.`, NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', `${header}.${payload}.`, NOW)).resolves.toBeNull();
   });
 
   it.each(['HS384', 'HS512'])(
     'refuses a %s token signed with the RIGHT secret, because only HS256 is pinned',
     async (alg) => {
-      await expect(verifyAdminToken(SECRET, await forge({ alg }), NOW)).resolves.toBeNull();
+      await expect(verifyToken(SECRET, 'studio', await forge({ alg }), NOW)).resolves.toBeNull();
     },
   );
 
   it('refuses an HS256 signature presented under an RS256 header', async () => {
     const [, payload, signature] = segments(await forge());
     const rs = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
-    await expect(verifyAdminToken(SECRET, `${rs}.${payload}.${signature}`, NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', `${rs}.${payload}.${signature}`, NOW)).resolves.toBeNull();
   });
 });
 
 // --- Verifying: scope -------------------------------------------------------------------
 
-describe('verifyAdminToken scope claims', () => {
+describe('verifyToken scope claims', () => {
   it.each([
     ['another audience', { aud: 'bookly-client' }],
+    ['the retired Phase 1 audience', { aud: 'bookly-admin' }],
     ['no audience', { aud: null }],
     ['another issuer', { iss: 'someone-else' }],
     ['no issuer', { iss: null }],
   ] as const)('refuses a correctly-signed token with %s', async (_label, override) => {
-    await expect(verifyAdminToken(SECRET, await forge(override), NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', await forge(override), NOW)).resolves.toBeNull();
   });
 });
 
 // --- Verifying: claim shapes ----------------------------------------------------------------
 
-describe('verifyAdminToken claim shapes', () => {
+describe('verifyToken claim shapes', () => {
   it('refuses a token with no subject', async () => {
-    await expect(verifyAdminToken(SECRET, await forge({ sub: null }), NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', await forge({ sub: null }), NOW)).resolves.toBeNull();
   });
 
   it.each(['not-a-uuid', '', '1', "3f2b8c1e'; DROP TABLE app_user;--", `${ADMIN_ID}x`])(
     'refuses a correctly-signed subject %j that is not a UUID -- a 401, never a database error',
     async (sub) => {
-      await expect(verifyAdminToken(SECRET, await forge({ sub }), NOW)).resolves.toBeNull();
+      await expect(verifyToken(SECRET, 'studio', await forge({ sub }), NOW)).resolves.toBeNull();
     },
   );
 
   it('accepts an upper-case UUID subject', async () => {
     const upper = ADMIN_ID.toUpperCase();
-    await expect(verifyAdminToken(SECRET, await forge({ sub: upper }), NOW)).resolves.toMatchObject({
+    await expect(verifyToken(SECRET, 'studio', await forge({ sub: upper }), NOW)).resolves.toMatchObject({
       userId: upper,
     });
   });
 
   it('refuses a token with no role: one issued before the marketplace', async () => {
-    await expect(verifyAdminToken(SECRET, await forge({ role: null }), NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', await forge({ role: null }), NOW)).resolves.toBeNull();
   });
 
   it.each(['admin', 'Photographer', '', 42, ['photographer'], { role: 'photographer' }])(
     'refuses a correctly-signed role %j outside app_user_role_allowed',
     async (role) => {
-      await expect(verifyAdminToken(SECRET, await forge({ role }), NOW)).resolves.toBeNull();
+      await expect(verifyToken(SECRET, 'studio', await forge({ role }), NOW)).resolves.toBeNull();
     },
   );
 
-  it('refuses a token with no password fingerprint', async () => {
+  it('refuses a token carrying the Phase 1 pwd_fp claim instead of cred_fp', async () => {
+    const legacy = await new SignJWT({ role: 'photographer', pwd_fp: credentialFingerprint(SECRET, admin) })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+      .setSubject(ADMIN_ID)
+      .setIssuer(TOKEN_ISSUER)
+      .setAudience(TOKEN_AUDIENCES.studio)
+      .setIssuedAt(NOW_SECONDS)
+      .setExpirationTime(NOW_SECONDS + 60)
+      .sign(key());
+    await expect(verifyToken(SECRET, 'studio', legacy, NOW)).resolves.toBeNull();
+  });
+
+  it('refuses a token with no credential fingerprint', async () => {
     await expect(
-      verifyAdminToken(SECRET, await forge({ fingerprint: null }), NOW),
+      verifyToken(SECRET, 'studio', await forge({ fingerprint: null }), NOW),
     ).resolves.toBeNull();
   });
 
   it.each([42, true, { nested: 'x' }, ['a']])(
     'refuses a fingerprint that is not a string (%j)',
     async (fingerprint) => {
-      await expect(verifyAdminToken(SECRET, await forge({ fingerprint }), NOW)).resolves.toBeNull();
+      await expect(verifyToken(SECRET, 'studio', await forge({ fingerprint }), NOW)).resolves.toBeNull();
     },
   );
 });
 
 // --- Verifying: garbage ---------------------------------------------------------------------
 
-describe('verifyAdminToken on garbage', () => {
+describe('verifyToken on garbage', () => {
   it.each([
     ['an empty string', ''],
     ['one segment', 'abc'],
@@ -338,40 +433,53 @@ describe('verifyAdminToken on garbage', () => {
     ['base64 that is not JSON', 'bm90IGpzb24.bm90IGpzb24.c2ln'],
     ['whitespace', '   '],
   ])('returns null for %s rather than throwing', async (_label, token) => {
-    await expect(verifyAdminToken(SECRET, token, NOW)).resolves.toBeNull();
+    await expect(verifyToken(SECRET, 'studio', token, NOW)).resolves.toBeNull();
   });
 });
 
-// --- The password fingerprint ------------------------------------------------------------------
+// --- The credential fingerprint (Phase 2 decision 2) ----------------------------------------
 
-describe('passwordFingerprint', () => {
-  it('is deterministic for one secret and one hash', () => {
-    expect(passwordFingerprint(SECRET, PASSWORD_HASH)).toBe(
-      passwordFingerprint(SECRET, PASSWORD_HASH),
-    );
+describe('credentialFingerprint', () => {
+  const base = { passwordHash: PASSWORD_HASH as string | null, googleSub: null as string | null, tokenVersion: 0 };
+
+  it('is deterministic for one secret and one set of credentials', () => {
+    expect(credentialFingerprint(SECRET, base)).toBe(credentialFingerprint(SECRET, { ...base }));
   });
 
-  it('changes when the password hash changes -- which is what revokes old tokens', () => {
-    expect(passwordFingerprint(SECRET, PASSWORD_HASH)).not.toBe(
-      passwordFingerprint(SECRET, `${PASSWORD_HASH}x`),
-    );
+  it.each<[string, Partial<typeof base>]>([
+    ['the password hash changes -- a password change or reset', { passwordHash: `${PASSWORD_HASH}x` }],
+    ['a Google identity is linked', { googleSub: GOOGLE_SUB }],
+    ['the token version goes up -- revokeTokens', { tokenVersion: 1 }],
+  ])('changes when %s, which is what revokes old tokens', (_label, change) => {
+    expect(credentialFingerprint(SECRET, { ...base, ...change })).not.toBe(credentialFingerprint(SECRET, base));
+  });
+
+  it('gives a Google-only client a fingerprint that moves with the token version and the subject', () => {
+    const google = { passwordHash: null, googleSub: GOOGLE_SUB, tokenVersion: 0 };
+    expect(credentialFingerprint(SECRET, { ...google, tokenVersion: 1 })).not.toBe(credentialFingerprint(SECRET, google));
+    expect(credentialFingerprint(SECRET, { ...google, googleSub: 'another-subject' })).not.toBe(credentialFingerprint(SECRET, google));
+    expect(credentialFingerprint(SECRET, { ...google, passwordHash: PASSWORD_HASH })).not.toBe(credentialFingerprint(SECRET, google));
+  });
+
+  it('cannot be matched by moving text between fields', () => {
+    // With naive concatenation these two would hash the same input.
+    const a = { passwordHash: 'ab', googleSub: 'c', tokenVersion: 0 };
+    const b = { passwordHash: 'a', googleSub: 'bc', tokenVersion: 0 };
+    expect(credentialFingerprint(SECRET, a)).not.toBe(credentialFingerprint(SECRET, b));
   });
 
   it('changes with the secret, so it reveals nothing to someone without it', () => {
-    expect(passwordFingerprint(SECRET, PASSWORD_HASH)).not.toBe(
-      passwordFingerprint(OTHER_SECRET, PASSWORD_HASH),
-    );
+    expect(credentialFingerprint(SECRET, base)).not.toBe(credentialFingerprint(OTHER_SECRET, base));
   });
 
   it('is not a plain hash of the password hash', () => {
-    const fingerprint = passwordFingerprint(SECRET, PASSWORD_HASH);
+    const fingerprint = credentialFingerprint(SECRET, base);
     expect(fingerprint).not.toBe(sha256Hex(PASSWORD_HASH));
     expect(fingerprint).not.toBe(Buffer.from(sha256Hex(PASSWORD_HASH), 'hex').toString('base64url'));
   });
 
   it('is a 256-bit base64url value', () => {
-    const fingerprint = passwordFingerprint(SECRET, PASSWORD_HASH);
-    expect(fingerprint).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(credentialFingerprint(SECRET, base)).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 });
 

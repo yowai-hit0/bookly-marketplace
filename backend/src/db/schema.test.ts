@@ -753,6 +753,14 @@ describe('app_user CHECKs', () => {
     expect(await insertUser({ role: 'client', password_hash: 'x', email_verify_token_hash: 'h3', email_verify_expires_at: new Date() })).toBeUndefined();
   });
 
+  it('starts token_version at 0 and refuses a negative one (Phase 2 decision 2)', async () => {
+    expect(await insertUser({ role: 'client', password_hash: 'x', token_version: -1 })).toBe('23514');
+    const email = `v${Math.random().toString(36).slice(2)}@example.com`;
+    expect(await insertUser({ email, role: 'client', google_sub: `google-${email}` })).toBeUndefined();
+    const row = await db.query<{ token_version: number }>('SELECT token_version FROM app_user WHERE email = $1', [email]);
+    expect(row.rows).toEqual([{ token_version: 0 }]);
+  });
+
   it('lets a token hash address one login only', async () => {
     const expires = new Date();
     expect(await insertUser({ role: 'client', password_hash: 'x', password_reset_token_hash: 'same', password_reset_expires_at: expires })).toBeUndefined();

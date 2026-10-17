@@ -193,7 +193,7 @@ const refundBody = z.strictObject({
     .transform((value) => (value === undefined ? undefined : new Date(value))),
 });
 
-export function adminBookingsRouter(deps: AdminBookingsDeps): Router {
+export function studioBookingsRouter(deps: AdminBookingsDeps): Router {
   const { prisma, now, paymentProviderId } = deps;
   const router = Router();
 

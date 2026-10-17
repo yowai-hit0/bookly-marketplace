@@ -4,7 +4,7 @@ import type pg from 'pg';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { issueAdminToken } from '../auth/token.js';
+import { issueToken } from '../auth/token.js';
 import { listPublicCatalogue } from '../catalogue/public.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
@@ -54,10 +54,10 @@ const MALFORMED_IDS = [
   '00000000000040008000000000000000',
 ];
 
-const CATALOGUE = '/api/admin/catalogue';
-const SERVICES = '/api/admin/services';
-const PACKAGES = '/api/admin/packages';
-const ADDONS = '/api/admin/addons';
+const CATALOGUE = '/api/studio/catalogue';
+const SERVICES = '/api/studio/services';
+const PACKAGES = '/api/studio/packages';
+const ADDONS = '/api/studio/addons';
 
 beforeAll(async () => {
   prisma = createPrismaClient(testDatabaseUrl());
@@ -88,7 +88,7 @@ beforeEach(async () => {
   await setClock(START);
   app = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+    auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
   });
   clientId = (
     await prisma.client.create({
@@ -150,7 +150,7 @@ type CatalogueJson = {
 /** Moves the injected clock and mints a token valid at that instant. */
 async function setClock(instant: Date): Promise<void> {
   clock = instant;
-  token = (await issueAdminToken(SECRET, admin, instant)).token;
+  token = (await issueToken(SECRET, 'studio', admin, instant)).token;
 }
 
 /** `bearer: null` sends no Authorization header at all. */
@@ -319,7 +319,7 @@ function expectNotFound(res: Response): void {
 function expectUnauthenticated(res: Response): void {
   expect(res.status).toBe(401);
   expect(res.body).toEqual({ error: 'unauthenticated' });
-  expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-admin"/);
+  expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-studio"/);
 }
 
 function warning(longestWindow: OpenWindow | null): WarningJson {
@@ -553,7 +553,7 @@ describe('plan.md Task 10 verification', () => {
 
 // --- GET /catalogue --------------------------------------------------------------------
 
-describe('GET /api/admin/catalogue', () => {
+describe('GET /api/studio/catalogue', () => {
   it('answers an empty catalogue', async () => {
     expect(await getCatalogue()).toEqual({ services: [], sharedAddons: [] });
   });
@@ -651,7 +651,7 @@ describe('GET /api/admin/catalogue', () => {
 
 // --- Services ---------------------------------------------------------------------------
 
-describe('POST /api/admin/services', () => {
+describe('POST /api/studio/services', () => {
   it('creates a service with 201, trimming names and defaulting what was not sent', async () => {
     const res = await send('post', SERVICES, { slug: 'portraits', nameEn: '  Portraits  ', nameFr: '  Portraits FR ' });
 
@@ -791,7 +791,7 @@ describe('POST /api/admin/services', () => {
   });
 });
 
-describe('PATCH /api/admin/services/:id', () => {
+describe('PATCH /api/studio/services/:id', () => {
   it('changes only the fields it names', async () => {
     const service = await insertService('portraits', { descriptionEn: 'Studio portraits.', sortOrder: 1 });
 
@@ -892,7 +892,7 @@ describe('PATCH /api/admin/services/:id', () => {
 
 // --- Packages ---------------------------------------------------------------------------
 
-describe('POST /api/admin/packages', () => {
+describe('POST /api/studio/packages', () => {
   let serviceId: string;
 
   beforeEach(async () => {
@@ -977,7 +977,7 @@ describe('POST /api/admin/packages', () => {
   });
 });
 
-describe('PATCH /api/admin/packages/:id', () => {
+describe('PATCH /api/studio/packages/:id', () => {
   beforeEach(seedWeekdayHours);
 
   it('changes only the fields it names', async () => {
@@ -1047,7 +1047,7 @@ describe('PATCH /api/admin/packages/:id', () => {
 
 // --- Add-ons ----------------------------------------------------------------------------
 
-describe('POST /api/admin/addons', () => {
+describe('POST /api/studio/addons', () => {
   let serviceId: string;
 
   beforeEach(async () => {
@@ -1121,7 +1121,7 @@ describe('POST /api/admin/addons', () => {
   });
 });
 
-describe('PATCH /api/admin/addons/:id', () => {
+describe('PATCH /api/studio/addons/:id', () => {
   it('changes only the fields it names', async () => {
     const service = await insertService('portraits');
     const addon = await insertAddon(service.id, { nameFr: 'Heure' });

@@ -1,26 +1,28 @@
 import { randomBytes } from 'node:crypto';
-import type { AppUser, PrismaClient } from '@prisma/client';
+import type { AppUser, Prisma, PrismaClient } from '@prisma/client';
 import { enqueue } from '../outbox/enqueue.js';
 import { hashPassword, verifyPassword } from './password.js';
-import { canUseStudio } from './roles.js';
-import { type IssuedToken, issueAdminToken, sha256Hex } from './token.js';
+import { AREA_ROLE, AREA_WEB_PATHS, type AuthArea, admitsArea, hasVerifiedEmail } from './roles.js';
+import { type IssuedToken, issueToken, sha256Hex } from './token.js';
 
 /**
- * Studio login, lockout and password reset (plan.md Task 7, spec §6.23, A-11),
- * per `app_user` (marketplace-spec.md R2.5). Transport-free: the router maps
- * these results onto HTTP.
+ * Login, lockout and password reset for every signed-in area (plan.md Task 7,
+ * spec §6.23, A-11; marketplace-spec.md R2.5; Phase 2 decisions 1-3). One
+ * implementation, called with the area: the studio (photographers), the
+ * platform (platform admins) and the account (clients). Transport-free: the
+ * routers map these results onto HTTP.
  *
- * Phase 1 serves only photographers, on the existing `/api/admin/*` paths
- * (brief decision 3). Any other login -- a platform admin, a client, a disabled
- * or erased account -- is treated exactly like an unknown email: the same
- * result, the same Argon2 cost, no attempt counted and no email sent. Phase 2
- * adds the platform and client logins beside this one.
+ * Each area admits only its own role (`admitsArea`). Any other login -- another
+ * role, a disabled or erased account, a Google-only client at a password
+ * login -- is treated exactly like an unknown email: the same result, the same
+ * Argon2 cost, no attempt counted and no email sent. So no area's login, and no
+ * area's reset, reveals which addresses have accounts of any kind.
  */
 
 export type AuthDeps = {
   prisma: PrismaClient;
   sessionSecret: string;
-  /** The studio UI's origin. Reset links point here, never at the API host. */
+  /** The web app's origin. Emailed links point here, never at the API host. */
   webOrigin: string;
   /** Injected so lockout and expiry are testable without waiting. */
   now: () => Date;
@@ -39,20 +41,19 @@ export const LOCKOUT_MINUTES = [1, 5, 15] as const;
 export const PASSWORD_RESET_TTL_MINUTES = 30;
 
 export type LoginResult =
-  | ({ status: 'ok'; user: AppUser; photographerId: string } & IssuedToken)
+  | ({ status: 'ok'; user: AppUser } & IssuedToken)
   /** Deliberately one result for unknown email, wrong password, a locked
-   *  account AND a login that is not a photographer's: none of them is
-   *  disclosed to the caller. The lockout email is how the account holder
-   *  learns they are locked out. */
+   *  account, an unverified address AND a login that is not the area's: none
+   *  of them is disclosed to the caller. The lockout email is how the account
+   *  holder learns they are locked out. */
   | { status: 'invalid_credentials' };
 
-export async function attemptLogin(
-  deps: AuthDeps,
-  email: string,
-  password: string,
-): Promise<LoginResult> {
+export async function attemptLogin(deps: AuthDeps, area: AuthArea, email: string, password: string): Promise<LoginResult> {
   const now = deps.now();
-  const login = await findStudioLogin(deps.prisma, email);
+  const account = await findAreaLogin(deps.prisma, area, email);
+  // A Google-only client has no password to check: at a password login it is
+  // an unknown email, like every other login the area cannot sign in here.
+  const login = account === null || account.passwordHash === null ? null : { ...account, passwordHash: account.passwordHash };
 
   // Claim the attempt BEFORE spending Argon2 on it. The claim is one atomic
   // UPDATE that refuses a locked account and, when this attempt is the Nth, sets
@@ -69,8 +70,12 @@ export async function attemptLogin(
     return { status: 'invalid_credentials' };
   }
 
-  if (!(await verifyPassword(login.passwordHash, password))) {
-    await alertIfLocked(deps, login, attemptNumber, now);
+  // The email-verification gate (Phase 2 decision 3) sits here, after the
+  // password, so an unverified address is answered exactly as a wrong password
+  // is: the attempt claimed above stays counted, the lock still applies, and
+  // the cost is one Argon2 check either way.
+  if (!(await verifyPassword(login.passwordHash, password)) || !hasVerifiedEmail(login)) {
+    await alertIfLocked(deps, area, login, attemptNumber, now);
     return { status: 'invalid_credentials' };
   }
 
@@ -81,8 +86,8 @@ export async function attemptLogin(
     data: { failedLoginCount: 0, lockedUntil: null, lastLoginAt: now },
   });
 
-  const issued = await issueAdminToken(deps.sessionSecret, signedIn, now);
-  return { status: 'ok', user: signedIn, photographerId: login.photographerId, ...issued };
+  const issued = await issueToken(deps.sessionSecret, area, signedIn, now);
+  return { status: 'ok', user: signedIn, ...issued };
 }
 
 /** Minutes to lock for this failure count, or null if it does not lock. */
@@ -93,14 +98,19 @@ export function lockoutMinutesFor(failedLoginCount: number): number | null {
 }
 
 /**
- * Always resolves, whether or not the email has a studio login: the response
- * must not confirm which addresses do. A second request replaces that user's
- * first token, so only the newest link works. The token lives on the user's
- * own row, and its hash is unique across users
+ * Always resolves, whether or not the email has a login in `area`: the
+ * response must not confirm which addresses do. A second request replaces that
+ * user's first token, so only the newest link works. The token lives on the
+ * user's own row, and its hash is unique across users
  * (`app_user_password_reset_token_hash_unique`).
+ *
+ * The link goes to the area's own reset page (`AREA_WEB_PATHS`). A Google-only
+ * client may use it to add a password, and an address that was never verified
+ * may use it too: the link reaches only the mailbox's owner. Consuming it does
+ * not verify the address -- that remains the verification flow's job.
  */
-export async function requestPasswordReset(deps: AuthDeps, email: string): Promise<void> {
-  const login = await findStudioLogin(deps.prisma, email);
+export async function requestPasswordReset(deps: AuthDeps, area: AuthArea, email: string): Promise<void> {
+  const login = await findAreaLogin(deps.prisma, area, email);
   if (login === null) return;
 
   // 256 bits. High entropy is what makes a fast hash acceptable for storage.
@@ -114,7 +124,7 @@ export async function requestPasswordReset(deps: AuthDeps, email: string): Promi
       data: { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: expiresAt },
     });
     // `account_password_reset` (marketplace-data-model.md §2.14), the account
-    // email every role will share (R2.5). The plaintext token lives only in this
+    // email every role shares (R2.5). The plaintext token lives only in this
     // payload until the worker (Task 14) delivers it -- never in an app_user
     // column. Account mail concerns a person rather than a studio, so the row
     // carries no photographer_id.
@@ -126,7 +136,7 @@ export async function requestPasswordReset(deps: AuthDeps, email: string): Promi
       payload: {
         // A fragment, not a query string: it never reaches a server log, a
         // proxy, or a Referer header on the static host.
-        resetUrl: `${deps.webOrigin}/admin/reset-password#token=${token}`,
+        resetUrl: `${deps.webOrigin}${AREA_WEB_PATHS[area].resetPassword}#token=${token}`,
         expiresAt: expiresAt.toISOString(),
       },
     });
@@ -141,7 +151,9 @@ export type PasswordResetResult = 'ok' | 'invalid_or_expired_token';
  * the token hash, and the same statement clears it, so two concurrent uses of
  * one token cannot both succeed.
  *
- * The token alone names the user: its hash is unique across `app_user`.
+ * The token alone names the user: its hash is unique across `app_user`. It is
+ * honoured only at the area it was issued for, and only while that area still
+ * admits the user -- a login disabled since the email went out cannot use it.
  *
  * Changing `password_hash` invalidates every token already issued to that user,
  * because each carries a fingerprint of the old hash. It also clears any lockout: the
@@ -149,21 +161,22 @@ export type PasswordResetResult = 'ok' | 'invalid_or_expired_token';
  */
 export async function confirmPasswordReset(
   deps: AuthDeps,
+  area: AuthArea,
   token: string,
   newPassword: string,
 ): Promise<PasswordResetResult> {
   const now = deps.now();
   const tokenHash = sha256Hex(token);
-  const liveToken = { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: { gt: now } };
+  const liveToken = { passwordResetTokenHash: tokenHash, passwordResetExpiresAt: { gt: now }, role: AREA_ROLE[area] };
 
   // Checked first only to avoid spending Argon2 on a garbage token.
-  const holder = await deps.prisma.appUser.findFirst({ where: liveToken, select: { id: true } });
-  if (holder === null) return 'invalid_or_expired_token';
+  const holder = await deps.prisma.appUser.findFirst({ where: liveToken, include: { photographer: { select: { id: true } } } });
+  if (holder === null || !admitsArea(area, holder)) return 'invalid_or_expired_token';
 
   const passwordHash = await hashPassword(newPassword);
 
   const { count } = await deps.prisma.appUser.updateMany({
-    where: { id: holder.id, ...liveToken },
+    where: { id: holder.id, ...liveToken, disabledAt: null, anonymizedAt: null },
     data: {
       passwordHash,
       passwordResetTokenHash: null,
@@ -174,6 +187,17 @@ export async function confirmPasswordReset(
   });
 
   return count === 1 ? 'ok' : 'invalid_or_expired_token';
+}
+
+/**
+ * Revokes every token `userId` holds, in every area, on the next request: adds
+ * one to `token_version`, which every token's credential fingerprint covers
+ * (auth/token.ts). The revocation of a Google-only client, who has no password
+ * to change (Phase 2 decision 2); "sign out everywhere", erasure and a Google
+ * unlink call this. Works on the root client or inside a transaction.
+ */
+export async function revokeTokens(db: PrismaClient | Prisma.TransactionClient, userId: string): Promise<void> {
+  await db.appUser.update({ where: { id: userId }, data: { tokenVersion: { increment: 1 } } });
 }
 
 /**
@@ -189,11 +213,7 @@ export async function confirmPasswordReset(
  * The lock is set pessimistically, before the password is checked. If that Nth
  * attempt turns out to be right, the success path clears it.
  */
-async function claimLoginAttempt(
-  deps: AuthDeps,
-  userId: string,
-  now: Date,
-): Promise<number | null> {
+async function claimLoginAttempt(deps: AuthDeps, userId: string, now: Date): Promise<number | null> {
   // The minutes table is passed in, not repeated, so LOCKOUT_MINUTES stays the
   // single source of truth for SQL and for `lockoutMinutesFor` alike.
   const [first, second, third] = LOCKOUT_MINUTES;
@@ -219,17 +239,15 @@ async function claimLoginAttempt(
 
 /**
  * Emails the account holder when a failed attempt was the one that locked the
- * account (spec §6.23), as `account_security_alert`. The lock itself is
- * already in place.
+ * account (spec §6.23), as `account_security_alert`, with a button to the
+ * area's own sign-in page. The lock itself is already in place.
+ *
+ * Not to an address nobody has verified: mail to one is only ever the
+ * verification link. The lock applies all the same.
  */
-async function alertIfLocked(
-  deps: AuthDeps,
-  login: StudioLogin,
-  attemptNumber: number,
-  now: Date,
-): Promise<void> {
+async function alertIfLocked(deps: AuthDeps, area: AuthArea, login: AreaLogin, attemptNumber: number, now: Date): Promise<void> {
   const minutes = lockoutMinutesFor(attemptNumber);
-  if (minutes === null) return;
+  if (minutes === null || !hasVerifiedEmail(login)) return;
 
   // Recomputed rather than read back from `$queryRaw`: same clock, same table,
   // same formula as the claim, and no timestamp crosses the raw-query boundary.
@@ -246,18 +264,19 @@ async function alertIfLocked(
     dedupeKey: `email:account_security_alert:login_lockout:${login.id}:${attemptNumber}:${lockedUntil.toISOString()}`,
     payload: {
       variant: 'login_lockout',
+      area,
       failedLoginCount: attemptNumber,
       lockedUntil: lockedUntil.toISOString(),
     },
   });
 }
 
-/** A login `canUseStudio` accepts, with what this module needs of it. */
-type StudioLogin = { id: string; email: string; passwordHash: string; photographerId: string };
+/** A login `admitsArea` accepts, with what this module needs of it. */
+type AreaLogin = { id: string; email: string; passwordHash: string | null; emailVerifiedAt: Date | null };
 
 /**
- * The studio login for this email, or null -- for an unknown email AND for any
- * account `canUseStudio` refuses, so a caller cannot tell the two apart.
+ * The login in `area` for this email, or null -- for an unknown email AND for
+ * any account the area does not admit, so a caller cannot tell the two apart.
  *
  * Exact, case-insensitive match, served by the functional unique index
  * `app_user_lower_email_unique`: one address is one account, whatever its role.
@@ -268,14 +287,14 @@ type StudioLogin = { id: string; email: string; passwordHash: string; photograph
  * 22025 as a 500. The account's address stopped being a factor at all: anyone
  * could guess passwords, lock the account, or trigger reset emails against it.
  */
-async function findStudioLogin(prisma: PrismaClient, email: string): Promise<StudioLogin | null> {
+async function findAreaLogin(prisma: PrismaClient, area: AuthArea, email: string): Promise<AreaLogin | null> {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     SELECT id FROM app_user WHERE lower(email) = lower(${email}) LIMIT 1`;
   const id = rows[0]?.id;
   if (id === undefined) return null;
   const user = await prisma.appUser.findUnique({ where: { id }, include: { photographer: { select: { id: true } } } });
-  if (user === null || !canUseStudio(user)) return null;
-  return { id: user.id, email: user.email, passwordHash: user.passwordHash, photographerId: user.photographer.id };
+  if (user === null || !admitsArea(area, user)) return null;
+  return { id: user.id, email: user.email, passwordHash: user.passwordHash, emailVerifiedAt: user.emailVerifiedAt };
 }
 
 let dummyHashPromise: Promise<string> | undefined;

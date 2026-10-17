@@ -57,7 +57,7 @@ export async function emailBookingLinks(deps: LinkLookupDeps, typedEmail: string
     // Equality on lower(), never Prisma's `{ equals, mode: 'insensitive' }`: on
     // PostgreSQL that is ILIKE, a pattern, so `_____@gmail.com` or `%` would
     // match strangers' bookings and mail their links to the caller (security
-    // review 2026-10-11, finding 1; the same rule as admin-auth.ts).
+    // review 2026-10-11, finding 1; the same rule as account-auth.ts).
     const matched = await tx.$queryRaw<{ id: string }[]>`
       SELECT id::text AS id
         FROM booking

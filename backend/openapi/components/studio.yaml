@@ -1,43 +1,24 @@
-# Admin schemas: auth, availability, settings, calendar and bookings.
+# Studio schemas: the signed-in photographer, availability, settings, calendar and bookings.
 
 schemas:
-  # --- Auth ----------------------------------------------------------------
+  # --- Me ------------------------------------------------------------------
 
-  PublicAdmin:
+  StudioMe:
     type: object
-    description: The only shape of the admin that leaves the API. No hash, reset or lockout state.
-    required: [id, email, lastLoginAt]
+    required: [user, photographer]
     additionalProperties: false
     properties:
-      id: { $ref: 'common.yaml#/schemas/Uuid' }
-      email: { type: string, format: email }
-      lastLoginAt: { type: [string, 'null'], format: date-time }
-
-  LoginRequest:
-    type: object
-    required: [email, password]
-    properties:
-      email: { type: string, minLength: 1, maxLength: 320 }
-      password: { type: string, minLength: 1, maxLength: 1024 }
-
-  LoginResponse:
-    type: object
-    required: [admin, token, tokenType, expiresAt]
-    additionalProperties: false
-    properties:
-      admin: { $ref: '#/schemas/PublicAdmin' }
-      token:
-        type: string
-        description: "Send as `Authorization: Bearer <token>`. Keep it in memory or `sessionStorage`, never `localStorage`."
-      tokenType: { const: Bearer }
-      expiresAt: { $ref: 'common.yaml#/schemas/Instant' }
-
-  AdminEnvelope:
-    type: object
-    required: [admin]
-    additionalProperties: false
-    properties:
-      admin: { $ref: '#/schemas/PublicAdmin' }
+      user: { $ref: 'auth.yaml#/schemas/PublicUser' }
+      photographer:
+        type: object
+        description: The studio the login owns. Its `status` drives the pending or suspended banner.
+        required: [id, handle, displayName, status]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          handle: { type: string }
+          displayName: { type: string }
+          status: { $ref: 'platform.yaml#/schemas/PhotographerStatus' }
 
   # --- Working hours and blocks -------------------------------------------
 

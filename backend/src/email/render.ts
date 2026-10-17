@@ -13,7 +13,9 @@ import { clientNote } from './templates/client-note.js';
 import { paymentReceipt } from './templates/payment-receipt.js';
 import { photoDelivery } from './templates/photo-delivery.js';
 import { photographerAlert } from './templates/photographer-alert.js';
+import { photographerApproved } from './templates/photographer-approved.js';
 import { photographerNewBooking } from './templates/photographer-new-booking.js';
+import { photographerSuspended } from './templates/photographer-suspended.js';
 import { platformAlert } from './templates/platform-alert.js';
 import { reschedule } from './templates/reschedule.js';
 import { sessionFeeRequest } from './templates/session-fee-request.js';
@@ -48,6 +50,8 @@ export const TEMPLATES: Record<SendableEmailTemplate, AnyEmailTemplate> = {
   client_note: clientNote,
   account_password_reset: accountPasswordReset,
   account_security_alert: accountSecurityAlert,
+  photographer_approved: photographerApproved,
+  photographer_suspended: photographerSuspended,
 };
 
 export type RenderOptions = {

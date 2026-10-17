@@ -1,11 +1,11 @@
-# Services, packages and add-ons. All require the admin bearer token. Edits are
+# Services, packages and add-ons. All require the studio bearer token. Edits are
 # partial and never touch an existing booking (bookings carry their own
 # snapshots). A delete is allowed only for a row nothing references (else 409).
 
 catalogue:
   get:
     operationId: getCatalogue
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: The whole catalogue
     description: Every service (active or not) with its packages and own add-ons, and the add-ons offered on every service.
     responses:
@@ -20,7 +20,7 @@ catalogue:
 services:
   post:
     operationId: createService
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Create a service
     requestBody:
       required: true
@@ -42,7 +42,7 @@ services:
 serviceItem:
   patch:
     operationId: updateService
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Update a service
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -66,7 +66,7 @@ serviceItem:
         $ref: '#/_responses/invalid'
   delete:
     operationId: deleteService
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Delete a service
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -83,7 +83,7 @@ serviceItem:
 packages:
   post:
     operationId: createPackage
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Create a package
     requestBody:
       required: true
@@ -106,7 +106,7 @@ packages:
 packageItem:
   patch:
     operationId: updatePackage
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Update a package
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -128,7 +128,7 @@ packageItem:
         $ref: '#/_responses/invalid'
   delete:
     operationId: deletePackage
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Delete a package
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -145,7 +145,7 @@ packageItem:
 addons:
   post:
     operationId: createAddon
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Create an add-on
     requestBody:
       required: true
@@ -168,7 +168,7 @@ addons:
 addonItem:
   patch:
     operationId: updateAddon
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Update an add-on
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -190,7 +190,7 @@ addonItem:
         $ref: '#/_responses/invalid'
   delete:
     operationId: deleteAddon
-    tags: [Admin catalogue]
+    tags: [Studio catalogue]
     summary: Delete an add-on
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId

@@ -3,8 +3,8 @@
   "info": {
     "title": "Bookly API",
     "version": "1.0.0",
-    "summary": "Booking, payment and admin API for a photographer's booking site in Kigali.",
-    "description": "The API behind the Bookly booking site. It serves three kinds of caller:\n\n- **The public**: anonymous visitors browsing photographers and their\n  services, checking availability, booking a slot and paying its booking fee.\n- **A booking's client**: no account; every client request carries a\n  **capability token** in its path, emailed when the booking is confirmed.\n- **A photographer** (the studio, under `/api/admin/*` until Phase 2 moves\n  it to `/api/studio/*`): an `Authorization: Bearer` JWT from\n  `POST /api/admin/auth/login`. Every studio route is scoped to the\n  photographer the token names; an id of another photographer's row is a\n  404, exactly like an id that names nothing.\n\nRead [the API conventions](/api/conventions) first: error shapes, the\n400-versus-422 rule, time zones and money are the same on every operation.\n\nThis file is written by hand. A backend test (`src/openapi.test.ts`) fails\nwhen a route exists without an operation here, or the other way round, and\nvalidates real responses against these schemas.\n"
+    "summary": "Booking, payment, studio and platform API for a marketplace of photographers in Kigali.",
+    "description": "The API behind the Bookly marketplace. It serves four kinds of caller:\n\n- **The public**: anonymous visitors browsing photographers and their\n  services, checking availability, booking a slot and paying its booking fee.\n- **A booking's client**: no account needed; every client request carries a\n  **capability token** in its path, emailed when the booking is confirmed.\n- **A photographer**, in the studio under `/api/studio/*`: an\n  `Authorization: Bearer` JWT from `POST /api/studio/auth/login`. Every\n  studio route is scoped to the photographer the token names; an id of\n  another photographer's row is a 404, exactly like an id that names nothing.\n- **A platform admin**, in the console under `/api/platform/*`: a bearer\n  JWT from `POST /api/platform/auth/login`.\n\nEach signed-in area has its own login and its own token audience: a token\nfrom one area is a `401` in every other, whatever its role claim says.\n\nRead [the API conventions](/api/conventions) first: error shapes, the\n400-versus-422 rule, time zones and money are the same on every operation.\n\nThis file is written by hand. A backend test (`src/openapi.test.ts`) fails\nwhen a route exists without an operation here, or the other way round, and\nvalidates real responses against these schemas.\n"
   },
   "servers": [
     {
@@ -18,7 +18,7 @@
   ],
   "security": [
     {
-      "adminBearer": []
+      "studioBearer": []
     }
   ],
   "tags": [
@@ -50,30 +50,38 @@
       "description": "Confirming a booking's change of contact email from the new address."
     },
     {
-      "name": "Admin auth",
+      "name": "Studio auth",
       "description": "Login and password reset for a photographer's studio account."
     },
     {
-      "name": "Admin availability",
+      "name": "Studio availability",
       "description": "Working hours and blocked time."
     },
     {
-      "name": "Admin settings",
+      "name": "Studio settings",
       "description": "The photographer's operating values and client cancellation policy."
     },
     {
-      "name": "Admin calendar"
+      "name": "Studio calendar"
     },
     {
-      "name": "Admin bookings",
+      "name": "Studio bookings",
       "description": "The bookings list, one booking, and everything done to it."
     },
     {
-      "name": "Admin payments"
+      "name": "Studio payments"
     },
     {
-      "name": "Admin catalogue",
+      "name": "Studio catalogue",
       "description": "Services, packages and add-ons."
+    },
+    {
+      "name": "Platform auth",
+      "description": "Login and password reset for a platform admin."
+    },
+    {
+      "name": "Platform photographers",
+      "description": "Listing photographers, and approving, suspending and reactivating them."
     },
     {
       "name": "Webhooks",
@@ -1067,14 +1075,14 @@
         }
       }
     },
-    "/api/admin/auth/login": {
+    "/api/studio/auth/login": {
       "post": {
-        "operationId": "adminLogin",
+        "operationId": "studioLogin",
         "tags": [
-          "Admin auth"
+          "Studio auth"
         ],
         "summary": "Log in",
-        "description": "Email and password for the one admin account. Returns a bearer JWT valid\n8 hours. Unknown email, wrong password and a locked account are one\nanswer — `401 invalid_credentials` — so none is disclosed; repeated\nfailures lock the account and email the photographer. `Cache-Control: no-store`.\n",
+        "description": "Email and password for a photographer's studio. Returns a bearer JWT for\nthe `bookly-studio` audience, valid 8 hours, which no other area accepts.\nUnknown email, wrong password, a locked account, an unverified address\nand an account of another kind (a platform admin, a client) are one\nanswer — `401 invalid_credentials` — so none is disclosed; repeated\nfailures lock the account and email its holder. A pending or suspended\nphotographer can sign in. `Cache-Control: no-store`.\n",
         "security": [],
         "requestBody": {
           "required": true,
@@ -1101,17 +1109,7 @@
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
-            "description": "Invalid credentials (or the account is locked — not disclosed which).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                },
-                "example": {
-                  "error": "invalid_credentials"
-                }
-              }
-            }
+            "$ref": "#/components/responses/InvalidCredentials"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -1119,51 +1117,32 @@
         }
       }
     },
-    "/api/admin/auth/password-reset/request": {
+    "/api/studio/auth/password-reset/request": {
       "post": {
-        "operationId": "requestPasswordReset",
+        "operationId": "requestStudioPasswordReset",
         "tags": [
-          "Admin auth"
+          "Studio auth"
         ],
         "summary": "Request a password reset",
-        "description": "If the address is the admin's, a single-use, time-limited reset link is\nemailed. The answer is always `202`, whether or not it is, so the endpoint\ndoes not reveal the admin's address.\n",
+        "description": "If the address is a photographer's login, a single-use reset link to\n`/studio/reset-password`, valid 30 minutes, is emailed. The answer is\nalways `202`, whether or not it is, so the endpoint does not reveal which\naddresses have accounts.\n",
         "security": [],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "email"
-                ],
-                "properties": {
-                  "email": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 320
-                  }
-                }
+                "$ref": "#/components/schemas/ResetRequest"
               }
             }
           }
         },
         "responses": {
           "202": {
-            "description": "Accepted (sent only if the address is the admin's).",
+            "description": "Accepted (sent only if the address is a photographer's login).",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "ok"
-                  ],
-                  "additionalProperties": false,
-                  "properties": {
-                    "ok": {
-                      "const": true
-                    }
-                  }
+                  "$ref": "#/components/schemas/ResetAccepted"
                 }
               }
             }
@@ -1177,37 +1156,21 @@
         }
       }
     },
-    "/api/admin/auth/password-reset/confirm": {
+    "/api/studio/auth/password-reset/confirm": {
       "post": {
-        "operationId": "confirmPasswordReset",
+        "operationId": "confirmStudioPasswordReset",
         "tags": [
-          "Admin auth"
+          "Studio auth"
         ],
         "summary": "Set a new password from a reset link",
-        "description": "Consumes the emailed token and sets the new password, which revokes every token already issued. The token works once.",
+        "description": "Consumes the emailed token and sets the new password, which revokes every token already issued. The token works once, and only here.",
         "security": [],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "token",
-                  "newPassword"
-                ],
-                "properties": {
-                  "token": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 512
-                  },
-                  "newPassword": {
-                    "type": "string",
-                    "minLength": 12,
-                    "maxLength": 1024
-                  }
-                }
+                "$ref": "#/components/schemas/ResetConfirm"
               }
             }
           }
@@ -1217,44 +1180,28 @@
             "description": "The password is changed."
           },
           "400": {
-            "description": "A malformed body, or an invalid or expired token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                },
-                "examples": {
-                  "invalid_request": {
-                    "value": {
-                      "error": "invalid_request"
-                    }
-                  },
-                  "invalid_token": {
-                    "value": {
-                      "error": "invalid_or_expired_token"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/ResetConfirmRefused"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
     },
-    "/api/admin/me": {
+    "/api/studio/me": {
       "get": {
-        "operationId": "getAdminMe",
+        "operationId": "getStudioMe",
         "tags": [
-          "Admin auth"
+          "Studio auth"
         ],
-        "summary": "The signed-in admin",
+        "summary": "The signed-in photographer",
         "responses": {
           "200": {
-            "description": "The admin.",
+            "description": "The login and the studio it owns.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminEnvelope"
+                  "$ref": "#/components/schemas/StudioMe"
                 }
               }
             }
@@ -1265,11 +1212,11 @@
         }
       }
     },
-    "/api/admin/working-hours": {
+    "/api/studio/working-hours": {
       "get": {
         "operationId": "listWorkingHours",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "List working hours",
         "responses": {
@@ -1303,7 +1250,7 @@
       "post": {
         "operationId": "createWorkingHours",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "Add a weekly rule or dated override",
         "requestBody": {
@@ -1368,11 +1315,11 @@
         }
       }
     },
-    "/api/admin/working-hours/{id}": {
+    "/api/studio/working-hours/{id}": {
       "put": {
         "operationId": "replaceWorkingHours",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "Replace a working-hours row",
         "description": "Replaces the whole row, so a rule can move between a weekday and a date.",
@@ -1448,7 +1395,7 @@
       "delete": {
         "operationId": "deleteWorkingHours",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "Delete a working-hours row",
         "description": "Deleting a weekday rule closes that weekday; deleting an override restores the weekly rule for its date.",
@@ -1470,16 +1417,16 @@
         }
       }
     },
-    "/api/admin/blocks": {
+    "/api/studio/blocks": {
       "get": {
         "operationId": "listBlocks",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "List blocks",
         "responses": {
           "200": {
-            "description": "Blocked time, with reasons (admin-only).",
+            "description": "Blocked time, with reasons (studio-only).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1508,7 +1455,7 @@
       "post": {
         "operationId": "createBlock",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "Block time",
         "requestBody": {
@@ -1570,11 +1517,11 @@
         }
       }
     },
-    "/api/admin/blocks/{id}": {
+    "/api/studio/blocks/{id}": {
       "put": {
         "operationId": "updateBlock",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "Change a block",
         "parameters": [
@@ -1646,7 +1593,7 @@
       "delete": {
         "operationId": "deleteBlock",
         "tags": [
-          "Admin availability"
+          "Studio availability"
         ],
         "summary": "Delete a block",
         "parameters": [
@@ -1667,11 +1614,11 @@
         }
       }
     },
-    "/api/admin/settings": {
+    "/api/studio/settings": {
       "get": {
         "operationId": "getSettings",
         "tags": [
-          "Admin settings"
+          "Studio settings"
         ],
         "summary": "The photographer's operating values and cancellation policy",
         "responses": {
@@ -1693,7 +1640,7 @@
       "patch": {
         "operationId": "updateSettings",
         "tags": [
-          "Admin settings"
+          "Studio settings"
         ],
         "summary": "Change settings",
         "description": "Any subset of the six. Each is range-checked here, so a value out of\nrange is a 422 rather than a database error. Applies to bookings made\nfrom now on; existing bookings keep the terms they were made under.\n",
@@ -1737,11 +1684,11 @@
         }
       }
     },
-    "/api/admin/calendar": {
+    "/api/studio/calendar": {
       "get": {
         "operationId": "getCalendar",
         "tags": [
-          "Admin calendar"
+          "Studio calendar"
         ],
         "summary": "Bookings, holds and blocks for a range",
         "parameters": [
@@ -1793,11 +1740,11 @@
         }
       }
     },
-    "/api/admin/bookings": {
+    "/api/studio/bookings": {
       "get": {
         "operationId": "listBookings",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "List bookings",
         "description": "The signed-in photographer's bookings only. Filtered by stage, status and\nshoot date, searched by reference, name, email or phone (the booking's\nown contact details), and paged by number with a total.\n",
@@ -1900,11 +1847,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}": {
+    "/api/studio/bookings/{id}": {
       "get": {
         "operationId": "getBooking",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "One booking",
         "parameters": [
@@ -1928,11 +1875,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/reschedule": {
+    "/api/studio/bookings/{id}/reschedule": {
       "post": {
         "operationId": "rescheduleBooking",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Reschedule a booking",
         "description": "Keeps the booking, its reference, token and payments; moves the slot and its buffer to a free slot.",
@@ -2010,11 +1957,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/cancel": {
+    "/api/studio/bookings/{id}/cancel": {
       "post": {
         "operationId": "cancelBooking",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Cancel a booking",
         "description": "Releases the slot and marks the booking fee `refund_due` for a full refund. An optional reason is shown to the client.",
@@ -2063,11 +2010,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/complete": {
+    "/api/studio/bookings/{id}/complete": {
       "post": {
         "operationId": "completeBooking",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Mark a booking completed",
         "description": "Completing means paid. A booking that still owes money is a 409 `balance_due`.",
@@ -2116,11 +2063,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/no-show": {
+    "/api/studio/bookings/{id}/no-show": {
       "post": {
         "operationId": "markNoShow",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Mark a no-show",
         "parameters": [
@@ -2147,11 +2094,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/resend-link": {
+    "/api/studio/bookings/{id}/resend-link": {
       "post": {
         "operationId": "resendAccessLink",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Resend the client's access link",
         "description": "Issues a fresh token and invalidates the old one, then emails the new link.",
@@ -2179,11 +2126,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/addons": {
+    "/api/studio/bookings/{id}/addons": {
       "post": {
         "operationId": "addPostShootAddon",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Add a post-shoot add-on",
         "description": "Adds a catalogue add-on to a booking whose shoot has begun. The price is read from the catalogue, never sent.",
@@ -2246,11 +2193,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/addons/{addonId}": {
+    "/api/studio/bookings/{id}/addons/{addonId}": {
       "delete": {
         "operationId": "removePostShootAddon",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Remove a post-shoot add-on",
         "description": "Removes an add-on still removable (post-shoot, not yet paid for).",
@@ -2307,11 +2254,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/session-fee": {
+    "/api/studio/bookings/{id}/session-fee": {
       "post": {
         "operationId": "requestSessionFee",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Ask the client for the session fee",
         "description": "Opens a session-fee request for what the booking owes and emails the\nclient. Only mounted when a payment provider is configured; without one\nthe route is a 404.\n",
@@ -2366,11 +2313,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/payments/cash": {
+    "/api/studio/bookings/{id}/payments/cash": {
       "post": {
         "operationId": "recordCashPayment",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Record a cash payment",
         "description": "Records cash the photographer was handed, up to what is owed. Refused\nwhile an online payment may be in flight; it voids an open online request\nso the same money cannot be taken twice, and emails nobody.\n",
@@ -2470,11 +2417,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/delivery": {
+    "/api/studio/bookings/{id}/delivery": {
       "put": {
         "operationId": "saveDelivery",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Save the photo-delivery link",
         "description": "Sets the external photo link and its expiry on a completed booking. The link must be https.",
@@ -2546,11 +2493,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/delivery/send": {
+    "/api/studio/bookings/{id}/delivery/send": {
       "post": {
         "operationId": "sendDelivery",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Send the photos",
         "description": "Emails the saved delivery link, optionally to another address for this one email. The booking's own contact email is not changed.",
@@ -2627,11 +2574,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/notes": {
+    "/api/studio/bookings/{id}/notes": {
       "post": {
         "operationId": "addNote",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Add a note to the client",
         "description": "A plain-text note, emailed to the client unless `email` is false.",
@@ -2694,11 +2641,11 @@
         }
       }
     },
-    "/api/admin/bookings/{id}/notes/{noteId}": {
+    "/api/studio/bookings/{id}/notes/{noteId}": {
       "delete": {
         "operationId": "deleteNote",
         "tags": [
-          "Admin bookings"
+          "Studio bookings"
         ],
         "summary": "Delete a note",
         "parameters": [
@@ -2730,11 +2677,11 @@
         }
       }
     },
-    "/api/admin/payments/{id}/refund": {
+    "/api/studio/payments/{id}/refund": {
       "post": {
         "operationId": "recordRefund",
         "tags": [
-          "Admin payments"
+          "Studio payments"
         ],
         "summary": "Record a refund",
         "description": "Records that the photographer refunded a payment by hand (the system\nnever moves money). Needs the MoMo or bank reference it was sent with.\n",
@@ -2814,11 +2761,11 @@
         }
       }
     },
-    "/api/admin/catalogue": {
+    "/api/studio/catalogue": {
       "get": {
         "operationId": "getCatalogue",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "The whole catalogue",
         "description": "Every service (active or not) with its packages and own add-ons, and the add-ons offered on every service.",
@@ -2839,11 +2786,11 @@
         }
       }
     },
-    "/api/admin/services": {
+    "/api/studio/services": {
       "post": {
         "operationId": "createService",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Create a service",
         "requestBody": {
@@ -2875,11 +2822,11 @@
         }
       }
     },
-    "/api/admin/services/{id}": {
+    "/api/studio/services/{id}": {
       "patch": {
         "operationId": "updateService",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Update a service",
         "parameters": [
@@ -2921,7 +2868,7 @@
       "delete": {
         "operationId": "deleteService",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Delete a service",
         "parameters": [
@@ -2945,11 +2892,11 @@
         }
       }
     },
-    "/api/admin/packages": {
+    "/api/studio/packages": {
       "post": {
         "operationId": "createPackage",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Create a package",
         "requestBody": {
@@ -2985,11 +2932,11 @@
         }
       }
     },
-    "/api/admin/packages/{id}": {
+    "/api/studio/packages/{id}": {
       "patch": {
         "operationId": "updatePackage",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Update a package",
         "parameters": [
@@ -3028,7 +2975,7 @@
       "delete": {
         "operationId": "deletePackage",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Delete a package",
         "parameters": [
@@ -3052,11 +2999,11 @@
         }
       }
     },
-    "/api/admin/addons": {
+    "/api/studio/addons": {
       "post": {
         "operationId": "createAddon",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Create an add-on",
         "requestBody": {
@@ -3092,11 +3039,11 @@
         }
       }
     },
-    "/api/admin/addons/{id}": {
+    "/api/studio/addons/{id}": {
       "patch": {
         "operationId": "updateAddon",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Update an add-on",
         "parameters": [
@@ -3135,7 +3082,7 @@
       "delete": {
         "operationId": "deleteAddon",
         "tags": [
-          "Admin catalogue"
+          "Studio catalogue"
         ],
         "summary": "Delete an add-on",
         "parameters": [
@@ -3155,6 +3102,349 @@
           },
           "409": {
             "$ref": "#/components/responses/inUse"
+          }
+        }
+      }
+    },
+    "/api/platform/auth/login": {
+      "post": {
+        "operationId": "platformLogin",
+        "tags": [
+          "Platform auth"
+        ],
+        "summary": "Log in",
+        "description": "Email and password for a platform admin. Returns a bearer JWT for the\n`bookly-platform` audience, valid 8 hours, which no other area accepts.\nUnknown email, wrong password, a locked account, an unverified address\nand an account of another kind are one answer — `401 invalid_credentials`.\n`Cache-Control: no-store`.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidCredentials"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/platform/auth/password-reset/request": {
+      "post": {
+        "operationId": "requestPlatformPasswordReset",
+        "tags": [
+          "Platform auth"
+        ],
+        "summary": "Request a password reset",
+        "description": "If the address is a platform admin's login, a single-use reset link to\n`/platform/reset-password`, valid 30 minutes, is emailed. Always `202`.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (sent only if the address is a platform admin's login).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/platform/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "confirmPlatformPasswordReset",
+        "tags": [
+          "Platform auth"
+        ],
+        "summary": "Set a new password from a reset link",
+        "description": "Consumes the emailed token and sets the new password, which revokes every token already issued. The token works once, and only here.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetConfirm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The password is changed."
+          },
+          "400": {
+            "$ref": "#/components/responses/ResetConfirmRefused"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/platform/me": {
+      "get": {
+        "operationId": "getPlatformMe",
+        "tags": [
+          "Platform auth"
+        ],
+        "summary": "The signed-in platform admin",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The platform admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/platform/photographers": {
+      "get": {
+        "operationId": "listPlatformPhotographers",
+        "tags": [
+          "Platform photographers"
+        ],
+        "summary": "List photographers",
+        "description": "Every photographer, newest first, or only those in one status.",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PhotographerStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The photographers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPhotographerList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/platform/photographers/{id}/approve": {
+      "post": {
+        "operationId": "approvePhotographer",
+        "tags": [
+          "Platform photographers"
+        ],
+        "summary": "Approve a photographer",
+        "description": "`pending` → `approved`: listed and bookable from now on. Records who\napproved and when, and emails the photographer `photographer_approved`.\nIdempotent: approving an approved photographer is a `200` that changes\nnothing and sends nothing. A suspended photographer is reactivated, not\napproved (`409`). Takes no body.\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The photographer, now approved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPhotographerEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The photographer is suspended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidTransition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/photographers/{id}/suspend": {
+      "post": {
+        "operationId": "suspendPhotographer",
+        "tags": [
+          "Platform photographers"
+        ],
+        "summary": "Suspend a photographer",
+        "description": "`pending` or `approved` → `suspended`, with the reason the photographer\nis emailed (`photographer_suspended`). The profile is hidden and new\nbookings are refused; every existing booking carries on. Idempotent:\nsuspending a suspended photographer is a `200` that keeps the first\nreason and sends nothing.\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Trimmed. Shown to the photographer."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The photographer, now suspended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPhotographerEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      }
+    },
+    "/api/platform/photographers/{id}/reactivate": {
+      "post": {
+        "operationId": "reactivatePhotographer",
+        "tags": [
+          "Platform photographers"
+        ],
+        "summary": "Reactivate a suspended photographer",
+        "description": "`suspended` → `approved`, or back to `pending` for one suspended before\never being approved. Clears the suspension's date and reason. Idempotent:\nreactivating a photographer who is not suspended is a `200` that changes\nnothing. Takes no body.\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The photographer as they now are.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPhotographerEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -3331,11 +3621,17 @@
   },
   "components": {
     "securitySchemes": {
-      "adminBearer": {
+      "studioBearer": {
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "HS256 JWT from `POST /api/admin/auth/login`, valid 8 hours. Sent as\n`Authorization: Bearer <token>`; never a cookie. Changing the admin\npassword revokes every token already issued.\n"
+        "description": "HS256 JWT from `POST /api/studio/auth/login`, audience `bookly-studio`,\nvalid 8 hours. Sent as `Authorization: Bearer <token>`; never a cookie.\nRefused once the password changes, the login is disabled or erased, or\nits tokens are revoked; refused outside the studio.\n"
+      },
+      "platformBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "HS256 JWT from `POST /api/platform/auth/login`, audience\n`bookly-platform`, valid 8 hours. Revoked like the studio's; refused\noutside the platform console.\n"
       }
     },
     "schemas": {
@@ -4761,9 +5057,9 @@
           }
         }
       },
-      "PublicAdmin": {
+      "PublicUser": {
         "type": "object",
-        "description": "The only shape of the admin that leaves the API. No hash, reset or lockout state.",
+        "description": "The only shape of a signed-in user that leaves the API, in every area. No\npassword hash, token hashes, Google subject, token version, lockout state\nor role.\n",
         "required": [
           "id",
           "email",
@@ -4790,19 +5086,19 @@
       "LoginResponse": {
         "type": "object",
         "required": [
-          "admin",
+          "user",
           "token",
           "tokenType",
           "expiresAt"
         ],
         "additionalProperties": false,
         "properties": {
-          "admin": {
-            "$ref": "#/components/schemas/PublicAdmin"
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
           },
           "token": {
             "type": "string",
-            "description": "Send as `Authorization: Bearer <token>`. Keep it in memory or `sessionStorage`, never `localStorage`."
+            "description": "Send as `Authorization: Bearer <token>`, to this area only. Keep it in memory or `sessionStorage`, never `localStorage`."
           },
           "tokenType": {
             "const": "Bearer"
@@ -4812,15 +5108,94 @@
           }
         }
       },
-      "AdminEnvelope": {
+      "ResetRequest": {
         "type": "object",
         "required": [
-          "admin"
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 320
+          }
+        }
+      },
+      "ResetAccepted": {
+        "type": "object",
+        "required": [
+          "ok"
         ],
         "additionalProperties": false,
         "properties": {
-          "admin": {
-            "$ref": "#/components/schemas/PublicAdmin"
+          "ok": {
+            "const": true
+          }
+        }
+      },
+      "ResetConfirm": {
+        "type": "object",
+        "required": [
+          "token",
+          "newPassword"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024
+          }
+        }
+      },
+      "PhotographerStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "suspended"
+        ],
+        "description": "`pending` until a platform admin approves; `approved` is listed and\nbookable; `suspended` is hidden and takes no new bookings, but keeps every\nbooking it already has.\n"
+      },
+      "StudioMe": {
+        "type": "object",
+        "required": [
+          "user",
+          "photographer"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "photographer": {
+            "type": "object",
+            "description": "The studio the login owns. Its `status` drives the pending or suspended banner.",
+            "required": [
+              "id",
+              "handle",
+              "displayName",
+              "status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "handle": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "status": {
+                "$ref": "#/components/schemas/PhotographerStatus"
+              }
+            }
           }
         }
       },
@@ -6509,6 +6884,133 @@
             "minimum": 0
           }
         }
+      },
+      "UserEnvelope": {
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          }
+        }
+      },
+      "PlatformPhotographer": {
+        "type": "object",
+        "required": [
+          "id",
+          "handle",
+          "displayName",
+          "email",
+          "status",
+          "createdAt",
+          "approvedAt",
+          "approvedByUserId",
+          "suspendedAt",
+          "suspensionReason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "The photographer's login address."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PhotographerStatus"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approvedByUserId": {
+            "description": "The platform admin who approved them.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "suspendedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the current suspension began. Cleared on reactivation."
+          },
+          "suspensionReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The reason given for the current suspension, as emailed to the photographer."
+          }
+        }
+      },
+      "PlatformPhotographerList": {
+        "type": "object",
+        "required": [
+          "photographers"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "photographers": {
+            "type": "array",
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/PlatformPhotographer"
+            }
+          }
+        }
+      },
+      "PlatformPhotographerEnvelope": {
+        "type": "object",
+        "required": [
+          "photographer"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "photographer": {
+            "$ref": "#/components/schemas/PlatformPhotographer"
+          }
+        }
+      },
+      "InvalidTransition": {
+        "type": "object",
+        "required": [
+          "error",
+          "photographer"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "invalid_transition"
+          },
+          "photographer": {
+            "$ref": "#/components/schemas/PlatformPhotographer"
+          }
+        }
       }
     },
     "parameters": {
@@ -6572,7 +7074,7 @@
     },
     "responses": {
       "NotFound": {
-        "description": "Nothing there. For a capability token this is also the answer for an\nexpired, superseded or malformed token: never 403, which would confirm\nthat a booking exists. On an admin route it is also the answer for an id\nthat belongs to another photographer.\n",
+        "description": "Nothing there. For a capability token this is also the answer for an\nexpired, superseded or malformed token: never 403, which would confirm\nthat a booking exists. On a studio route it is also the answer for an id\nthat belongs to another photographer.\n",
         "content": {
           "application/json": {
             "schema": {
@@ -6618,8 +7120,43 @@
           }
         }
       },
+      "InvalidCredentials": {
+        "description": "Invalid credentials. One answer for an unknown email, a wrong password, a\nlocked account, an unverified address and an account of another kind:\nnone is disclosed.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "invalid_credentials"
+            }
+          }
+        }
+      },
+      "ResetConfirmRefused": {
+        "description": "A malformed body, or an invalid or expired token.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "invalid_request": {
+                "value": {
+                  "error": "invalid_request"
+                }
+              },
+              "invalid_token": {
+                "value": {
+                  "error": "invalid_or_expired_token"
+                }
+              }
+            }
+          }
+        }
+      },
       "Unauthorized": {
-        "description": "No valid admin token. The `WWW-Authenticate` header says which: `Bearer\nrealm=\"bookly-admin\"` for no token, `…, error=\"invalid_token\"` for a\nrefused one (expired, tampered, or issued before a password change).\n",
+        "description": "No valid token for this area. The `WWW-Authenticate` header says which:\n`Bearer realm=\"bookly-studio\"` (or `bookly-platform`) for no token,\n`…, error=\"invalid_token\"` for a refused one: expired, tampered, issued\nfor another area, issued before a password change or a revocation, or\nfor a login since disabled.\n",
         "headers": {
           "WWW-Authenticate": {
             "schema": {
@@ -6742,6 +7279,16 @@
                   "$ref": "#/components/schemas/AdminAddon"
                 }
               }
+            }
+          }
+        }
+      },
+      "ValidationFailed": {
+        "description": "Well-formed, but a value breaks a rule. Names the fields.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ValidationError"
             }
           }
         }

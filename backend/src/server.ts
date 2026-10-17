@@ -31,7 +31,7 @@ function boot(): void {
   const app = createApp({
     corsOrigin: env.WEB_ORIGIN,
     trustProxyHops: env.TRUST_PROXY_HOPS,
-    admin: {
+    auth: {
       prisma,
       sessionSecret: env.SESSION_SECRET,
       webOrigin: env.WEB_ORIGIN,

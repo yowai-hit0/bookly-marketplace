@@ -295,6 +295,24 @@
         "ifNotYou": "If this was not you, someone may be trying to guess your password. Once the lock ends, consider resetting your password.",
         "signIn": "Go to the sign-in page"
       }
+    },
+    "photographerApproved": {
+      "subject": "Your studio is approved",
+      "preheader": "Clients can now find you and book you.",
+      "heading": "Your studio is approved",
+      "intro": "Good news: your studio has been approved. Your profile is now listed in the directory, and clients can book your services.",
+      "profileLabel": "Your public profile",
+      "button": "Open your studio"
+    },
+    "photographerSuspended": {
+      "subject": "Your studio has been suspended",
+      "preheader": "Your profile is hidden and new bookings are paused.",
+      "heading": "Your studio has been suspended",
+      "intro": "A platform admin has suspended your studio. Your profile is hidden from the directory, and clients cannot make new bookings with you.",
+      "reasonLabel": "Reason",
+      "existingBookings": "Bookings you already have are not affected: they carry on as planned, and you can still sign in to manage them.",
+      "questions": "If you have questions, or think this is a mistake, reply to this email.",
+      "button": "Open your studio"
     }
   }
 }

@@ -35,9 +35,9 @@ The data model changes are in [`docs/marketplace-data-model.md`](marketplace-dat
 | Guest booking (unchanged mechanics) | `/checkout/:reference/:token`, `/checkout/:reference/:token/payments/:ourRef` (also the **card return page**), `/booking/:token`, `/my-booking`, `/email-confirm/:token` |
 | Client account | `/account/login`, `/account/signup`, `/account/verify/:token`, `/account/reset-password`, `/account` (dashboard), `/account/bookings/:reference`, `/account/payments`, `/account/payments/:ourRef/receipt`, `/account/profile` |
 | Photographer studio | `/studio/login`, `/studio/signup`, `/studio/verify/:token`, `/studio/reset-password`. The current five pages move from `/admin/*` to `/studio/*`. New pages: `/studio/setup`, `/studio/profile`, `/studio/earnings`, `/studio/payout-method`, `/studio/subscription`. |
-| Platform admin | `/platform/login`, `/platform/photographers` (+ `/:id`), `/platform/payouts` (+ `/:id`), `/platform/subscriptions`, `/platform/categories`, `/platform/settings`, `/platform/refunds` |
+| Platform admin | `/platform/login`, `/platform/reset-password`, `/platform/photographers` (+ `/:id`), `/platform/payouts` (+ `/:id`), `/platform/subscriptions`, `/platform/categories`, `/platform/settings`, `/platform/refunds` |
 
-The API follows the same shape: `/api/...` for public, `/api/account/*`, `/api/studio/*` and `/api/platform/*`. Reserved handles (`admin`, `api`, `p`, `studio`, `platform`, `account`, `photographers`, …) are refused at signup.
+The API follows the same shape: `/api/...` for public, `/api/account/*`, `/api/studio/*` and `/api/platform/*`. Each signed-in area has its own `/api/{studio,platform,account}/auth/*` (login, password reset). The studio API was `/api/admin/*` until Phase 2, which renamed it with no alias. Reserved handles (`admin`, `api`, `p`, `studio`, `platform`, `account`, `photographers`, …) are refused at signup.
 
 ---
 
@@ -112,7 +112,18 @@ Everything in **`marketplace-data-model.md`** applies; that is the specification
   - The `id_token` is checked for signature (Google JWKS), `iss`, `aud`, `exp` and `nonce`.
   - It requires `email_verified = true`. An existing client account with that email is linked; an account with that email in another role is refused.
   - **Amendment to `marketplace-data-model.md`:** `app_user.password_hash` becomes nullable, and `google_sub text` is added (partial unique), with CHECKs `google_sub IS NULL OR role = 'client'` and `password_hash IS NOT NULL OR google_sub IS NOT NULL`.
-- **R2.5** Lockout, password reset and the fingerprint-based token revocation (`auth/admin-auth.ts`, `auth/token.ts`) are reused for every role. Signup, login and reset always return the same response, so they don't reveal which emails have accounts.
+- **R2.5** Lockout, password reset and the fingerprint-based token revocation (`auth/account-auth.ts`, `auth/token.ts`) are reused for every role. Signup, login and reset always return the same response, so they don't reveal which emails have accounts.
+- **R2.1a** Tokens and revocation, as built (decided 2026-10-17):
+  - Audiences `bookly-studio`, `bookly-platform`, `bookly-account` (the Phase 1 `bookly-admin` is retired); TTL 8 h, 8 h and 7 days. A token for one area is a `401 invalid_token` in every other.
+  - The fingerprint claim is `cred_fp`: an HMAC under `SESSION_SECRET` of `password_hash`, `google_sub` and a new `app_user.token_version int NOT NULL DEFAULT 0` (migration `20261017095220_app_user_token_version`; **amendment to `marketplace-data-model.md` §2.1**). A password change, linking a Google identity, or `revokeTokens` (adds 1 to `token_version`) revokes every token the user holds. `revokeTokens` is the revocation of a Google-only client, who has no password to change.
+  - Middleware: `requirePhotographer` (studio), `requirePlatformAdmin`, `requireClient`. Each re-reads the user on every request and requires the area's role, `disabled_at` and `anonymized_at` null, a verified email, the fingerprint to match, and for the studio a photographer row.
+  - Each area's login admits only its role. Any other account, a disabled or erased one, and a Google-only client at a password login are answered exactly like an unknown email (dummy Argon2, no attempt counted, no email). An **unverified** address with the right password is answered exactly like a wrong password (the attempt counts toward the lockout); the lockout alert goes only to a verified address. The alert's sign-in button and the reset link point to the area's own page (`/studio/…`, `/platform/…`, `/account/…`). A reset token works only in the area it was issued for.
+  - Login and `/me` answer the public user under `user` (Phase 1 used `admin`); the studio's `/me` adds `photographer { id, handle, displayName, status }` for the pending or suspended banner.
+- **R2.1b** Platform admin, minimal (pulled forward from R9.1, decided 2026-10-17): `POST /api/platform/auth/login` and reset, `GET /api/platform/me`, `GET /api/platform/photographers?status=`, and `POST /api/platform/photographers/:id/{approve,suspend,reactivate}`.
+  - approve: `pending` → `approved`, sets `approved_at` and `approved_by_user_id`, emails `photographer_approved`. A suspended photographer is a `409 invalid_transition` (reactivate instead).
+  - suspend `{ reason }`: `pending` or `approved` → `suspended`, sets `suspended_at` and `suspension_reason`, emails `photographer_suspended`. Existing bookings are kept.
+  - reactivate: `suspended` → `approved` (or `pending` if never approved), clearing `suspended_at` and `suspension_reason`. No email.
+  - Each is one `UPDATE … WHERE status IN (…)`, so racing calls make the change once; a repeat is a `200` that changes nothing and sends nothing. Every change is also a structured log line naming who and when (R9.4).
 - **R2.6** Frontend:
   - the session knows its role
   - route guards for `/studio/*`, `/platform/*` and `/account/*`, each with its own login page
@@ -123,7 +134,7 @@ Everything in **`marketplace-data-model.md`** applies; that is the specification
 - **T2.2** Someone who signs up with a victim's email but **doesn't verify it** sees 0 bookings. After verifying, the bookings appear.
 - **T2.3** Google, with a fake identity provider: a bad signature, `aud`, `nonce` or `state` is rejected. `email_verified=false` is rejected. An email that belongs to a photographer is not linked.
 - **T2.4** Signup, reset and login for an existing versus a non-existent email give identical status and body.
-- **T2.5** Changing the password revokes old tokens for every role, and a disabled user gets 401.
+- **T2.5** Changing the password revokes old tokens for every role, and a disabled user gets 401. So does `revokeTokens`, for every role including a Google-only client.
 
 ---
 

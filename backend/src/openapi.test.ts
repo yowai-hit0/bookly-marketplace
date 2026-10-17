@@ -5,13 +5,14 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from './app.js';
 import { hashPassword } from './auth/password.js';
-import { issueAdminToken } from './auth/token.js';
+import { issueToken } from './auth/token.js';
 import { checkoutToken } from './payments/checkout-link.js';
 import { createPrismaClient } from './db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from './test/database.js';
 import {
   ADMIN_EMAIL,
   PHOTOGRAPHER_HANDLE,
+  PLATFORM_ADMIN_EMAIL,
   type PaymentWorld,
   TEST_SECRET,
   insertBookingWithToken,
@@ -64,16 +65,16 @@ beforeEach(async () => {
 function app(): Express {
   return createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: TEST_SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
+    auth: { prisma, sessionSecret: TEST_SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
     publicApi: { prisma, now: () => NOW, payments: { provider: stubProvider(), secret: TEST_SECRET } },
     webhooks: { prisma, providers: { mtn_momo_direct: stubProvider() } },
   });
 }
 
 /** The world photographer's studio token. */
-async function adminToken(): Promise<string> {
+async function studioToken(): Promise<string> {
   const user = await prisma.appUser.findUniqueOrThrow({ where: { id: world.photographerUserId } });
-  return (await issueAdminToken(TEST_SECRET, user, NOW)).token;
+  return (await issueToken(TEST_SECRET, 'studio', user, NOW)).token;
 }
 
 describe('the OpenAPI spec', () => {
@@ -208,38 +209,55 @@ describe('responses match the spec', () => {
     await expectMatchesSpec(await request(server).get(`/api/checkout/${reference}/${token}`), 'getCheckout', 200);
   });
 
-  it('admin auth', async () => {
+  it('studio auth', async () => {
     await prisma.appUser.update({ where: { id: world.photographerUserId }, data: { passwordHash: await hashPassword('a-good-enough-password') } });
     const server = app();
-    const login = await request(server).post('/api/admin/auth/login').send({ email: ADMIN_EMAIL, password: 'a-good-enough-password' });
-    await expectMatchesSpec(login, 'adminLogin', 200);
+    const login = await request(server).post('/api/studio/auth/login').send({ email: ADMIN_EMAIL, password: 'a-good-enough-password' });
+    await expectMatchesSpec(login, 'studioLogin', 200);
 
-    const token = await adminToken();
-    await expectMatchesSpec(await request(server).get('/api/admin/me').set('Authorization', `Bearer ${token}`), 'getAdminMe', 200);
+    const token = await studioToken();
+    await expectMatchesSpec(await request(server).get('/api/studio/me').set('Authorization', `Bearer ${token}`), 'getStudioMe', 200);
   });
 
-  it('admin availability, settings and calendar', async () => {
+  it('platform auth and photographers', async () => {
+    const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
+    await prisma.appUser.update({ where: { id: admin.id }, data: { passwordHash: await hashPassword('a-good-enough-password') } });
     const server = app();
-    const auth = { Authorization: `Bearer ${await adminToken()}` };
-    await expectMatchesSpec(await request(server).get('/api/admin/working-hours').set(auth), 'listWorkingHours', 200);
-    await expectMatchesSpec(await request(server).get('/api/admin/blocks').set(auth), 'listBlocks', 200);
-    await expectMatchesSpec(await request(server).get('/api/admin/settings').set(auth), 'getSettings', 200);
+    const login = await request(server).post('/api/platform/auth/login').send({ email: PLATFORM_ADMIN_EMAIL, password: 'a-good-enough-password' });
+    await expectMatchesSpec(login, 'platformLogin', 200);
+    const auth = { Authorization: `Bearer ${(login.body as { token: string }).token}` };
+
+    await expectMatchesSpec(await request(server).get('/api/platform/me').set(auth), 'getPlatformMe', 200);
+    await expectMatchesSpec(await request(server).get('/api/platform/photographers?status=approved').set(auth), 'listPlatformPhotographers', 200);
+    const path = `/api/platform/photographers/${world.photographerId}`;
+    await expectMatchesSpec(await request(server).post(`${path}/suspend`).set(auth).send({ reason: 'Checking the spec' }), 'suspendPhotographer', 200);
+    await expectMatchesSpec(await request(server).post(`${path}/approve`).set(auth), 'approvePhotographer', 409);
+    await expectMatchesSpec(await request(server).post(`${path}/reactivate`).set(auth), 'reactivatePhotographer', 200);
+    await expectMatchesSpec(await request(server).post(`${path}/approve`).set(auth), 'approvePhotographer', 200);
+  });
+
+  it('studio availability, settings and calendar', async () => {
+    const server = app();
+    const auth = { Authorization: `Bearer ${await studioToken()}` };
+    await expectMatchesSpec(await request(server).get('/api/studio/working-hours').set(auth), 'listWorkingHours', 200);
+    await expectMatchesSpec(await request(server).get('/api/studio/blocks').set(auth), 'listBlocks', 200);
+    await expectMatchesSpec(await request(server).get('/api/studio/settings').set(auth), 'getSettings', 200);
     await expectMatchesSpec(
-      await request(server).get('/api/admin/calendar?from=2026-10-01&to=2026-10-31').set(auth),
+      await request(server).get('/api/studio/calendar?from=2026-10-01&to=2026-10-31').set(auth),
       'getCalendar',
       200,
     );
   });
 
-  it('admin catalogue and bookings', async () => {
+  it('studio catalogue and bookings', async () => {
     const { booking } = await insertBookingWithToken(prisma, world);
     await insertPayment(prisma, booking.id, { kind: 'booking_fee', status: 'succeeded', amountRwf: 20_000 });
     const server = app();
-    const auth = { Authorization: `Bearer ${await adminToken()}` };
-    await expectMatchesSpec(await request(server).get('/api/admin/catalogue').set(auth), 'getCatalogue', 200);
-    await expectMatchesSpec(await request(server).get('/api/admin/bookings').set(auth), 'listBookings', 200);
+    const auth = { Authorization: `Bearer ${await studioToken()}` };
+    await expectMatchesSpec(await request(server).get('/api/studio/catalogue').set(auth), 'getCatalogue', 200);
+    await expectMatchesSpec(await request(server).get('/api/studio/bookings').set(auth), 'listBookings', 200);
     await expectMatchesSpec(
-      await request(server).get(`/api/admin/bookings/${booking.id}`).set(auth),
+      await request(server).get(`/api/studio/bookings/${booking.id}`).set(auth),
       'getBooking',
       200,
     );

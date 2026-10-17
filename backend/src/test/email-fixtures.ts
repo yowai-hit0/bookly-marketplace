@@ -214,6 +214,7 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     template: 'account_security_alert',
     payload: {
       variant: 'login_lockout',
+      area: 'account',
       failedLoginCount: 5,
       /** format.json `formatDateTime`: 14 Mar 2026, 17:00. */
       lockedUntil: '2026-03-14T15:00:00.000Z',
@@ -223,10 +224,20 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     name: 'account_password_reset',
     template: 'account_password_reset',
     payload: {
-      resetUrl: `${FIXTURE_WEB_ORIGIN}/admin/reset-password#token=${FIXTURE_RESET_TOKEN}`,
+      resetUrl: `${FIXTURE_WEB_ORIGIN}/studio/reset-password#token=${FIXTURE_RESET_TOKEN}`,
       /** format.json `formatDateTime`: 1 Jan 2027, 00:00. */
       expiresAt: '2026-12-31T22:00:00.000Z',
     },
+  },
+  {
+    name: 'photographer_approved',
+    template: 'photographer_approved',
+    payload: { displayName: 'Kigali Lens', handle: 'kigali-lens' },
+  },
+  {
+    name: 'photographer_suspended',
+    template: 'photographer_suspended',
+    payload: { displayName: 'Kigali Lens', reason: 'Several clients reported shoots that did not happen.' },
   },
   {
     name: 'photographer_alert refund_due',

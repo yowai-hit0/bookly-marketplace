@@ -1,11 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
 import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
-import type { AuthDeps } from './auth/admin-auth.js';
-import { createLimiters, emailKey, type RateLimitOverrides, rateLimit } from './http/rate-limit.js';
+import type { AuthDeps } from './auth/account-auth.js';
+import { AUTH_AREAS } from './auth/roles.js';
+import { areaIpKey, createLimiters, emailKey, type RateLimitOverrides, rateLimit } from './http/rate-limit.js';
 import { securityHeaders } from './http/security-headers.js';
 import type { PaymentProvider } from './payments/provider.js';
-import { adminRouter } from './routes/admin.js';
 import { healthRouter } from './routes/health.js';
 import { clientBookingRouter } from './routes/client-booking.js';
 import { emailConfirmationsRouter } from './routes/email-confirmations.js';
@@ -15,6 +15,8 @@ import { type BookingLinksDeps, bookingLinksRouter } from './routes/public-booki
 import { bookingsRouter } from './routes/public-bookings.js';
 import { checkoutRouter } from './routes/public-checkout.js';
 import { publicCatalogueRouter } from './routes/public-catalogue.js';
+import { platformRouter } from './routes/platform.js';
+import { studioRouter } from './routes/studio.js';
 
 // Dev/test default, kept in sync with vite.config.ts's port and .env.example's
 // WEB_ORIGIN. server.ts always overrides this with env.WEB_ORIGIN once parsed.
@@ -22,9 +24,11 @@ const DEV_WEB_ORIGIN = 'http://localhost:5173';
 
 export type AppOptions = {
   corsOrigin?: string;
-  /** Mounts `/api/admin/*`. Omitted, those paths 404 -- closed, not open --
-   *  which keeps the health checks free of a database. */
-  admin?: AuthDeps;
+  /** Mounts the signed-in areas: `/api/studio/*` (photographers) and
+   *  `/api/platform/*` (platform admins), each with its own `/auth/*` (Phase 2
+   *  decision 1). Omitted, those paths 404 -- closed, not open -- which keeps
+   *  the health checks free of a database. */
+  auth?: AuthDeps;
   /** Mounts the anonymous public routes (`/api/services`, `/api/quote`,
    *  `/api/availability`, `/api/bookings`). Omitted, they 404 too, for the same
    *  reason. `now` is the injected clock lead time and consent are measured by. */
@@ -61,7 +65,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.set('trust proxy', options.trustProxyHops ?? 1);
   // On every response, errors and 404s included (security review 2026-10-11, finding 3).
   app.use(securityHeaders());
-  // Allowlisted to the admin UI's origin. No `credentials`: admin auth is a
+  // Allowlisted to the web app's origin. No `credentials`: auth is a
   // bearer token in the Authorization header, not a cookie, so no request needs
   // the browser to attach credentials on its behalf (plan.md Task 7, rev 2.3).
   app.use(cors({ origin: [corsOrigin] }));
@@ -70,8 +74,8 @@ export function createApp(options: AppOptions = {}): Express {
   if (options.webhooks) app.use('/api/webhooks', paymentWebhooksRouter(options.webhooks));
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
-  // Request limits on the public writes and the admin's sign-in (security review
-  // 2026-10-11, finding 2). Counted before any route does work, so a refused
+  // Request limits on the public writes and every area's sign-in and reset
+  // (security review 2026-10-11, finding 2; Phase 2 decision 8). Counted before any route does work, so a refused
   // request costs nothing but the count.
   const now = options.publicApi?.now ?? (() => new Date());
   const limiters = createLimiters(options.rateLimits);
@@ -80,8 +84,12 @@ export function createApp(options: AppOptions = {}): Express {
   app.post('/api/checkout/:reference/:token/payments', payments);
   app.post('/api/booking/:token/payments', payments);
   app.post('/api/booking/:token/email', rateLimit(limiters.emailChangePerIp, now));
-  app.post('/api/admin/auth/login', rateLimit(limiters.loginPerIp, now));
-  app.post('/api/admin/auth/password-reset/request', rateLimit(limiters.passwordResetPerIp, now));
+  for (const area of AUTH_AREAS) {
+    const byIp = areaIpKey(area);
+    app.post(`/api/${area}/auth/login`, rateLimit(limiters.loginPerIp, now, byIp));
+    app.post(`/api/${area}/auth/password-reset/request`, rateLimit(limiters.passwordResetPerIp, now, byIp));
+    app.post(`/api/${area}/auth/password-reset/confirm`, rateLimit(limiters.passwordResetConfirmPerIp, now, byIp));
+  }
 
   app.use('/api', healthRouter);
   if (options.publicApi) {
@@ -114,11 +122,12 @@ export function createApp(options: AppOptions = {}): Express {
       }),
     );
   }
-  if (options.admin) {
+  if (options.auth) {
     // The provider the client would pay through is the provider a session-fee
     // request is opened against: one active provider, never two (spec §6.18).
     const providerId = options.publicApi?.payments?.provider.id;
-    app.use('/api/admin', adminRouter({ ...options.admin, ...(providerId === undefined ? {} : { paymentProviderId: providerId }) }));
+    app.use('/api/studio', studioRouter({ ...options.auth, ...(providerId === undefined ? {} : { paymentProviderId: providerId }) }));
+    app.use('/api/platform', platformRouter(options.auth));
   }
 
   app.use((_req, res) => {

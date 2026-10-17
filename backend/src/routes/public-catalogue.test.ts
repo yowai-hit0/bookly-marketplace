@@ -699,14 +699,14 @@ describe('mounting', () => {
     expect((await prisma.photographer.findUniqueOrThrow({ where: { id: photographerId } })).displayName).toBe('Kigali Lens');
   });
 
-  it('opens no /api/admin/* route: without the admin option they 404', async () => {
+  it('opens no /api/studio/* route: without the admin option they 404', async () => {
     await seedCatalogue();
 
     for (const res of [
-      await request(app).get('/api/admin/catalogue'),
-      await request(app).get('/api/admin/services'),
-      await request(app).post('/api/admin/services').send({ slug: 'x', nameEn: 'X' }),
-      await request(app).get('/api/admin/settings'),
+      await request(app).get('/api/studio/catalogue'),
+      await request(app).get('/api/studio/services'),
+      await request(app).post('/api/studio/services').send({ slug: 'x', nameEn: 'X' }),
+      await request(app).get('/api/studio/settings'),
     ]) {
       expect(res.status).toBe(404);
       expect(res.body).toStrictEqual({ error: 'not_found' });
@@ -714,15 +714,15 @@ describe('mounting', () => {
     expect(await prisma.service.count()).toBe(3);
   });
 
-  it('leaves /api/admin/* behind its bearer token when both routers are mounted', async () => {
+  it('leaves /api/studio/* behind its bearer token when both routers are mounted', async () => {
     await seedCatalogue();
     const both = createApp({
       corsOrigin: WEB_ORIGIN,
       publicApi: { prisma },
-      admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => new Date() },
+      auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => new Date() },
     });
 
-    const catalogue = await request(both).get('/api/admin/catalogue');
+    const catalogue = await request(both).get('/api/studio/catalogue');
     expect(catalogue.status).toBe(401);
     expect(catalogue.body).toStrictEqual({ error: 'unauthenticated' });
     expect(catalogue.text).not.toContain('Portraits');

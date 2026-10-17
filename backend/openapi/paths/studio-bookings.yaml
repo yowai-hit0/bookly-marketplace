@@ -1,5 +1,5 @@
 # The bookings list, one booking, and every lifecycle action. All require the
-# admin bearer token, and all act on the signed-in photographer's own bookings:
+# studio bearer token, and all act on the signed-in photographer's own bookings:
 # a booking, payment, add-on line or note id of another photographer's is a 404.
 # Every action answers the booking as it now stands (200), or a 409 carrying
 # that same booking when it refuses.
@@ -7,7 +7,7 @@
 list:
   get:
     operationId: listBookings
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: List bookings
     description: |
       The signed-in photographer's bookings only. Filtered by stage, status and
@@ -51,7 +51,7 @@ list:
         description: One page of bookings.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/BookingsPage }
+            schema: { $ref: ../components/studio.yaml#/schemas/BookingsPage }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -60,7 +60,7 @@ list:
 detail:
   get:
     operationId: getBooking
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: One booking
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -77,7 +77,7 @@ detail:
 reschedule:
   post:
     operationId: rescheduleBooking
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Reschedule a booking
     description: Keeps the booking, its reference, token and payments; moves the slot and its buffer to a free slot.
     parameters:
@@ -105,7 +105,7 @@ reschedule:
         description: The slot is taken, or the booking cannot be rescheduled. Carries the booking.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
             examples:
               slot_taken: { value: { error: slot_taken, booking: null } }
               not_allowed: { value: { error: not_allowed, booking: null } }
@@ -118,7 +118,7 @@ reschedule:
 cancel:
   post:
     operationId: cancelBooking
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Cancel a booking
     description: Releases the slot and marks the booking fee `refund_due` for a full refund. An optional reason is shown to the client.
     parameters:
@@ -147,7 +147,7 @@ cancel:
 complete:
   post:
     operationId: completeBooking
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Mark a booking completed
     description: Completing means paid. A booking that still owes money is a 409 `balance_due`.
     parameters:
@@ -165,7 +165,7 @@ complete:
         description: Not in a state that can be completed, or money is still owed.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
             examples:
               not_allowed: { value: { error: not_allowed, booking: null } }
               balance_due: { value: { error: balance_due, booking: null } }
@@ -173,7 +173,7 @@ complete:
 noShow:
   post:
     operationId: markNoShow
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Mark a no-show
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -192,7 +192,7 @@ noShow:
 resendLink:
   post:
     operationId: resendAccessLink
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Resend the client's access link
     description: Issues a fresh token and invalidates the old one, then emails the new link.
     parameters:
@@ -212,7 +212,7 @@ resendLink:
 addons:
   post:
     operationId: addPostShootAddon
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Add a post-shoot add-on
     description: Adds a catalogue add-on to a booking whose shoot has begun. The price is read from the catalogue, never sent.
     parameters:
@@ -248,7 +248,7 @@ addons:
 addonItem:
   delete:
     operationId: removePostShootAddon
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Remove a post-shoot add-on
     description: Removes an add-on still removable (post-shoot, not yet paid for).
     parameters:
@@ -270,7 +270,7 @@ addonItem:
         description: The add-on cannot be removed (not post-shoot, or already paid).
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
             examples:
               not_allowed: { value: { error: not_allowed, booking: null } }
               already_paid: { value: { error: already_paid, booking: null } }
@@ -278,7 +278,7 @@ addonItem:
 sessionFee:
   post:
     operationId: requestSessionFee
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Ask the client for the session fee
     description: |
       Opens a session-fee request for what the booking owes and emails the
@@ -299,7 +299,7 @@ sessionFee:
         description: Not in a state to ask, nothing to ask for, or an attempt already in progress.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
             examples:
               not_allowed: { value: { error: not_allowed, booking: null } }
               nothing_to_pay: { value: { error: nothing_to_pay, booking: null } }
@@ -308,7 +308,7 @@ sessionFee:
 cash:
   post:
     operationId: recordCashPayment
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Record a cash payment
     description: |
       Records cash the photographer was handed, up to what is owed. Refused
@@ -340,7 +340,7 @@ cash:
         description: Not payable, nothing owed, more than is owed, or an online attempt in flight.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
             examples:
               not_allowed: { value: { error: not_allowed, booking: null } }
               nothing_to_pay: { value: { error: nothing_to_pay, booking: null } }
@@ -355,7 +355,7 @@ cash:
 delivery:
   put:
     operationId: saveDelivery
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Save the photo-delivery link
     description: Sets the external photo link and its expiry on a completed booking. The link must be https.
     parameters:
@@ -394,7 +394,7 @@ delivery:
 deliverySend:
   post:
     operationId: sendDelivery
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Send the photos
     description: Emails the saved delivery link, optionally to another address for this one email. The booking's own contact email is not changed.
     parameters:
@@ -421,7 +421,7 @@ deliverySend:
         description: Not deliverable, or no link saved to send.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
             examples:
               not_allowed: { value: { error: not_allowed, booking: null } }
               no_link: { value: { error: no_link, booking: null } }
@@ -434,7 +434,7 @@ deliverySend:
 notes:
   post:
     operationId: addNote
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Add a note to the client
     description: A plain-text note, emailed to the client unless `email` is false.
     parameters:
@@ -470,7 +470,7 @@ notes:
 noteItem:
   delete:
     operationId: deleteNote
-    tags: [Admin bookings]
+    tags: [Studio bookings]
     summary: Delete a note
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
@@ -491,7 +491,7 @@ noteItem:
 refund:
   post:
     operationId: recordRefund
-    tags: [Admin payments]
+    tags: [Studio payments]
     summary: Record a refund
     description: |
       Records that the photographer refunded a payment by hand (the system
@@ -514,7 +514,7 @@ refund:
         description: The booking the payment belongs to, as it now stands.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingEnvelope }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingEnvelope }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -525,7 +525,7 @@ refund:
         description: The payment is not in a state that can be refunded.
         content:
           application/json:
-            schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+            schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
             example: { error: not_refundable, booking: null }
       '422':
         description: A malformed reference or timestamp.
@@ -539,10 +539,10 @@ _responses:
     description: The booking as it now stands.
     content:
       application/json:
-        schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingEnvelope }
+        schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingEnvelope }
   conflict:
     description: The action was refused; the booking as it stands is included.
     content:
       application/json:
-        schema: { $ref: ../components/admin.yaml#/schemas/AdminBookingConflict }
+        schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
         example: { error: not_allowed, booking: null }

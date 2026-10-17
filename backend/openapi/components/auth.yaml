@@ -1,0 +1,81 @@
+# Auth schemas every signed-in area shares: the studio, the platform and (Phase 2) the account.
+
+schemas:
+  PublicUser:
+    type: object
+    description: |
+      The only shape of a signed-in user that leaves the API, in every area. No
+      password hash, token hashes, Google subject, token version, lockout state
+      or role.
+    required: [id, email, lastLoginAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      email: { type: string, format: email }
+      lastLoginAt: { type: [string, 'null'], format: date-time }
+
+  LoginRequest:
+    type: object
+    required: [email, password]
+    properties:
+      email: { type: string, minLength: 1, maxLength: 320 }
+      password: { type: string, minLength: 1, maxLength: 1024 }
+
+  LoginResponse:
+    type: object
+    required: [user, token, tokenType, expiresAt]
+    additionalProperties: false
+    properties:
+      user: { $ref: '#/schemas/PublicUser' }
+      token:
+        type: string
+        description: "Send as `Authorization: Bearer <token>`, to this area only. Keep it in memory or `sessionStorage`, never `localStorage`."
+      tokenType: { const: Bearer }
+      expiresAt: { $ref: 'common.yaml#/schemas/Instant' }
+
+  UserEnvelope:
+    type: object
+    required: [user]
+    additionalProperties: false
+    properties:
+      user: { $ref: '#/schemas/PublicUser' }
+
+  ResetRequest:
+    type: object
+    required: [email]
+    properties:
+      email: { type: string, minLength: 1, maxLength: 320 }
+
+  ResetAccepted:
+    type: object
+    required: [ok]
+    additionalProperties: false
+    properties:
+      ok: { const: true }
+
+  ResetConfirm:
+    type: object
+    required: [token, newPassword]
+    properties:
+      token: { type: string, minLength: 1, maxLength: 512 }
+      newPassword: { type: string, minLength: 12, maxLength: 1024 }
+
+responses:
+  InvalidCredentials:
+    description: |
+      Invalid credentials. One answer for an unknown email, a wrong password, a
+      locked account, an unverified address and an account of another kind:
+      none is disclosed.
+    content:
+      application/json:
+        schema: { $ref: 'common.yaml#/schemas/Error' }
+        example: { error: invalid_credentials }
+
+  ResetConfirmRefused:
+    description: A malformed body, or an invalid or expired token.
+    content:
+      application/json:
+        schema: { $ref: 'common.yaml#/schemas/Error' }
+        examples:
+          invalid_request: { value: { error: invalid_request } }
+          invalid_token: { value: { error: invalid_or_expired_token } }

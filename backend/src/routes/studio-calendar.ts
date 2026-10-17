@@ -6,7 +6,7 @@ import { findCalendar } from '../calendar/query.js';
 import { kigaliDate, parseOrReject } from './validation.js';
 
 /**
- * `GET /api/admin/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` -- bookings, live
+ * `GET /api/studio/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` -- bookings, live
  * holds and blocks for the month, week and day views (plan.md Task 9). Mounted
  * behind `requirePhotographer`, and always the signed-in photographer's own
  * calendar (marketplace-spec.md R1.4).

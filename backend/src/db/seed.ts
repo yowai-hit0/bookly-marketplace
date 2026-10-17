@@ -64,8 +64,10 @@ async function seedPlatformAdmin(prisma: PrismaClient, env: NodeJS.ProcessEnv): 
 
   const credentials = adminCredentialsSchema.parse(env);
   const passwordHash = await hashPassword(credentials.ADMIN_PASSWORD);
+  // Created verified (Phase 2 decision 3): password login requires a verified
+  // address, and nobody else could verify the first admin's.
   await prisma.appUser.create({
-    data: { email: credentials.ADMIN_EMAIL, role: 'platform_admin', passwordHash },
+    data: { email: credentials.ADMIN_EMAIL, role: 'platform_admin', passwordHash, emailVerifiedAt: new Date() },
   });
   return true;
 }

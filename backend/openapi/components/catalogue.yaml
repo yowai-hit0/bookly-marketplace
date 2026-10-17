@@ -1,5 +1,5 @@
 # Catalogue schemas: what the public sees (`catalogue/public.ts`) and what the
-# admin edits (`routes/admin-catalogue.ts`).
+# photographer edits in the studio (`routes/studio-catalogue.ts`).
 
 schemas:
   PublicPhotographerSummary:

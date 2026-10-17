@@ -6,24 +6,24 @@ import type pg from 'pg';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { LOCKOUT_THRESHOLD } from '../auth/admin-auth.js';
+import { LOCKOUT_THRESHOLD, revokeTokens } from '../auth/account-auth.js';
 import { photographerLocals, requirePhotographer } from '../auth/middleware.js';
 import { hashPassword } from '../auth/password.js';
-import { toPublicUser } from '../auth/public-admin.js';
+import { toPublicUser } from '../auth/public-user.js';
 import {
-  TOKEN_AUDIENCE,
+  TOKEN_AUDIENCES,
   TOKEN_ISSUER,
   TOKEN_TTL_SECONDS,
-  issueAdminToken,
-  passwordFingerprint,
+  credentialFingerprint,
+  issueToken,
 } from '../auth/token.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 
 /**
- * `/api/admin/*` over HTTP, against real PostgreSQL (plan.md Task 7, rev 2.3):
- * the photographer's studio, which keeps these paths until Phase 2 (brief
- * decision 3). Only a `photographer` login with a photographer row gets in.
+ * `/api/studio/*` over HTTP, against real PostgreSQL (plan.md Task 7, rev 2.3):
+ * the photographer's studio, under the admin prefix until Phase 2 renamed it (decision
+ * 1). Only a verified `photographer` login with a photographer row gets in.
  *
  * Studio auth is a JWT in `Authorization: Bearer`. No cookie is set, read or
  * honoured, and there is no CSRF token -- several tests below exist to prove
@@ -73,7 +73,7 @@ beforeEach(async () => {
   clock = START;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+    auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
   });
 });
 
@@ -81,7 +81,7 @@ beforeEach(async () => {
 
 let handleCounter = 0;
 
-/** A photographer's login and their approved photographer row: what the studio admits. */
+/** A photographer's verified login and their approved photographer row: what the studio admits. */
 function seedAdmin(email = EMAIL): Promise<AppUser> {
   handleCounter += 1;
   return prisma.appUser.create({
@@ -89,6 +89,7 @@ function seedAdmin(email = EMAIL): Promise<AppUser> {
       email,
       role: 'photographer',
       passwordHash,
+      emailVerifiedAt: START,
       photographer: {
         create: { handle: `studio-${handleCounter}`, displayName: 'Kigali Lens', status: 'approved', approvedAt: START },
       },
@@ -98,7 +99,7 @@ function seedAdmin(email = EMAIL): Promise<AppUser> {
 
 /** A login of another role, with no photographer row. */
 function seedUser(role: 'platform_admin' | 'client', email = EMAIL): Promise<AppUser> {
-  return prisma.appUser.create({ data: { email, role, passwordHash } });
+  return prisma.appUser.create({ data: { email, role, passwordHash, emailVerifiedAt: START } });
 }
 
 function reload(admin: AppUser): Promise<AppUser> {
@@ -134,7 +135,7 @@ function setCookies(res: Response): string[] {
 
 /** A token exactly as login would issue it, without spending Argon2. */
 async function mint(admin: AppUser, now = clock): Promise<string> {
-  return (await issueAdminToken(SECRET, admin, now)).token;
+  return (await issueToken(SECRET, 'studio', admin, now)).token;
 }
 
 type ForgeOptions = {
@@ -153,19 +154,19 @@ async function forge(admin: AppUser, options: ForgeOptions = {}): Promise<string
   const nowSeconds = Math.floor(clock.getTime() / 1000);
   return new SignJWT({
     role: options.role ?? admin.role,
-    pwd_fp: options.fingerprint ?? passwordFingerprint(SECRET, hashOf(admin)),
+    cred_fp: options.fingerprint ?? credentialFingerprint(SECRET, admin),
   })
     .setProtectedHeader({ alg: options.alg ?? 'HS256', typ: 'JWT' })
     .setSubject(options.sub ?? admin.id)
     .setIssuer(options.iss ?? TOKEN_ISSUER)
-    .setAudience(options.aud ?? TOKEN_AUDIENCE)
+    .setAudience(options.aud ?? TOKEN_AUDIENCES.studio)
     .setIssuedAt(nowSeconds)
-    .setExpirationTime(options.expSeconds ?? nowSeconds + TOKEN_TTL_SECONDS)
+    .setExpirationTime(options.expSeconds ?? nowSeconds + TOKEN_TTL_SECONDS.studio)
     .sign(new TextEncoder().encode(options.secret ?? SECRET));
 }
 
 function login(email = EMAIL, password = PASSWORD): Promise<Response> {
-  return request(app).post('/api/admin/auth/login').send({ email, password });
+  return request(app).post('/api/studio/auth/login').send({ email, password });
 }
 
 /** A real login over HTTP, returning the token the admin UI now holds. */
@@ -176,17 +177,17 @@ async function signIn(): Promise<string> {
 }
 
 function me(token?: string): request.Test {
-  const req = request(app).get('/api/admin/me');
+  const req = request(app).get('/api/studio/me');
   return token === undefined ? req : req.set('Authorization', `Bearer ${token}`);
 }
 
 function requestReset(email: string): request.Test {
-  return request(app).post('/api/admin/auth/password-reset/request').send({ email });
+  return request(app).post('/api/studio/auth/password-reset/request').send({ email });
 }
 
 function confirmReset(token: string, newPassword: string): request.Test {
   return request(app)
-    .post('/api/admin/auth/password-reset/confirm')
+    .post('/api/studio/auth/password-reset/confirm')
     .send({ token, newPassword });
 }
 
@@ -215,25 +216,25 @@ function expectUnauthenticated(res: Response, error?: 'invalid_token'): void {
   expect(res.headers.location).toBeUndefined();
   expect(setCookies(res)).toEqual([]);
   const challenge = String(res.headers['www-authenticate']);
-  expect(challenge).toMatch(/^Bearer realm="bookly-admin"/);
+  expect(challenge).toMatch(/^Bearer realm="bookly-studio"/);
   if (error === undefined) expect(challenge).not.toContain('error=');
   else expect(challenge).toContain(`error="${error}"`);
 }
 
 // --- Login ----------------------------------------------------------------------
 
-describe('POST /api/admin/auth/login', () => {
-  it('returns a bearer token, its expiry and the public admin -- and nothing else', async () => {
+describe('POST /api/studio/auth/login', () => {
+  it('returns a bearer token, its expiry and the public user -- and nothing else', async () => {
     const admin = await seedAdmin();
 
     const res = await login();
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      admin: { id: admin.id, email: EMAIL, lastLoginAt: START.toISOString() },
+      user: { id: admin.id, email: EMAIL, lastLoginAt: START.toISOString() },
       token: expect.stringMatching(/^[\w-]+\.[\w-]+\.[\w-]+$/),
       tokenType: 'Bearer',
-      expiresAt: new Date(START.getTime() + TOKEN_TTL_SECONDS * 1000).toISOString(),
+      expiresAt: new Date(START.getTime() + TOKEN_TTL_SECONDS.studio * 1000).toISOString(),
     });
   });
 
@@ -337,7 +338,7 @@ describe('POST /api/admin/auth/login', () => {
     const admin = await seedAdmin();
 
     const res = await request(app)
-      .post('/api/admin/auth/login')
+      .post('/api/studio/auth/login')
       .send(body as object);
 
     expect(res.status).toBe(400);
@@ -356,7 +357,7 @@ describe('POST /api/admin/auth/login', () => {
     await seedAdmin();
 
     const res = await request(app)
-      .post('/api/admin/auth/login')
+      .post('/api/studio/auth/login')
       .set('Content-Type', type)
       .send(body);
 
@@ -402,7 +403,7 @@ describe('POST /api/admin/auth/login', () => {
     // 20 from one IP: this measures the lockout's race, not the request limit.
     app = createApp({
       corsOrigin: WEB_ORIGIN,
-      admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+      auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
       rateLimits: { loginPerIp: { limit: 100, windowMs: 15 * 60_000 } },
     });
 
@@ -435,20 +436,37 @@ describe('POST /api/admin/auth/login', () => {
     expect(res.status).toBe(401);
     expect(res.body).toEqual({ error: 'invalid_credentials' });
   });
+
+  it('refuses the right password for an unverified address exactly as a wrong one, counting it (decision 3)', async () => {
+    const admin = await seedAdmin();
+    await prisma.appUser.update({ where: { id: admin.id }, data: { emailVerifiedAt: null } });
+
+    const wrong = await login(EMAIL, WRONG);
+    const right = await login();
+
+    for (const res of [wrong, right]) {
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: 'invalid_credentials' });
+    }
+    expect(right.text).toBe(wrong.text);
+    await expect(reload(admin)).resolves.toMatchObject({ failedLoginCount: 2, lastLoginAt: null });
+  });
 });
 
 // --- The bearer token -------------------------------------------------------------
 
 describe('the bearer token', () => {
-  it('admits the token login returned, answering /me with the public admin only', async () => {
+  it('admits the token login returned, answering /me with the public user and their photographer', async () => {
     const admin = await seedAdmin();
     const token = await signIn();
 
     const res = await me(token);
 
     expect(res.status).toBe(200);
+    const photographer = await prisma.photographer.findUniqueOrThrow({ where: { userId: admin.id } });
     expect(res.body).toEqual({
-      admin: { id: admin.id, email: EMAIL, lastLoginAt: START.toISOString() },
+      user: { id: admin.id, email: EMAIL, lastLoginAt: START.toISOString() },
+      photographer: { id: photographer.id, handle: photographer.handle, displayName: 'Kigali Lens', status: 'approved' },
     });
     expect(setCookies(res)).toEqual([]);
   });
@@ -474,7 +492,7 @@ describe('the bearer token', () => {
   it('admits a token one second before expiry and refuses it at and after', async () => {
     const admin = await seedAdmin();
     const token = await mint(admin);
-    const expiresAtMs = START.getTime() + TOKEN_TTL_SECONDS * 1000;
+    const expiresAtMs = START.getTime() + TOKEN_TTL_SECONDS.studio * 1000;
 
     clock = new Date(expiresAtMs - 1000);
     expect((await me(token)).status).toBe(200);
@@ -490,6 +508,9 @@ describe('the bearer token', () => {
     ['a token signed with another secret', (a) => forge(a, { secret: OTHER_SECRET })],
     ['an HS512 token signed with the right secret', (a) => forge(a, { alg: 'HS512' })],
     ['a token for another audience', (a) => forge(a, { aud: 'bookly-client' })],
+    ['a token for the platform audience', (a) => forge(a, { aud: TOKEN_AUDIENCES.platform })],
+    ['a token for the account audience', (a) => forge(a, { aud: TOKEN_AUDIENCES.account })],
+    ['a token for the retired Phase 1 audience', (a) => forge(a, { aud: 'bookly-admin' })],
     ['a token from another issuer', (a) => forge(a, { iss: 'someone-else' })],
     ['a token for a nonexistent user', (a) => forge(a, { sub: NONEXISTENT_ID })],
     ['a token claiming the platform_admin role', (a) => forge(a, { role: 'platform_admin' })],
@@ -556,6 +577,36 @@ describe('the bearer token', () => {
     expectUnauthenticated(await me(token), 'invalid_token');
   });
 
+  it('refuses a token, on the very next request, once revokeTokens bumps the token version (T2.5)', async () => {
+    const admin = await seedAdmin();
+    const token = await mint(admin);
+    expect((await me(token)).status).toBe(200);
+
+    await revokeTokens(prisma, admin.id);
+
+    expectUnauthenticated(await me(token), 'invalid_token');
+    // A token issued after the revocation works.
+    expect((await me(await mint(await reload(admin)))).status).toBe(200);
+  });
+
+  it('refuses a token once the address stops being verified', async () => {
+    const admin = await seedAdmin();
+    const token = await mint(admin);
+
+    await prisma.appUser.update({ where: { id: admin.id }, data: { emailVerifiedAt: null } });
+
+    expectUnauthenticated(await me(token), 'invalid_token');
+  });
+
+  it('refuses a token once the login is erased', async () => {
+    const admin = await seedAdmin();
+    const token = await mint(admin);
+
+    await prisma.appUser.update({ where: { id: admin.id }, data: { anonymizedAt: START } });
+
+    expectUnauthenticated(await me(token), 'invalid_token');
+  });
+
   it('decides on the role stored now, not the one in the token', async () => {
     const admin = await seedAdmin();
     const token = await mint(admin);
@@ -565,10 +616,13 @@ describe('the bearer token', () => {
     expectUnauthenticated(await me(token), 'invalid_token');
   });
 
-  it.each(['platform_admin', 'client'] as const)('refuses a correctly issued token for a %s', async (role) => {
+  it.each([
+    ['platform_admin', 'platform'],
+    ['client', 'account'],
+  ] as const)('refuses a correctly issued token for a %s, from its own area', async (role, area) => {
     const user = await seedUser(role);
 
-    expectUnauthenticated(await me(await mint(user)), 'invalid_token');
+    expectUnauthenticated(await me((await issueToken(SECRET, area, user, clock)).token), 'invalid_token');
   });
 
   it.each(['pending', 'suspended'])('admits a %s photographer, whose studio stays open', async (status) => {
@@ -585,8 +639,8 @@ describe('the bearer token', () => {
     const first = await seedAdmin();
     const second = await seedAdmin(OTHER_EMAIL);
 
-    expect((await me(await mint(first))).body).toEqual({ admin: toPublicUser(first) });
-    expect((await me(await mint(second))).body).toEqual({ admin: toPublicUser(second) });
+    expect((await me(await mint(first))).body).toMatchObject({ user: toPublicUser(first), photographer: { id: await photographerIdOf(first) } });
+    expect((await me(await mint(second))).body).toMatchObject({ user: toPublicUser(second), photographer: { id: await photographerIdOf(second) } });
   });
 
   it("refuses one photographer's token after the other's password changes only if it is theirs", async () => {
@@ -608,7 +662,7 @@ describe('the bearer token', () => {
     const admin = await seedAdmin();
     const token = await mint(admin);
 
-    const res = await request(app).get('/api/admin/me').set('Authorization', `${scheme} ${token}`);
+    const res = await request(app).get('/api/studio/me').set('Authorization', `${scheme} ${token}`);
 
     expect(res.status).toBe(200);
   });
@@ -627,29 +681,29 @@ describe('a token anywhere but the Authorization header', () => {
     const admin = await seedAdmin();
     const token = await mint(admin);
 
-    expectUnauthenticated(await attach(request(app).get('/api/admin/me'), token));
+    expectUnauthenticated(await attach(request(app).get('/api/studio/me'), token));
   });
 
   it('is ignored in the query string', async () => {
     const admin = await seedAdmin();
     const token = await mint(admin);
 
-    expectUnauthenticated(await request(app).get(`/api/admin/me?token=${token}&access_token=${token}`));
+    expectUnauthenticated(await request(app).get(`/api/studio/me?token=${token}&access_token=${token}`));
   });
 });
 
 // --- Without a token --------------------------------------------------------------------
 
-describe('/api/admin/* without a token', () => {
-  it.each(['/api/admin/me', '/api/admin/does-not-exist', '/api/admin/', '/api/admin/auth/logout'])(
+describe('/api/studio/* without a token', () => {
+  it.each(['/api/studio/me', '/api/studio/does-not-exist', '/api/studio/', '/api/studio/auth/logout'])(
     'GET %s answers 401 with a Bearer challenge and no redirect',
     async (path) => {
       expectUnauthenticated(await request(app).get(path));
     },
   );
 
-  it('HEAD /api/admin/me answers 401 with no redirect', async () => {
-    const res = await request(app).head('/api/admin/me');
+  it('HEAD /api/studio/me answers 401 with no redirect', async () => {
+    const res = await request(app).head('/api/studio/me');
     expect(res.status).toBe(401);
     expect(res.headers.location).toBeUndefined();
     expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer /);
@@ -658,16 +712,16 @@ describe('/api/admin/* without a token', () => {
   it.each(['post', 'put', 'patch', 'delete'] as const)(
     '%s on a protected path answers 401 before any handler runs',
     async (method) => {
-      expectUnauthenticated(await request(app)[method]('/api/admin/me').send({}));
+      expectUnauthenticated(await request(app)[method]('/api/studio/me').send({}));
     },
   );
 
   it('answers an unknown path with 404 only once authenticated', async () => {
     const admin = await seedAdmin();
 
-    expectUnauthenticated(await request(app).get('/api/admin/nope'));
+    expectUnauthenticated(await request(app).get('/api/studio/nope'));
     const res = await request(app)
-      .get('/api/admin/nope')
+      .get('/api/studio/nope')
       .set('Authorization', `Bearer ${await mint(admin)}`);
     expect(res.status).toBe(404);
   });
@@ -685,7 +739,7 @@ describe('a cross-site request', () => {
     const token = await mint(admin);
 
     const res = await request(app)
-      .post('/api/admin/me')
+      .post('/api/studio/me')
       .set('Origin', FOREIGN_ORIGIN)
       .set('Cookie', `bookly_admin_session=${token}; bookly_admin_csrf=x`)
       .type('form')
@@ -711,7 +765,7 @@ describe('a cross-site request', () => {
 describe('CORS for bearer auth', () => {
   function preflight(origin: string): request.Test {
     return request(app)
-      .options('/api/admin/me')
+      .options('/api/studio/me')
       .set('Origin', origin)
       .set('Access-Control-Request-Method', 'GET')
       .set('Access-Control-Request-Headers', 'authorization, content-type');
@@ -753,7 +807,7 @@ describe('the endpoints the cookie design had and this one does not', () => {
     const admin = await seedAdmin();
 
     const res = await request(app)
-      .post('/api/admin/auth/logout')
+      .post('/api/studio/auth/logout')
       .set('Authorization', `Bearer ${await mint(admin)}`);
 
     expect(res.status).toBe(404);
@@ -764,7 +818,7 @@ describe('the endpoints the cookie design had and this one does not', () => {
     const admin = await seedAdmin();
     const token = await mint(admin);
 
-    await request(app).post('/api/admin/auth/logout').set('Authorization', `Bearer ${token}`);
+    await request(app).post('/api/studio/auth/logout').set('Authorization', `Bearer ${token}`);
 
     expect((await me(token)).status).toBe(200);
   });
@@ -819,7 +873,7 @@ describe('password reset over HTTP', () => {
     const url = new URL(String(payloadOf(row).resetUrl));
 
     expect(url.origin).toBe(WEB_ORIGIN);
-    expect(url.pathname).toBe('/admin/reset-password');
+    expect(url.pathname).toBe('/studio/reset-password');
     expect(url.search).toBe('');
     expect(url.hash).toBe(`#token=${await latestResetToken()}`);
   });
@@ -911,7 +965,7 @@ describe('password reset over HTTP', () => {
     await seedAdmin();
 
     const res = await request(app)
-      .post('/api/admin/auth/password-reset/request')
+      .post('/api/studio/auth/password-reset/request')
       .send(body as object);
 
     expect(res.status).toBe(400);
@@ -921,7 +975,7 @@ describe('password reset over HTTP', () => {
 
   it('answers a malformed JSON reset request with 400', async () => {
     const res = await request(app)
-      .post('/api/admin/auth/password-reset/request')
+      .post('/api/studio/auth/password-reset/request')
       .set('Content-Type', 'application/json')
       .send('{"email":');
 
@@ -967,7 +1021,7 @@ describe('password reset over HTTP', () => {
     const pending = await reload(admin);
 
     const res = await request(app)
-      .post('/api/admin/auth/password-reset/confirm')
+      .post('/api/studio/auth/password-reset/confirm')
       .send(body(await latestResetToken()) as object);
 
     expect(res.status).toBe(400);
@@ -977,7 +1031,7 @@ describe('password reset over HTTP', () => {
 
   it('answers a malformed JSON reset confirmation with 400', async () => {
     const res = await request(app)
-      .post('/api/admin/auth/password-reset/confirm')
+      .post('/api/studio/auth/password-reset/confirm')
       .set('Content-Type', 'application/json')
       .send('{"token": "abc", ');
 
@@ -999,6 +1053,8 @@ describe('password_hash never leaves the API', () => {
     'emailVerify',
     'googleSub',
     'disabledAt',
+    'tokenVersion',
+    'token_version',
     'role',
   ];
 
@@ -1103,15 +1159,26 @@ describe('requirePhotographer', () => {
 // --- Mounting -----------------------------------------------------------------------
 
 describe('mounting', () => {
-  it('404s /api/admin/* when createApp is given no admin deps -- closed, not open', async () => {
+  it('keeps no alias at the old admin prefix: 404 with or without a valid token (Phase 2 decision 1)', async () => {
+    const admin = await seedAdmin();
+    // Built, so the old prefix appears nowhere in the source as a path.
+    const old = ['', 'api', 'admin'].join('/');
+
+    for (const path of [`${old}/me`, `${old}/auth/login`, `${old}/bookings`]) {
+      expect((await request(app).get(path).set('Authorization', `Bearer ${await mint(admin)}`)).status).toBe(404);
+    }
+    expect((await request(app).post(`${old}/auth/login`).send({ email: EMAIL, password: PASSWORD })).status).toBe(404);
+  });
+
+  it('404s /api/studio/* when createApp is given no admin deps -- closed, not open', async () => {
     const bare = createApp();
 
-    const meRes = await request(bare).get('/api/admin/me');
+    const meRes = await request(bare).get('/api/studio/me');
     expect(meRes.status).toBe(404);
     expect(meRes.body).toEqual({ error: 'not_found' });
 
     const loginRes = await request(bare)
-      .post('/api/admin/auth/login')
+      .post('/api/studio/auth/login')
       .send({ email: EMAIL, password: PASSWORD });
     expect(loginRes.status).toBe(404);
   });

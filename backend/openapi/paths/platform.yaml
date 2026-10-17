@@ -1,0 +1,218 @@
+# The platform admin's console (Phase 2 decision 7). Every operation but the
+# three auth ones requires a platform admin's bearer token (`platformBearer`);
+# a photographer's or a client's token is a 401, whatever it says.
+
+login:
+  post:
+    operationId: platformLogin
+    tags: [Platform auth]
+    summary: Log in
+    description: |
+      Email and password for a platform admin. Returns a bearer JWT for the
+      `bookly-platform` audience, valid 8 hours, which no other area accepts.
+      Unknown email, wrong password, a locked account, an unverified address
+      and an account of another kind are one answer — `401 invalid_credentials`.
+      `Cache-Control: no-store`.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/LoginRequest }
+    responses:
+      '200':
+        description: Signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/auth.yaml#/responses/InvalidCredentials
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+resetRequest:
+  post:
+    operationId: requestPlatformPasswordReset
+    tags: [Platform auth]
+    summary: Request a password reset
+    description: |
+      If the address is a platform admin's login, a single-use reset link to
+      `/platform/reset-password`, valid 30 minutes, is emailed. Always `202`.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResetRequest }
+    responses:
+      '202':
+        description: Accepted (sent only if the address is a platform admin's login).
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/ResetAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+resetConfirm:
+  post:
+    operationId: confirmPlatformPasswordReset
+    tags: [Platform auth]
+    summary: Set a new password from a reset link
+    description: Consumes the emailed token and sets the new password, which revokes every token already issued. The token works once, and only here.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResetConfirm }
+    responses:
+      '204':
+        description: The password is changed.
+      '400':
+        $ref: ../components/auth.yaml#/responses/ResetConfirmRefused
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+me:
+  get:
+    operationId: getPlatformMe
+    tags: [Platform auth]
+    summary: The signed-in platform admin
+    security:
+      - platformBearer: []
+    responses:
+      '200':
+        description: The platform admin.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/UserEnvelope }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+photographers:
+  get:
+    operationId: listPlatformPhotographers
+    tags: [Platform photographers]
+    summary: List photographers
+    description: Every photographer, newest first, or only those in one status.
+    security:
+      - platformBearer: []
+    parameters:
+      - name: status
+        in: query
+        required: false
+        schema: { $ref: ../components/platform.yaml#/schemas/PhotographerStatus }
+    responses:
+      '200':
+        description: The photographers.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformPhotographerList }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+approve:
+  post:
+    operationId: approvePhotographer
+    tags: [Platform photographers]
+    summary: Approve a photographer
+    description: |
+      `pending` → `approved`: listed and bookable from now on. Records who
+      approved and when, and emails the photographer `photographer_approved`.
+      Idempotent: approving an approved photographer is a `200` that changes
+      nothing and sends nothing. A suspended photographer is reactivated, not
+      approved (`409`). Takes no body.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        description: The photographer, now approved.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformPhotographerEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: The photographer is suspended.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/InvalidTransition }
+
+suspend:
+  post:
+    operationId: suspendPhotographer
+    tags: [Platform photographers]
+    summary: Suspend a photographer
+    description: |
+      `pending` or `approved` → `suspended`, with the reason the photographer
+      is emailed (`photographer_suspended`). The profile is hidden and new
+      bookings are refused; every existing booking carries on. Idempotent:
+      suspending a suspended photographer is a `200` that keeps the first
+      reason and sends nothing.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [reason]
+            additionalProperties: false
+            properties:
+              reason: { type: string, minLength: 1, maxLength: 500, description: Trimmed. Shown to the photographer. }
+    responses:
+      '200':
+        description: The photographer, now suspended.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformPhotographerEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+
+reactivate:
+  post:
+    operationId: reactivatePhotographer
+    tags: [Platform photographers]
+    summary: Reactivate a suspended photographer
+    description: |
+      `suspended` → `approved`, or back to `pending` for one suspended before
+      ever being approved. Clears the suspension's date and reason. Idempotent:
+      reactivating a photographer who is not suspended is a `200` that changes
+      nothing. Takes no body.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        description: The photographer as they now are.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformPhotographerEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound

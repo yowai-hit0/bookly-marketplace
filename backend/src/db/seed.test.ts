@@ -90,6 +90,13 @@ describe('seedDatabase', () => {
     await expect(verifyPassword(admin.passwordHash ?? '', CREDENTIALS.ADMIN_PASSWORD)).resolves.toBe(true);
   });
 
+  it('creates the platform admin with a verified address, so they can sign in (Phase 2 decision 3)', async () => {
+    await seedDatabase(prisma, BASE_ENV);
+
+    const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
+    expect(admin.emailVerifiedAt).not.toBeNull();
+  });
+
   it('requires ADMIN_EMAIL and ADMIN_PASSWORD only when no platform admin exists yet', async () => {
     await expect(seedDatabase(prisma, { SEED_DEMO_DATA: 'false' })).rejects.toThrow();
 

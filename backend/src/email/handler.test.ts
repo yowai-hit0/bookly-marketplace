@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { LOCKOUT_THRESHOLD, attemptLogin, requestPasswordReset } from '../auth/admin-auth.js';
+import { LOCKOUT_THRESHOLD, attemptLogin, requestPasswordReset } from '../auth/account-auth.js';
 import { hashPassword } from '../auth/password.js';
 import { createPrismaClient } from '../db/client.js';
 import { formatDateTime } from '../format.js';
@@ -121,7 +121,7 @@ describe('createEmailHandler', () => {
     const handler = createEmailHandler({ mail: new RecordingProvider(), webOrigin: FIXTURE_WEB_ORIGIN });
     const offSite = {
       ...(emailFixture('account_password_reset').payload as Record<string, unknown>),
-      resetUrl: 'http://localhost:4000/api/admin/reset-password#token=abc',
+      resetUrl: 'http://localhost:4000/api/studio/reset-password#token=abc',
     };
 
     await expect(handler(rowFor('booking_confirmation', { template: 'booking_invite' }), new AbortController().signal)).rejects.toBeInstanceOf(
@@ -336,7 +336,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
   it('delivers the account_password_reset exactly as requestPasswordReset enqueues it', async () => {
     const mail = new RecordingProvider();
     const now = new Date('2026-10-07T07:00:00Z');
-    await requestPasswordReset({ prisma, sessionSecret: 'x'.repeat(40), webOrigin: FIXTURE_WEB_ORIGIN, now: () => now }, ADMIN_EMAIL);
+    await requestPasswordReset({ prisma, sessionSecret: 'x'.repeat(40), webOrigin: FIXTURE_WEB_ORIGIN, now: () => now }, 'studio', ADMIN_EMAIL);
     const row = await prisma.outbox.findFirstOrThrow();
     const payload = row.payload as { resetUrl: string; expiresAt: string };
 
@@ -360,7 +360,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
   it('refuses a password_reset enqueued against a different WEB_ORIGIN than the worker’s, rather than sending the admin off-site', async () => {
     const mail = new RecordingProvider();
     const now = new Date('2026-10-07T07:00:00Z');
-    await requestPasswordReset({ prisma, sessionSecret: 'x'.repeat(40), webOrigin: 'http://localhost:4000', now: () => now }, ADMIN_EMAIL);
+    await requestPasswordReset({ prisma, sessionSecret: 'x'.repeat(40), webOrigin: 'http://localhost:4000', now: () => now }, 'studio', ADMIN_EMAIL);
 
     await processNext({ prisma, handlers: { email: createEmailHandler({ mail, webOrigin: FIXTURE_WEB_ORIGIN }) }, log: noLog });
 
@@ -374,7 +374,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     const mail = new RecordingProvider();
     const now = new Date('2026-10-07T07:00:00Z');
     const deps = { prisma, sessionSecret: 'x'.repeat(40), webOrigin: FIXTURE_WEB_ORIGIN, now: () => now };
-    for (let i = 0; i < LOCKOUT_THRESHOLD; i++) await attemptLogin(deps, ADMIN_EMAIL, 'wrong password');
+    for (let i = 0; i < LOCKOUT_THRESHOLD; i++) await attemptLogin(deps, 'studio', ADMIN_EMAIL, 'wrong password');
     const row = await prisma.outbox.findFirstOrThrow();
     const payload = row.payload as { variant: string; lockedUntil: string };
     expect(payload.variant).toBe('login_lockout');
@@ -387,7 +387,7 @@ describe('delivery through the worker, against PostgreSQL', () => {
     expect(message?.subject).toBe(`Sign-in locked after ${LOCKOUT_THRESHOLD} failed attempts`);
     // Locked for one minute from 07:00Z: 09:01 in Kigali.
     expect(message?.text).toContain('locked until 7 Oct 2026, 09:01 (Kigali time)');
-    expect(message?.html).toContain(`href="${FIXTURE_WEB_ORIGIN}/admin/login"`);
+    expect(message?.html).toContain(`href="${FIXTURE_WEB_ORIGIN}/studio/login"`);
   }, 30_000);
 
   it('the worker never delivers an alert about an alert it could not send', async () => {

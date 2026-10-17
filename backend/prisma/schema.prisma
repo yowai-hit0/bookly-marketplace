@@ -62,6 +62,11 @@ model AppUser {
   disabledAt             DateTime? @map("disabled_at") @db.Timestamptz(6)
   /// Erasure ran (data-model_v2.md §10.2).
   anonymizedAt           DateTime? @map("anonymized_at") @db.Timestamptz(6)
+  /// Part of every bearer token's credential fingerprint (auth/token.ts). Adding
+  /// one revokes every token the user holds, on the next request: the revocation
+  /// a Google-only client, who has no password to change, needs (Phase 2,
+  /// decision 2). CHECK app_user_token_version_non_negative.
+  tokenVersion           Int       @default(0) @map("token_version")
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

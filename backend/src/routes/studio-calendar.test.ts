@@ -6,14 +6,14 @@ import type pg from 'pg';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { issueAdminToken } from '../auth/token.js';
+import { issueToken } from '../auth/token.js';
 import { findCalendar } from '../calendar/query.js';
 import type { BookingStatus } from '../db/statuses.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { createPhotographer } from '../test/payment-fixtures.js';
 
 /**
- * `GET /api/admin/calendar` over HTTP, against real PostgreSQL (plan.md Task 9;
+ * `GET /api/studio/calendar` over HTTP, against real PostgreSQL (plan.md Task 9;
  * spec §3.3 step 1, §7).
  *
  * The loading rules are proven in calendar/query.test.ts. What is proven here:
@@ -42,7 +42,7 @@ const START = new Date('2026-10-01T06:00:00Z');
 const MINUTE_MS = 60_000;
 const DAY_MS = 1440 * MINUTE_MS;
 
-const CALENDAR = '/api/admin/calendar';
+const CALENDAR = '/api/studio/calendar';
 const OCTOBER_GRID = { from: '2026-09-28', to: '2026-11-01' };
 const WEDNESDAY = '2026-10-07';
 
@@ -72,10 +72,10 @@ beforeEach(async () => {
     where: { id: photographerUserId },
     data: { passwordHash: '$argon2id$placeholder-never-verified' },
   });
-  token = (await issueAdminToken(SECRET, user, START)).token;
+  token = (await issueToken(SECRET, 'studio', user, START)).token;
   app = createApp({
     corsOrigin: WEB_ORIGIN,
-    admin: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+    auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
   });
   catalogue = await insertCatalogue(photographerId);
   queries = [];
@@ -176,12 +176,12 @@ type CalendarJson = {
 function expectUnauthenticated(res: Response): void {
   expect(res.status).toBe(401);
   expect(res.body).toEqual({ error: 'unauthenticated' });
-  expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-admin"/);
+  expect(String(res.headers['www-authenticate'])).toMatch(/^Bearer realm="bookly-studio"/);
 }
 
 // --- Auth -----------------------------------------------------------------------
 
-describe('GET /api/admin/calendar without a valid token', () => {
+describe('GET /api/studio/calendar without a valid token', () => {
   it('answers 401 with no token, running no calendar query', async () => {
     const res = await getCalendar(range(WEDNESDAY, WEDNESDAY), null);
 
@@ -203,7 +203,7 @@ describe('GET /api/admin/calendar without a valid token', () => {
 
 // --- Response ----------------------------------------------------------------------
 
-describe('GET /api/admin/calendar', () => {
+describe('GET /api/studio/calendar', () => {
   it('answers 200 with the range’s bookings, live holds and blocks, and nothing else', async () => {
     const block = await prisma.availabilityBlock.create({
       data: { photographerId: catalogue.photographerId, startsAt: at(WEDNESDAY, '09:30'), endsAt: at(WEDNESDAY, '11:00'), reason: 'Clinic' },
@@ -295,7 +295,7 @@ describe('GET /api/admin/calendar', () => {
 
 // --- Validation ------------------------------------------------------------------------
 
-describe('GET /api/admin/calendar query validation', () => {
+describe('GET /api/studio/calendar query validation', () => {
   it.each<[string, string]>([
     ['no query at all', ''],
     ['a missing from', '?to=2026-10-31'],

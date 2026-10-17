@@ -49,6 +49,7 @@ Companion to `docs/marketplace-spec.md`. Supersedes `docs/data-model_v2.md` for 
 | Add | `full_name` text NULL |
 | Add | `email_verified_at`, `email_verify_token_hash`, `email_verify_expires_at`. A client account links to `client` rows only after verification. |
 | Add | `disabled_at` (platform admin switched the login off) and `anonymized_at` (erasure). |
+| Add (Phase 2) | `token_version int NOT NULL DEFAULT 0`, CHECK `app_user_token_version_non_negative`. Covered by every token's credential fingerprint; adding one revokes all of the user's tokens (marketplace-spec.md R2.1a). Migration `20261017095220_app_user_token_version`. |
 | Keep | `email`, `password_hash` (nullable per amendment), `failed_login_count`, `locked_until`, `password_reset_token_hash`, `password_reset_expires_at`, `last_login_at`, timestamps. |
 | Unique | `app_user_lower_email_unique ON app_user (lower(email))`, replacing init `:335`. |
 | New partial uniques | `app_user_password_reset_token_hash_unique` and `app_user_email_verify_token_hash_unique`, each `WHERE … IS NOT NULL`. With many users a token hash must address one row. Today `findFirst` by hash at `auth/admin-auth.ts:149` assumes there is a single row. |
@@ -291,6 +292,7 @@ model AppUser {
   lastLoginAt            DateTime? @map("last_login_at") @db.Timestamptz(6)
   disabledAt             DateTime? @map("disabled_at") @db.Timestamptz(6)
   anonymizedAt           DateTime? @map("anonymized_at") @db.Timestamptz(6)
+  tokenVersion           Int       @default(0) @map("token_version")   /// Phase 2: revokes every token when bumped
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

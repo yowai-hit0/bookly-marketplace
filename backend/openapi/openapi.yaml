@@ -2,19 +2,23 @@ openapi: 3.1.0
 info:
   title: Bookly API
   version: 1.0.0
-  summary: Booking, payment and admin API for a photographer's booking site in Kigali.
+  summary: Booking, payment, studio and platform API for a marketplace of photographers in Kigali.
   description: |
-    The API behind the Bookly booking site. It serves three kinds of caller:
+    The API behind the Bookly marketplace. It serves four kinds of caller:
 
     - **The public**: anonymous visitors browsing photographers and their
       services, checking availability, booking a slot and paying its booking fee.
-    - **A booking's client**: no account; every client request carries a
+    - **A booking's client**: no account needed; every client request carries a
       **capability token** in its path, emailed when the booking is confirmed.
-    - **A photographer** (the studio, under `/api/admin/*` until Phase 2 moves
-      it to `/api/studio/*`): an `Authorization: Bearer` JWT from
-      `POST /api/admin/auth/login`. Every studio route is scoped to the
-      photographer the token names; an id of another photographer's row is a
-      404, exactly like an id that names nothing.
+    - **A photographer**, in the studio under `/api/studio/*`: an
+      `Authorization: Bearer` JWT from `POST /api/studio/auth/login`. Every
+      studio route is scoped to the photographer the token names; an id of
+      another photographer's row is a 404, exactly like an id that names nothing.
+    - **A platform admin**, in the console under `/api/platform/*`: a bearer
+      JWT from `POST /api/platform/auth/login`.
+
+    Each signed-in area has its own login and its own token audience: a token
+    from one area is a `401` in every other, whatever its role claim says.
 
     Read [the API conventions](/api/conventions) first: error shapes, the
     400-versus-422 rule, time zones and money are the same on every operation.
@@ -27,10 +31,10 @@ servers:
     description: Production
   - url: http://localhost:4000
     description: Local development
-# Admin operations inherit this; public, client and auth operations set
-# `security: []` to opt out.
+# Studio operations inherit this. Public, client and auth operations set
+# `security: []` to opt out; platform operations name `platformBearer`.
 security:
-  - adminBearer: []
+  - studioBearer: []
 tags:
   - name: Health
   - name: Catalogue & availability
@@ -45,18 +49,22 @@ tags:
     description: '"Email me my links": a fresh link for every current booking on an address.'
   - name: Email confirmations
     description: Confirming a booking's change of contact email from the new address.
-  - name: Admin auth
+  - name: Studio auth
     description: Login and password reset for a photographer's studio account.
-  - name: Admin availability
+  - name: Studio availability
     description: Working hours and blocked time.
-  - name: Admin settings
+  - name: Studio settings
     description: The photographer's operating values and client cancellation policy.
-  - name: Admin calendar
-  - name: Admin bookings
+  - name: Studio calendar
+  - name: Studio bookings
     description: The bookings list, one booking, and everything done to it.
-  - name: Admin payments
-  - name: Admin catalogue
+  - name: Studio payments
+  - name: Studio catalogue
     description: Services, packages and add-ons.
+  - name: Platform auth
+    description: Login and password reset for a platform admin.
+  - name: Platform photographers
+    description: Listing photographers, and approving, suspending and reactivating them.
   - name: Webhooks
     description: Inbound payment-provider callbacks. Called by providers, never by browsers.
 paths:
@@ -99,76 +107,93 @@ paths:
     $ref: paths/client.yaml#/email
   /api/booking/{token}/payments:
     $ref: paths/client.yaml#/payments
-  # --- Admin auth -----------------------------------------------------------
-  /api/admin/auth/login:
-    $ref: paths/admin-auth.yaml#/login
-  /api/admin/auth/password-reset/request:
-    $ref: paths/admin-auth.yaml#/resetRequest
-  /api/admin/auth/password-reset/confirm:
-    $ref: paths/admin-auth.yaml#/resetConfirm
-  /api/admin/me:
-    $ref: paths/admin-auth.yaml#/me
-  # --- Admin availability, settings, calendar -------------------------------
-  /api/admin/working-hours:
-    $ref: paths/admin-availability.yaml#/workingHours
-  /api/admin/working-hours/{id}:
-    $ref: paths/admin-availability.yaml#/workingHoursItem
-  /api/admin/blocks:
-    $ref: paths/admin-availability.yaml#/blocks
-  /api/admin/blocks/{id}:
-    $ref: paths/admin-availability.yaml#/blocksItem
-  /api/admin/settings:
-    $ref: paths/admin-availability.yaml#/settings
-  /api/admin/calendar:
-    $ref: paths/admin-availability.yaml#/calendar
-  # --- Admin bookings -------------------------------------------------------
-  /api/admin/bookings:
-    $ref: paths/admin-bookings.yaml#/list
-  /api/admin/bookings/{id}:
-    $ref: paths/admin-bookings.yaml#/detail
-  /api/admin/bookings/{id}/reschedule:
-    $ref: paths/admin-bookings.yaml#/reschedule
-  /api/admin/bookings/{id}/cancel:
-    $ref: paths/admin-bookings.yaml#/cancel
-  /api/admin/bookings/{id}/complete:
-    $ref: paths/admin-bookings.yaml#/complete
-  /api/admin/bookings/{id}/no-show:
-    $ref: paths/admin-bookings.yaml#/noShow
-  /api/admin/bookings/{id}/resend-link:
-    $ref: paths/admin-bookings.yaml#/resendLink
-  /api/admin/bookings/{id}/addons:
-    $ref: paths/admin-bookings.yaml#/addons
-  /api/admin/bookings/{id}/addons/{addonId}:
-    $ref: paths/admin-bookings.yaml#/addonItem
-  /api/admin/bookings/{id}/session-fee:
-    $ref: paths/admin-bookings.yaml#/sessionFee
-  /api/admin/bookings/{id}/payments/cash:
-    $ref: paths/admin-bookings.yaml#/cash
-  /api/admin/bookings/{id}/delivery:
-    $ref: paths/admin-bookings.yaml#/delivery
-  /api/admin/bookings/{id}/delivery/send:
-    $ref: paths/admin-bookings.yaml#/deliverySend
-  /api/admin/bookings/{id}/notes:
-    $ref: paths/admin-bookings.yaml#/notes
-  /api/admin/bookings/{id}/notes/{noteId}:
-    $ref: paths/admin-bookings.yaml#/noteItem
-  /api/admin/payments/{id}/refund:
-    $ref: paths/admin-bookings.yaml#/refund
-  # --- Admin catalogue ------------------------------------------------------
-  /api/admin/catalogue:
-    $ref: paths/admin-catalogue.yaml#/catalogue
-  /api/admin/services:
-    $ref: paths/admin-catalogue.yaml#/services
-  /api/admin/services/{id}:
-    $ref: paths/admin-catalogue.yaml#/serviceItem
-  /api/admin/packages:
-    $ref: paths/admin-catalogue.yaml#/packages
-  /api/admin/packages/{id}:
-    $ref: paths/admin-catalogue.yaml#/packageItem
-  /api/admin/addons:
-    $ref: paths/admin-catalogue.yaml#/addons
-  /api/admin/addons/{id}:
-    $ref: paths/admin-catalogue.yaml#/addonItem
+  # --- Studio auth ----------------------------------------------------------
+  /api/studio/auth/login:
+    $ref: paths/studio-auth.yaml#/login
+  /api/studio/auth/password-reset/request:
+    $ref: paths/studio-auth.yaml#/resetRequest
+  /api/studio/auth/password-reset/confirm:
+    $ref: paths/studio-auth.yaml#/resetConfirm
+  /api/studio/me:
+    $ref: paths/studio-auth.yaml#/me
+  # --- Studio availability, settings, calendar -------------------------------
+  /api/studio/working-hours:
+    $ref: paths/studio-availability.yaml#/workingHours
+  /api/studio/working-hours/{id}:
+    $ref: paths/studio-availability.yaml#/workingHoursItem
+  /api/studio/blocks:
+    $ref: paths/studio-availability.yaml#/blocks
+  /api/studio/blocks/{id}:
+    $ref: paths/studio-availability.yaml#/blocksItem
+  /api/studio/settings:
+    $ref: paths/studio-availability.yaml#/settings
+  /api/studio/calendar:
+    $ref: paths/studio-availability.yaml#/calendar
+  # --- Studio bookings -------------------------------------------------------
+  /api/studio/bookings:
+    $ref: paths/studio-bookings.yaml#/list
+  /api/studio/bookings/{id}:
+    $ref: paths/studio-bookings.yaml#/detail
+  /api/studio/bookings/{id}/reschedule:
+    $ref: paths/studio-bookings.yaml#/reschedule
+  /api/studio/bookings/{id}/cancel:
+    $ref: paths/studio-bookings.yaml#/cancel
+  /api/studio/bookings/{id}/complete:
+    $ref: paths/studio-bookings.yaml#/complete
+  /api/studio/bookings/{id}/no-show:
+    $ref: paths/studio-bookings.yaml#/noShow
+  /api/studio/bookings/{id}/resend-link:
+    $ref: paths/studio-bookings.yaml#/resendLink
+  /api/studio/bookings/{id}/addons:
+    $ref: paths/studio-bookings.yaml#/addons
+  /api/studio/bookings/{id}/addons/{addonId}:
+    $ref: paths/studio-bookings.yaml#/addonItem
+  /api/studio/bookings/{id}/session-fee:
+    $ref: paths/studio-bookings.yaml#/sessionFee
+  /api/studio/bookings/{id}/payments/cash:
+    $ref: paths/studio-bookings.yaml#/cash
+  /api/studio/bookings/{id}/delivery:
+    $ref: paths/studio-bookings.yaml#/delivery
+  /api/studio/bookings/{id}/delivery/send:
+    $ref: paths/studio-bookings.yaml#/deliverySend
+  /api/studio/bookings/{id}/notes:
+    $ref: paths/studio-bookings.yaml#/notes
+  /api/studio/bookings/{id}/notes/{noteId}:
+    $ref: paths/studio-bookings.yaml#/noteItem
+  /api/studio/payments/{id}/refund:
+    $ref: paths/studio-bookings.yaml#/refund
+  # --- Studio catalogue ------------------------------------------------------
+  /api/studio/catalogue:
+    $ref: paths/studio-catalogue.yaml#/catalogue
+  /api/studio/services:
+    $ref: paths/studio-catalogue.yaml#/services
+  /api/studio/services/{id}:
+    $ref: paths/studio-catalogue.yaml#/serviceItem
+  /api/studio/packages:
+    $ref: paths/studio-catalogue.yaml#/packages
+  /api/studio/packages/{id}:
+    $ref: paths/studio-catalogue.yaml#/packageItem
+  /api/studio/addons:
+    $ref: paths/studio-catalogue.yaml#/addons
+  /api/studio/addons/{id}:
+    $ref: paths/studio-catalogue.yaml#/addonItem
+  # --- Platform -------------------------------------------------------------
+  /api/platform/auth/login:
+    $ref: paths/platform.yaml#/login
+  /api/platform/auth/password-reset/request:
+    $ref: paths/platform.yaml#/resetRequest
+  /api/platform/auth/password-reset/confirm:
+    $ref: paths/platform.yaml#/resetConfirm
+  /api/platform/me:
+    $ref: paths/platform.yaml#/me
+  /api/platform/photographers:
+    $ref: paths/platform.yaml#/photographers
+  /api/platform/photographers/{id}/approve:
+    $ref: paths/platform.yaml#/approve
+  /api/platform/photographers/{id}/suspend:
+    $ref: paths/platform.yaml#/suspend
+  /api/platform/photographers/{id}/reactivate:
+    $ref: paths/platform.yaml#/reactivate
   # --- Webhooks -------------------------------------------------------------
   /api/webhooks/mtn-momo/{ourRef}/{signature}:
     $ref: paths/webhooks.yaml#/mtnMomo
@@ -176,11 +201,20 @@ paths:
     $ref: paths/webhooks.yaml#/flutterwave
 components:
   securitySchemes:
-    adminBearer:
+    studioBearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
       description: |
-        HS256 JWT from `POST /api/admin/auth/login`, valid 8 hours. Sent as
-        `Authorization: Bearer <token>`; never a cookie. Changing the admin
-        password revokes every token already issued.
+        HS256 JWT from `POST /api/studio/auth/login`, audience `bookly-studio`,
+        valid 8 hours. Sent as `Authorization: Bearer <token>`; never a cookie.
+        Refused once the password changes, the login is disabled or erased, or
+        its tokens are revoked; refused outside the studio.
+    platformBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 JWT from `POST /api/platform/auth/login`, audience
+        `bookly-platform`, valid 8 hours. Revoked like the studio's; refused
+        outside the platform console.

@@ -1,25 +1,26 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
-import { type UserRole, isUserRole } from './roles.js';
+import { AREA_ROLE, type AuthArea, type UserRole } from './roles.js';
 
 /**
- * The studio access token (plan.md Task 7, revision 2.3), issued on
- * `/api/admin/*` until Phase 2 renames the paths (brief decision 3).
+ * The bearer access tokens of the three signed-in areas (plan.md Task 7,
+ * revision 2.3; marketplace-spec.md R2.1; Phase 2 decision 2).
  *
- * Claims are `{ sub: userId, role }` plus the password fingerprint
- * (marketplace-spec.md R2.1). The role is informative: the middleware decides
- * on the role stored in `app_user`, never on the one in the token. Phase 2 gives
- * each role its own `aud`; until then every token is `bookly-admin`, and only a
- * photographer is ever issued one.
+ * Claims are `{ sub: userId, role }` plus the credential fingerprint. Each area
+ * has its own `aud` -- `bookly-studio`, `bookly-platform`, `bookly-account` --
+ * so a token issued for one is refused by the others' middleware, even on a
+ * route wired to the wrong one. The role is informative: the middleware decides
+ * on the role stored in `app_user`, never on the one in the token.
  *
  * A JWT the client sends as `Authorization: Bearer <token>`. No cookie is
- * involved in admin auth, so there is nothing a browser attaches on its own, and
- * therefore nothing for a cross-site request to borrow: CSRF does not arise, and
- * no CSRF token exists.
+ * involved, so there is nothing a browser attaches on its own, and therefore
+ * nothing for a cross-site request to borrow: CSRF does not arise, and no CSRF
+ * token exists.
  *
- * Stateless, like the cookie it replaced: 8 hours, no session table. It is
- * revoked two ways only -- changing the password (the token's fingerprint claim
- * stops matching) or rotating SESSION_SECRET (every signature stops verifying).
+ * Stateless: no session table. A token stops working when it expires, when
+ * SESSION_SECRET rotates (every signature stops verifying), or when its
+ * credential fingerprint stops matching the user's row -- see
+ * `credentialFingerprint` for what changes it.
  */
 
 /** HS256: one service both issues and verifies, so a shared secret is right and
@@ -27,14 +28,26 @@ import { type UserRole, isUserRole } from './roles.js';
 export const TOKEN_ALGORITHM = 'HS256';
 
 /** Scope claims. A JWT signed with this secret for any other purpose later (a
- *  reset link, a client token) cannot be replayed as an admin token. */
+ *  reset link, say) cannot be replayed as an access token, and one area's
+ *  token cannot be replayed in another's. */
 export const TOKEN_ISSUER = 'bookly-api';
-export const TOKEN_AUDIENCE = 'bookly-admin';
+export const TOKEN_AUDIENCES = {
+  studio: 'bookly-studio',
+  platform: 'bookly-platform',
+  account: 'bookly-account',
+} as const satisfies Record<AuthArea, string>;
 
-export const TOKEN_TTL_SECONDS = 8 * 60 * 60;
+const HOUR_SECONDS = 60 * 60;
 
-/** Private claim: an HMAC of the user's password hash -- never the hash. */
-const PASSWORD_FINGERPRINT_CLAIM = 'pwd_fp';
+/** Eight hours for photographers and platform admins, seven days for clients (R2.1). */
+export const TOKEN_TTL_SECONDS = {
+  studio: 8 * HOUR_SECONDS,
+  platform: 8 * HOUR_SECONDS,
+  account: 7 * 24 * HOUR_SECONDS,
+} as const satisfies Record<AuthArea, number>;
+
+/** Private claim: an HMAC of the user's credentials -- never the credentials. */
+const CREDENTIAL_FINGERPRINT_CLAIM = 'cred_fp';
 
 /** Private claim: the `app_user.role` the token was issued to. */
 const ROLE_CLAIM = 'role';
@@ -43,30 +56,34 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type IssuedToken = { token: string; expiresAt: Date };
 
-export type VerifiedClaims = { userId: string; role: UserRole; passwordFingerprint: string };
+export type VerifiedClaims = { userId: string; role: UserRole; credentialFingerprint: string };
+
+/** What a credential fingerprint is computed from: three `app_user` columns. */
+export type CredentialSubject = { passwordHash: string | null; googleSub: string | null; tokenVersion: number };
 
 /** The `app_user` columns a token is built from. */
-export type TokenSubject = { id: string; role: string; passwordHash: string | null };
+export type TokenSubject = CredentialSubject & { id: string; role: string };
 
 /**
- * Throws for a user without a password (a Google-only client, R2.4): the token
- * is bound to a password hash, and there is none to bind to. Login never gets
- * here for one -- `canUseStudio` refuses it first.
+ * Issues `area`'s token to `user`. Throws for a user of another role -- login
+ * and Google sign-in never get here for one, so this is a bug, not a refusal --
+ * and for a user with no credential at all, which the
+ * `app_user_has_credential` CHECK already makes impossible.
  */
-export async function issueAdminToken(secret: string, user: TokenSubject, now: Date): Promise<IssuedToken> {
-  if (user.passwordHash === null) throw new Error('Cannot issue a password-bound token to a user without a password');
-  if (!isUserRole(user.role)) throw new Error(`Cannot issue a token for the unknown role ${user.role}`);
+export async function issueToken(secret: string, area: AuthArea, user: TokenSubject, now: Date): Promise<IssuedToken> {
+  if (user.role !== AREA_ROLE[area]) throw new Error(`Cannot issue a ${area} token to a ${user.role}`);
+  if (user.passwordHash === null && user.googleSub === null) throw new Error('Cannot issue a token to a user without a credential');
   const issuedAt = Math.floor(now.getTime() / 1000);
-  const expiresAt = issuedAt + TOKEN_TTL_SECONDS;
+  const expiresAt = issuedAt + TOKEN_TTL_SECONDS[area];
 
   const token = await new SignJWT({
     [ROLE_CLAIM]: user.role,
-    [PASSWORD_FINGERPRINT_CLAIM]: passwordFingerprint(secret, user.passwordHash),
+    [CREDENTIAL_FINGERPRINT_CLAIM]: credentialFingerprint(secret, user),
   })
     .setProtectedHeader({ alg: TOKEN_ALGORITHM, typ: 'JWT' })
     .setSubject(user.id)
     .setIssuer(TOKEN_ISSUER)
-    .setAudience(TOKEN_AUDIENCE)
+    .setAudience(TOKEN_AUDIENCES[area])
     .setIssuedAt(issuedAt)
     .setExpirationTime(expiresAt)
     .sign(signingKey(secret));
@@ -75,8 +92,9 @@ export async function issueAdminToken(secret: string, user: TokenSubject, now: D
 }
 
 /**
- * Verifies signature, algorithm, issuer, audience and expiry, and returns the
- * claims -- or null for any token that fails any of them.
+ * Verifies signature, algorithm, issuer, `area`'s audience and expiry, and
+ * returns the claims -- or null for any token that fails any of them, and for
+ * one whose role claim is not the area's.
  *
  * `algorithms` is pinned. That single option is what closes the algorithm-
  * confusion class of attack: a token declaring `alg: none`, or any algorithm but
@@ -84,33 +102,29 @@ export async function issueAdminToken(secret: string, user: TokenSubject, now: D
  * required too, so a correctly-signed token that somehow lacks `exp` is refused
  * rather than treated as valid forever.
  *
- * This does NOT check the password fingerprint or the role against the
- * database: it has no database. `requirePhotographer` does both after loading
- * the user.
+ * This does NOT check the fingerprint or the role against the database: it has
+ * no database. The area's middleware does both after loading the user.
  */
-export async function verifyAdminToken(
-  secret: string,
-  token: string,
-  now: Date,
-): Promise<VerifiedClaims | null> {
+export async function verifyToken(secret: string, area: AuthArea, token: string, now: Date): Promise<VerifiedClaims | null> {
   try {
     const { payload } = await jwtVerify(token, signingKey(secret), {
       algorithms: [TOKEN_ALGORITHM],
       issuer: TOKEN_ISSUER,
-      audience: TOKEN_AUDIENCE,
+      audience: TOKEN_AUDIENCES[area],
       currentDate: now,
-      requiredClaims: ['sub', 'iat', 'exp', ROLE_CLAIM, PASSWORD_FINGERPRINT_CLAIM],
+      requiredClaims: ['sub', 'iat', 'exp', ROLE_CLAIM, CREDENTIAL_FINGERPRINT_CLAIM],
     });
 
-    const fingerprint = payload[PASSWORD_FINGERPRINT_CLAIM];
+    const fingerprint = payload[CREDENTIAL_FINGERPRINT_CLAIM];
     const role = payload[ROLE_CLAIM];
     // A UUID check before the id reaches a `@db.Uuid` lookup: a malformed id
     // raises a database error there, and a bad token must be a 401, never a 500.
     if (typeof payload.sub !== 'string' || !UUID.test(payload.sub)) return null;
     if (typeof fingerprint !== 'string') return null;
-    if (!isUserRole(role)) return null;
+    const expected = AREA_ROLE[area];
+    if (role !== expected) return null;
 
-    return { userId: payload.sub, role, passwordFingerprint: fingerprint };
+    return { userId: payload.sub, role: expected, credentialFingerprint: fingerprint };
   } catch {
     // Every jose failure -- malformed, expired, wrong key, wrong alg, wrong
     // audience -- is the same outcome to the caller: not a valid token.
@@ -119,16 +133,28 @@ export async function verifyAdminToken(
 }
 
 /**
- * Binds a token to the password it was issued under. Changing the password
- * changes this value, so every token issued before the change fails on the next
- * request -- the revocation the cookie design got from signing over the hash.
+ * Binds a token to the credentials it was issued under -- the revocation
+ * scheme of every role (Phase 2 decision 2, T2.5). It covers three columns of
+ * `app_user`, and changing any of them fails every token issued before the
+ * change, on the very next request:
+ *
+ * - `password_hash`: a password change or reset (the scheme of Phase 1);
+ * - `google_sub`: linking or unlinking a Google identity;
+ * - `token_version`: bumped by `revokeTokens` (auth/account-auth.ts). This is
+ *   the revocation a Google-only client gets, having no password to change --
+ *   "sign out everywhere", erasure -- and it works for every other role too.
+ *
+ * Disabling or erasing a login needs none of this: the middleware refuses a
+ * disabled or anonymized row outright.
  *
  * An HMAC under the server secret, not a plain hash: a JWT payload is only
  * base64, readable by anyone holding the token, and nothing derived from the
- * Argon2 hash without the secret may appear in it.
+ * Argon2 hash or the Google subject without the secret may appear in it. The
+ * input is a JSON array, so no value can impersonate a separator.
  */
-export function passwordFingerprint(secret: string, passwordHash: string): string {
-  return createHmac('sha256', secret).update(`pwd_fp.${passwordHash}`).digest('base64url');
+export function credentialFingerprint(secret: string, subject: CredentialSubject): string {
+  const material = JSON.stringify(['cred_fp.v1', subject.passwordHash, subject.googleSub, subject.tokenVersion]);
+  return createHmac('sha256', secret).update(material).digest('base64url');
 }
 
 /**
