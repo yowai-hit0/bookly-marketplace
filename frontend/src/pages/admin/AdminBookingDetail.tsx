@@ -111,7 +111,7 @@ export function AdminBookingDetail() {
       .catch((error: unknown) => {
         if (cancelled) return
         if (error instanceof UnauthenticatedError) {
-          void navigate('/admin/login', { replace: true })
+          void navigate('/studio/login', { replace: true })
           return
         }
         setState(error instanceof ApiError && error.status === 404 ? 'missing' : 'failed')
@@ -141,7 +141,7 @@ export function AdminBookingDetail() {
       return true
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        void navigate('/admin/login', { replace: true })
+        void navigate('/studio/login', { replace: true })
         return false
       }
       setFailure({ code: error instanceof ApiError ? error.message : 'failed' })
@@ -675,7 +675,7 @@ function Shell({ head, children }: { head: ReactNode; children?: ReactNode }) {
   return (
     <main className={cn(PAGE, 'max-w-3xl')}>
       <div className="flex flex-col gap-4 lg:gap-6">
-        <BackLink to="/admin/bookings" className="max-lg:min-h-11">
+        <BackLink to="/studio/bookings" className="max-lg:min-h-11">
           {t('admin:booking.back')}
         </BackLink>
         {head}

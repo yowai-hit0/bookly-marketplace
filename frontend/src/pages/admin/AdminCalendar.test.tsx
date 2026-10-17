@@ -6,10 +6,11 @@ import '@/i18n'
 import type { CalendarBlock, CalendarBooking, CalendarData } from '@/admin/calendar-events'
 import { readSession, saveSession } from '@/admin/session'
 import { routes } from '@/routes'
+import { isStudioMe, studioMe } from '@/test/studio-me'
 
 /**
  * The admin calendar page (plan.md Task 9; spec §3.3 step 1, §6.4, §6.5):
- * FullCalendar in Africa/Kigali, fed by `GET /api/admin/calendar`, rendered
+ * FullCalendar in Africa/Kigali, fed by `GET /api/studio/calendar`, rendered
  * through the real routes with `fetch` stubbed.
  *
  * The clock is 2026-10-31 22:30 UTC -- already 00:30 on Sunday 1 November in
@@ -20,7 +21,7 @@ import { routes } from '@/routes'
 
 const NOW = new Date('2026-10-31T22:30:00.000Z')
 const TOKEN = 'header.payload.signature'
-const CALENDAR_API = '/api/admin/calendar'
+const CALENDAR_API = '/api/studio/calendar'
 const CONFLICT = 'Conflicts with a block'
 
 function booking(fields: Pick<CalendarBooking, 'id' | 'reference' | 'startsAt' | 'endsAt'> & Partial<CalendarBooking>): CalendarBooking {
@@ -82,7 +83,8 @@ type Handler = (url: string) => Response | Promise<Response>
 
 function stubFetch(handler: Handler = () => json(OCTOBER)) {
   const mock = vi.fn((input: string | URL | Request, _init?: RequestInit) =>
-    Promise.resolve().then(() => handler(String(input))),
+    // The layout's banner request is answered here, so `handler` sees only the page's own.
+    Promise.resolve().then(() => (isStudioMe(input) ? studioMe() : handler(String(input)))),
   )
   vi.stubGlobal('fetch', mock)
   return mock
@@ -97,7 +99,7 @@ function calendarUrl(from: string, to: string): string {
 }
 
 function requestedUrls(mock: ReturnType<typeof stubFetch>): string[] {
-  return mock.mock.calls.map(([input]) => String(input))
+  return mock.mock.calls.map(([input]) => String(input)).filter((url) => !isStudioMe(url))
 }
 
 function signIn() {
@@ -148,7 +150,7 @@ describe('month view (plan.md Task 9)', () => {
   it('renders 3 confirmed bookings, 1 live hold and 1 block as 5 entries, each labelled with its status', async () => {
     signIn()
     stubFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
 
     await waitForEntries(5)
 
@@ -169,7 +171,7 @@ describe('month view (plan.md Task 9)', () => {
   it('shows each start as Kigali time, on the Kigali date, including 23:30 on the 23rd', async () => {
     signIn()
     stubFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
 
     await waitForEntries(5)
 
@@ -184,7 +186,7 @@ describe('month view (plan.md Task 9)', () => {
   it('marks the booking that overlaps a block with a conflict marker, and no other entry (spec §6.4)', async () => {
     signIn()
     stubFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
 
     await waitForEntries(5)
 
@@ -199,12 +201,12 @@ describe('month view (plan.md Task 9)', () => {
   it('fetches exactly the whole weeks of the month once, with the bearer token', async () => {
     signIn()
     const fetchMock = stubFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
 
     await waitForEntries(5)
 
     expect(requestedUrls(fetchMock)).toEqual([calendarUrl('2026-09-28', '2026-11-01')])
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    const init = fetchMock.mock.calls.find(([input]) => !isStudioMe(input))?.[1] as RequestInit | undefined
     expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${TOKEN}`)
   })
 })
@@ -213,7 +215,7 @@ describe('the URL', () => {
   it('opens the view and date it names, and records where the calendar landed', async () => {
     signIn()
     const fetchMock = stubFetch()
-    const router = renderAt('/admin/calendar?view=week&date=2026-10-07')
+    const router = renderAt('/studio/calendar?view=week&date=2026-10-07')
 
     await waitForEntries(2)
 
@@ -222,9 +224,9 @@ describe('the URL', () => {
   })
 
   it.each([
-    ['no parameters', '/admin/calendar'],
-    ['an unknown view and a malformed date', '/admin/calendar?view=year&date=31-10-2026'],
-    ['a year the API refuses', '/admin/calendar?view=month&date=0050-06-15'],
+    ['no parameters', '/studio/calendar'],
+    ['an unknown view and a malformed date', '/studio/calendar?view=year&date=31-10-2026'],
+    ['a year the API refuses', '/studio/calendar?view=month&date=0050-06-15'],
   ])('falls back to the month of Kigali today for %s', async (_label, path) => {
     signIn()
     const fetchMock = stubFetch(() => json({ bookings: [], blocks: [] }))
@@ -240,7 +242,7 @@ describe('navigation', () => {
   it('fetches the next month on Next, and follows it in the URL', async () => {
     signIn()
     const fetchMock = stubFetch()
-    const router = renderAt('/admin/calendar?view=month&date=2026-10-07')
+    const router = renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     await user().click(toolbarButton('Next'))
@@ -254,7 +256,7 @@ describe('navigation', () => {
   it('switches to the week and day views without refetching dates it already holds', async () => {
     signIn()
     const fetchMock = stubFetch()
-    const router = renderAt('/admin/calendar?view=month&date=2026-10-07')
+    const router = renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
     const u = user()
 
@@ -271,7 +273,7 @@ describe('week and day views', () => {
   it('show each booking with its service, package and reference, and a block with its reason', async () => {
     signIn()
     stubFetch()
-    renderAt('/admin/calendar?view=week&date=2026-10-07')
+    renderAt('/studio/calendar?view=week&date=2026-10-07')
 
     await waitForEntries(2)
 
@@ -295,7 +297,7 @@ describe('week and day views', () => {
         blocks: [block({ id: 'k2', isAllDay: true, startsAt: '2026-10-11T22:00:00.000Z', endsAt: '2026-10-13T22:00:00.000Z', reason: 'Trip' })],
       }),
     )
-    renderAt('/admin/calendar?view=day&date=2026-10-13')
+    renderAt('/studio/calendar?view=day&date=2026-10-13')
 
     await waitForEntries(1)
 
@@ -308,7 +310,7 @@ describe('when the API does not answer with a calendar', () => {
   it('sends him to sign in on a 401 and forgets the token', async () => {
     signIn()
     stubFetch(() => json({ error: 'unauthenticated' }, 401))
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
 
     expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
     expect(readSession()).toBeNull()
@@ -318,7 +320,7 @@ describe('when the API does not answer with a calendar', () => {
     signIn()
     let calls = 0
     const fetchMock = stubFetch(() => (++calls === 1 ? json({ error: 'internal_error' }, 500) : json(OCTOBER)))
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Could not load the calendar.')
@@ -335,7 +337,7 @@ describe('when the API does not answer with a calendar', () => {
     signIn()
     let answer: (response: Response) => void = () => {}
     stubFetch(() => new Promise<Response>((resolve) => (answer = resolve)))
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
 
     expect(await screen.findByRole('status')).toHaveTextContent('Loading calendar…')
 
@@ -349,7 +351,7 @@ describe('when the API does not answer with a calendar', () => {
 describe('the admin layout around it', () => {
   it('sends a visitor with no session to sign in without fetching', async () => {
     const fetchMock = stubFetch()
-    renderAt('/admin/calendar')
+    renderAt('/studio/calendar')
 
     expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -358,7 +360,7 @@ describe('the admin layout around it', () => {
   it('signs out by forgetting the token', async () => {
     signIn()
     stubFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     await user().click(screen.getByRole('button', { name: 'Sign out' }))
@@ -382,6 +384,7 @@ function stubWritableFetch(data: CalendarData = OCTOBER) {
         return json({ block: { id: 'new', startsAt: '', endsAt: '', isAllDay: true, reason: null } }, 201)
       }
       if (url.startsWith(CALENDAR_API)) return json(data)
+      if (isStudioMe(url)) return studioMe()
       return json({})
     }),
   )
@@ -393,30 +396,30 @@ describe('opening a booking from the calendar (plan.md Task 19)', () => {
   it('opens the booking behind an event that is clicked', async () => {
     signIn()
     stubFetch()
-    const router = renderAt('/admin/calendar?view=month&date=2026-10-07')
+    const router = renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     const event = document.querySelector<HTMLElement>('[data-kind="booking"]')
     await user().click(event as HTMLElement)
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/bookings/b1'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/bookings/b1'))
   })
 
   it('opens the page that edits a block when the block is clicked', async () => {
     signIn()
     stubFetch()
-    const router = renderAt('/admin/calendar?view=month&date=2026-10-07')
+    const router = renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     await user().click(document.querySelector<HTMLElement>('[data-kind="block"]') as HTMLElement)
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/availability'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/availability'))
   })
 
   it('puts every event in the tab order, so neither kind needs a mouse', async () => {
     signIn()
     stubFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     for (const kind of ['booking', 'block']) {
@@ -428,7 +431,7 @@ describe('opening a booking from the calendar (plan.md Task 19)', () => {
   it('opens the booking from the keyboard, not by mouse alone', async () => {
     signIn()
     stubFetch()
-    const router = renderAt('/admin/calendar?view=month&date=2026-10-07')
+    const router = renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     const event = document.querySelector<HTMLElement>('[data-kind="booking"]')?.closest('.fc-event') as HTMLElement
@@ -436,7 +439,7 @@ describe('opening a booking from the calendar (plan.md Task 19)', () => {
     expect(event).toHaveFocus()
     await user().keyboard('{Enter}')
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/bookings/b1'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/bookings/b1'))
   })
 })
 
@@ -444,7 +447,7 @@ describe('blocking time from the calendar (spec §3.3 step 3)', () => {
   it('opens the block form on the first day shown when today is elsewhere', async () => {
     signIn()
     stubWritableFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     await user().click(screen.getByRole('button', { name: 'Block time' }))
@@ -456,7 +459,7 @@ describe('blocking time from the calendar (spec §3.3 step 3)', () => {
   it('opens it on today when today is on screen', async () => {
     signIn()
     stubWritableFetch({ bookings: [], blocks: [] })
-    renderAt('/admin/calendar')
+    renderAt('/studio/calendar')
 
     await user().click(await screen.findByRole('button', { name: 'Block time' }))
 
@@ -466,7 +469,7 @@ describe('blocking time from the calendar (spec §3.3 step 3)', () => {
   it('creates the block and refetches the events so it appears', async () => {
     signIn()
     const { written, mock } = stubWritableFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
     const loadsBefore = requestedUrls(mock).filter((url) => url.startsWith(CALENDAR_API)).length
 
@@ -478,7 +481,7 @@ describe('blocking time from the calendar (spec §3.3 step 3)', () => {
     await waitFor(() => expect(written).toHaveLength(1))
     expect(written[0]).toMatchObject({
       method: 'POST',
-      url: '/api/admin/blocks',
+      url: '/api/studio/blocks',
       body: { isAllDay: true, startDate: '2026-10-19', endDate: '2026-10-19', confirm: false },
     })
     // The form closes and the calendar reloads, so the new block is on screen.
@@ -491,7 +494,7 @@ describe('blocking time from the calendar (spec §3.3 step 3)', () => {
   it('closes the form without writing anything when he changes his mind', async () => {
     signIn()
     const { written } = stubWritableFetch()
-    renderAt('/admin/calendar?view=month&date=2026-10-07')
+    renderAt('/studio/calendar?view=month&date=2026-10-07')
     await waitForEntries(5)
 
     await user().click(screen.getByRole('button', { name: 'Block time' }))

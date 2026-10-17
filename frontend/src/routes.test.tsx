@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
@@ -78,7 +78,7 @@ describe('routing', () => {
   })
 
   it('leaves admin outside the client shell: the login is bare, like reset password (2026-09-26)', async () => {
-    renderAt('/admin/login')
+    renderAt('/studio/login')
 
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument()
@@ -86,15 +86,53 @@ describe('routing', () => {
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Book now' })).not.toBeInTheDocument()
     const shell = routes.find((route) => route.path === undefined)
-    expect((shell?.children ?? []).map((child) => child.path)).not.toContain('/admin/login')
+    expect((shell?.children ?? []).map((child) => child.path)).not.toContain('/studio/login')
   })
 
   it('keeps the reset page bare: no client top bar, no footer', async () => {
-    renderAt('/admin/reset-password')
+    renderAt('/studio/reset-password')
 
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Book now' })).not.toBeInTheDocument()
+  })
+
+  it('declares every Phase 2 area page (marketplace spec, URL map)', () => {
+    const shell = routes.find((route) => route.path === undefined)
+    const inShell = (shell?.children ?? []).map((child) => child.path)
+    const studio = routes.find((route) => route.path === '/studio')
+    const platform = routes.find((route) => route.path === '/platform')
+
+    // The account wears the client shell: it is the client's site.
+    expect(inShell).toEqual(
+      expect.arrayContaining(['/account', '/account/login', '/account/signup', '/account/verify/:token', '/account/reset-password', '/account/google/callback']),
+    )
+    // The studio's and the platform's sign-in pages are bare, outside their guarded layouts.
+    expect(declaredPaths()).toEqual(
+      expect.arrayContaining([
+        '/studio/login',
+        '/studio/signup',
+        '/studio/verify/:token',
+        '/studio/reset-password',
+        '/platform/login',
+        '/platform/verify/:token',
+        '/platform/reset-password',
+      ]),
+    )
+    expect((studio?.children ?? []).map((child) => child.path)).toEqual(
+      expect.arrayContaining(['calendar', 'catalogue', 'bookings', 'bookings/:id', 'availability', 'settings']),
+    )
+    expect((platform?.children ?? []).map((child) => child.path)).toContain('photographers')
+    expect(inShell).not.toContain('/studio/login')
+    expect(inShell).not.toContain('/platform/login')
+  })
+
+  it('keeps the platform login bare: no client top bar, no footer', async () => {
+    renderAt('/platform/login')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Platform sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument()
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
   })
 
   it('has no locale-prefixed route — /en is a 404, not the home page', () => {
@@ -180,5 +218,61 @@ describe('routing', () => {
       .filter((segment): segment is string => segment !== undefined)
     expect(firstSegments).not.toContain('en')
     expect(firstSegments).not.toContain('fr')
+  })
+})
+
+/**
+ * `/admin/*` was the studio until Phase 2. Old links -- bookmarks, and emailed
+ * reset links with their token in the fragment -- must still land, on the same
+ * page under `/studio`.
+ */
+describe('the old /admin addresses', () => {
+  function redirectFrom(path: string) {
+    const router = createMemoryRouter(routes, { initialEntries: [path] })
+    render(<RouterProvider router={router} />)
+    return router
+  }
+
+  it.each<[string, string, string, string]>([
+    ['/admin', '/studio/login', '', ''],
+    ['/admin/login', '/studio/login', '', ''],
+    ['/admin/reset-password', '/studio/reset-password', '', ''],
+    ['/admin/reset-password#token=r3set', '/studio/reset-password', '', '#token=r3set'],
+  ])('sends %s to %s, keeping the query and fragment', async (from, pathname, search, hash) => {
+    const router = redirectFrom(from)
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(pathname))
+    expect(router.state.location.search).toBe(search)
+    expect(router.state.location.hash).toBe(hash)
+    expect(router.state.historyAction).toBe('REPLACE')
+  })
+
+  it('sends a signed-in photographer’s old page to the same page under /studio', async () => {
+    sessionStorage.setItem('bookly.studio.session', JSON.stringify({ token: 't', expiresAt: '2099-01-01T00:00:00.000Z' }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ bookings: [], total: 0, page: 1, pageSize: 25, pageCount: 0 }))))
+    const router = redirectFrom('/admin/bookings?stage=confirmed')
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/bookings'))
+    expect(router.state.location.search).toBe('?stage=confirmed')
+    sessionStorage.clear()
+  })
+
+  it('opens the reset page with the emailed token still in the fragment', async () => {
+    redirectFrom('/admin/reset-password#token=r3set')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Choose a new password' })).toBeInTheDocument()
+  })
+
+  it('carries a signed-out visitor’s old page through to the studio login’s return path', async () => {
+    const router = redirectFrom('/admin/calendar?view=week')
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/login'))
+    expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/studio/calendar?view=week')
+  })
+
+  it('does not treat a look-alike path as the old admin', () => {
+    renderAt('/administrator')
+
+    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
   })
 })

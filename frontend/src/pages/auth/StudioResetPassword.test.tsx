@@ -6,7 +6,7 @@ import '@/i18n'
 import { routes } from '@/routes'
 
 /**
- * `/admin/reset-password` (plan.md Task 7, spec §6.23, A-11), rendered through
+ * `/studio/reset-password` (plan.md Task 7, spec §6.23, A-11), rendered through
  * the real routes with `fetch` stubbed.
  *
  * What is proven: one route does both halves of a reset, told apart by the
@@ -18,8 +18,8 @@ import { routes } from '@/routes'
 
 const NOW = new Date('2026-10-07T08:00:00.000Z')
 const RESET_TOKEN = 'reset.token.from.the.email'
-const REQUEST_URL = '/api/admin/auth/password-reset/request'
-const CONFIRM_URL = '/api/admin/auth/password-reset/confirm'
+const REQUEST_URL = '/api/studio/auth/password-reset/request'
+const CONFIRM_URL = '/api/studio/auth/password-reset/confirm'
 
 const GOOD_PASSWORD = 'correct horse battery staple'
 
@@ -46,7 +46,7 @@ function stubApi(respond: (sent: Sent) => Response | Promise<Response>) {
 
 /** `hash` is how the emailed link carries the token: never a query string. */
 function renderPage(hash = '') {
-  const router = createMemoryRouter(routes, { initialEntries: [`/admin/reset-password${hash}`] })
+  const router = createMemoryRouter(routes, { initialEntries: [`/studio/reset-password${hash}`] })
   render(<RouterProvider router={router} />)
   return router
 }
@@ -141,7 +141,7 @@ describe('AdminResetPassword, asking for a link', () => {
 
     await user().click(screen.getByRole('link', { name: 'Back to sign in' }))
 
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
   })
 })
 
@@ -183,7 +183,7 @@ describe('AdminResetPassword, choosing the new password', () => {
     expectBooklyLinkHome()
 
     await user().click(screen.getByRole('link', { name: 'Back to sign in' }))
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
   })
 
   it('refuses a password under twelve characters without sending it anywhere', async () => {
@@ -244,14 +244,14 @@ describe('AdminResetPassword, choosing the new password', () => {
 describe('the sign-in page', () => {
   it('links to the reset page, carrying nothing with it', async () => {
     stubApi(() => json({}))
-    const router = createMemoryRouter(routes, { initialEntries: ['/admin/login'] })
+    const router = createMemoryRouter(routes, { initialEntries: ['/studio/login'] })
     render(<RouterProvider router={router} />)
 
     const link = screen.getByRole('link', { name: 'Forgot your password?' })
-    expect(link).toHaveAttribute('href', '/admin/reset-password')
+    expect(link).toHaveAttribute('href', '/studio/reset-password')
 
     await user().click(link)
-    expect(router.state.location.pathname).toBe('/admin/reset-password')
+    expect(router.state.location.pathname).toBe('/studio/reset-password')
     expect(router.state.location.search).toBe('')
     expect(screen.getByRole('heading', { name: 'Reset your password' })).toBeInTheDocument()
   })

@@ -1,6 +1,7 @@
-import { ArrowRight, CalendarDays, Camera } from 'lucide-react'
+import { ArrowRight, CalendarDays, Camera, UserRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet } from 'react-router'
+import { accountName, useAccount } from '@/auth/account'
 import { bookingPath } from '@/catalogue/booking-access'
 import { Button } from '@/components/ui/button'
 import { SkipLink } from '@/components/ui/skip-link'
@@ -64,8 +65,9 @@ function Wordmark({ size = 'md' }: { size?: 'md' | 'sm' }) {
 /**
  * The client top bar: the wordmark home, the service list and how booking
  * works (from `md`), "My booking" (the booking this device last opened, else
- * `/my-booking`), the photographer's way into admin, the theme button, and the
- * one primary action.
+ * `/my-booking`), the client's account ("Sign in", or their name once signed
+ * in; Phase 2), the photographer's way into the studio, the theme button, and
+ * the one primary action.
  *
  * Nothing here is a radio or a `dl`, and the only button is the theme's: the
  * e2e suite counts radios page-wide and reads `dl dt` page-wide, and it looks
@@ -122,8 +124,11 @@ export function ClientHeader({
             <CalendarDays aria-hidden="true" />
             <span className="max-sm:sr-only">{t('shell:nav.myBooking')}</span>
           </Link>
+          {/* The client's account (Phase 2): below `sm` the bar has no room
+              left, so it moves to the footer with the admin login. */}
+          <AccountLink className="hidden sm:inline-flex" />
           {/* Clients rarely need it: below `sm` it moves to the footer (2026-09-25). */}
-          <Link to="/admin/login" className={cn(quietLink, 'text-muted-foreground hidden text-sm sm:inline-flex')}>
+          <Link to="/studio/login" className={cn(quietLink, 'text-muted-foreground hidden text-sm sm:inline-flex')}>
             {t('shell:nav.adminLogin')}
           </Link>
           <ThemeButton preference={themePreference} onChange={onThemeChange} />
@@ -136,6 +141,31 @@ export function ClientHeader({
         </div>
       </nav>
     </header>
+  )
+}
+
+/**
+ * "Sign in" with no account session; with one, the client's name (their
+ * address until a name is known), leading to `/account`. It follows sign-in
+ * and sign-out in this tab, and asks the API for the name once per session
+ * (`auth/account.ts`).
+ */
+function AccountLink({ className }: { className?: string }) {
+  const { t } = useTranslation()
+  const account = useAccount()
+
+  if (account.state === 'signedOut') {
+    return (
+      <Link to="/account/login" className={cn(quietLink, 'text-foreground text-[0.9375rem]', className)}>
+        {t('shell:nav.signIn')}
+      </Link>
+    )
+  }
+  return (
+    <Link to="/account" className={cn(quietLink, 'text-foreground min-w-0 text-[0.9375rem] [&_svg]:size-4', className)}>
+      <UserRound aria-hidden="true" />
+      <span className="max-w-40 truncate">{account.state === 'ready' ? accountName(account.user) : t('shell:nav.account')}</span>
+    </Link>
   )
 }
 
@@ -210,9 +240,12 @@ function ClientFooter() {
                   {t('shell:footer.home')}
                 </Link>
               </li>
-              {/* Only where the top bar has no room for it (below `sm`). */}
+              {/* Only where the top bar has no room for them (below `sm`). */}
               <li className="sm:hidden">
-                <Link to="/admin/login" className={quietLink}>
+                <AccountLink />
+              </li>
+              <li className="sm:hidden">
+                <Link to="/studio/login" className={quietLink}>
                   {t('shell:nav.adminLogin')}
                 </Link>
               </li>

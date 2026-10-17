@@ -16,7 +16,7 @@ export const NAV_ITEMS = [
 
 export type NavItem = (typeof NAV_ITEMS)[number]
 
-/** The nav item a path belongs to: `/admin/bookings/b1` is under Bookings. */
+/** The nav item a path belongs to: `/studio/bookings/b1` is under Bookings. */
 export function navItemFor(pathname: string): NavItem | null {
   const segment = pathname.split('/')[2] ?? ''
   return NAV_ITEMS.find((item) => item.page === segment) ?? null

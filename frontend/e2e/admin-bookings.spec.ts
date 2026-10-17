@@ -1,5 +1,11 @@
 import { type Page, expect, test } from '@playwright/test'
 
+/** The studio layout's status banner asks this (Phase 2); approved, so no banner shows. */
+const STUDIO_ME = {
+  user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null },
+  photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status: 'approved' },
+}
+
 /**
  * The bookings list and one booking's lifecycle in Chromium (plan.md Task 19;
  * spec §3.6, §6.11, §6.16, §6.21). `/api/*` is answered here by a small
@@ -171,21 +177,25 @@ async function mockApi(page: Page, options: { completed?: boolean } = {}) {
       const path = url.pathname
       const find = (id: string) => bookings.find((entry) => entry.id === id)
 
-      if (method === 'POST' && path === '/api/admin/auth/login') {
+      if (method === 'GET' && path === '/api/studio/me') {
+        await route.fulfill({ json: STUDIO_ME })
+        return
+      }
+      if (method === 'POST' && path === '/api/studio/auth/login') {
         await route.fulfill({
-          json: { admin: { id: 'a1', email: 'photographer@bookly.example' }, token: TOKEN, tokenType: 'Bearer', expiresAt: EXPIRES_AT },
+          json: { user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null }, token: TOKEN, tokenType: 'Bearer', expiresAt: EXPIRES_AT },
         })
         return
       }
-      if (method === 'GET' && path === '/api/admin/calendar') {
+      if (method === 'GET' && path === '/api/studio/calendar') {
         await route.fulfill({ json: { bookings: [], blocks: [] } })
         return
       }
-      if (method === 'GET' && path === '/api/admin/catalogue') {
+      if (method === 'GET' && path === '/api/studio/catalogue') {
         await route.fulfill({ json: CATALOGUE })
         return
       }
-      if (method === 'GET' && path === '/api/admin/bookings') {
+      if (method === 'GET' && path === '/api/studio/bookings') {
         // The list filters by display stage since 2026-09-25.
         const stages = url.searchParams.getAll('stage')
         const search = url.searchParams.get('search') ?? ''
@@ -196,14 +206,14 @@ async function mockApi(page: Page, options: { completed?: boolean } = {}) {
         return
       }
 
-      const detail = /^\/api\/admin\/bookings\/([^/]+)$/.exec(path)?.[1]
+      const detail = /^\/api\/studio\/bookings\/([^/]+)$/.exec(path)?.[1]
       if (method === 'GET' && detail !== undefined) {
         const entry = find(detail)
         await route.fulfill(entry === undefined ? { status: 404, json: { error: 'not_found' } } : { json: { booking: entry } })
         return
       }
 
-      const action = /^\/api\/admin\/bookings\/([^/]+)\/([a-z-]+)$/.exec(path)
+      const action = /^\/api\/studio\/bookings\/([^/]+)\/([a-z-]+)$/.exec(path)
       const body = request.postDataJSON() as Record<string, unknown> | null
       writes.push({ method, path, body, authorization: await request.headerValue('authorization') })
       const entry = action === null ? undefined : find(action[1] ?? '')
@@ -292,7 +302,7 @@ async function mockApi(page: Page, options: { completed?: boolean } = {}) {
 
       // Task 21: the link on his own host, and the email that hands it over.
       // `/delivery/send` has a slash in it, so it is matched on its own.
-      const delivery = /^\/api\/admin\/bookings\/([^/]+)\/delivery(\/send)?$/.exec(path)
+      const delivery = /^\/api\/studio\/bookings\/([^/]+)\/delivery(\/send)?$/.exec(path)
       const deliverable = delivery === null ? undefined : find(delivery[1] ?? '')
       if (deliverable !== undefined && method === 'PUT') {
         const current = deliverable.delivery as { sentAt: string | null }
@@ -321,7 +331,7 @@ async function mockApi(page: Page, options: { completed?: boolean } = {}) {
 
 /** Signs in and lands on the admin area, session in sessionStorage. */
 async function signIn(page: Page) {
-  await page.goto('/admin/login')
+  await page.goto('/studio/login')
   await page.getByLabel('Email').fill('photographer@bookly.example')
   await page.getByLabel('Password').fill('dev-only-change-me-123')
   await page.getByRole('button', { name: 'Sign in' }).click()
@@ -338,14 +348,14 @@ test('signs in, filters the list, moves a booking and then cancels it', async ({
   // The browser really is five hours behind Kigali, or this proves nothing.
   expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe('America/New_York')
 
-  await page.goto('/admin/login')
+  await page.goto('/studio/login')
   await page.getByLabel('Email').fill('photographer@bookly.example')
   await page.getByLabel('Password').fill('dev-only-change-me-123')
   await page.getByRole('button', { name: 'Sign in' }).click()
 
   const nav = page.getByRole('navigation', { name: 'Admin' })
   await nav.getByRole('link', { name: 'Bookings' }).click()
-  await expect(page).toHaveURL(/\/admin\/bookings$/)
+  await expect(page).toHaveURL(/\/studio\/bookings$/)
 
   // Both bookings, each in Kigali wall time rather than the browser's own.
   const rows = page.getByRole('table').getByRole('row')
@@ -365,7 +375,7 @@ test('signs in, filters the list, moves a booking and then cancels it', async ({
 
   await page.getByRole('link', { name: 'BKY-2701-00042' }).click()
 
-  await expect(page).toHaveURL(/\/admin\/bookings\/b1$/)
+  await expect(page).toHaveURL(/\/studio\/bookings\/b1$/)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('BKY-2701-00042')
   const shoot = page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: 'The shoot' }) })
   await expect(shoot).toContainText('Wednesday, 6 January 2027, 09:00 – 10:30')
@@ -382,7 +392,7 @@ test('signs in, filters the list, moves a booking and then cancels it', async ({
   await expect(shoot).toContainText('Originally booked for')
   expect(writes[0]).toEqual({
     method: 'POST',
-    path: '/api/admin/bookings/b1/reschedule',
+    path: '/api/studio/bookings/b1/reschedule',
     body: { startsAt: '2027-01-07T14:30:00+02:00' },
     authorization: `Bearer ${TOKEN}`,
   })
@@ -397,7 +407,7 @@ test('signs in, filters the list, moves a booking and then cancels it', async ({
   await expect(money).toContainText('To refund20,000 RWF')
   await expect(page.getByLabel('Refund reference')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Move booking' })).toHaveCount(0)
-  expect(writes[1]).toMatchObject({ method: 'POST', path: '/api/admin/bookings/b1/cancel', body: { reason: 'Studio flooded.' } })
+  expect(writes[1]).toMatchObject({ method: 'POST', path: '/api/studio/bookings/b1/cancel', body: { reason: 'Studio flooded.' } })
 
   // And the list shows the money owed back.
   await page.getByRole('link', { name: 'All bookings' }).click()
@@ -413,7 +423,7 @@ test('adds a post-shoot add-on to a completed booking and requests the session f
   const writes = await mockApi(page, { completed: true })
   await signIn(page)
 
-  await page.goto('/admin/bookings/b1')
+  await page.goto('/studio/bookings/b1')
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('BKY-2701-00042')
 
   const money = page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: 'Money' }) })
@@ -432,7 +442,7 @@ test('adds a post-shoot add-on to a completed booking and requests the session f
   await expect(money).toContainText('Still to pay35,000 RWF')
   expect(writes.at(-1)).toMatchObject({
     method: 'POST',
-    path: '/api/admin/bookings/b1/addons',
+    path: '/api/studio/bookings/b1/addons',
     body: { addonId: PRINTS_ID, quantity: 1 },
   })
 
@@ -443,7 +453,7 @@ test('adds a post-shoot add-on to a completed booking and requests the session f
   await expect(payments).toContainText('Session fee')
   await expect(payments).toContainText('35,000 RWF')
   await expect(payments).toContainText('Started')
-  expect(writes.at(-1)).toMatchObject({ method: 'POST', path: '/api/admin/bookings/b1/session-fee', body: {} })
+  expect(writes.at(-1)).toMatchObject({ method: 'POST', path: '/api/studio/bookings/b1/session-fee', body: {} })
 })
 
 /**
@@ -455,7 +465,7 @@ test('saves the delivery link on a completed booking and sends the photos', asyn
   const writes = await mockApi(page, { completed: true })
   await signIn(page)
 
-  await page.goto('/admin/bookings/b1')
+  await page.goto('/studio/bookings/b1')
   const photos = page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name: 'The photos' }) })
   await expect(photos).toContainText('Nothing has been sent to the client yet.')
   // Nothing to send until a link is saved.
@@ -469,7 +479,7 @@ test('saves the delivery link on a completed booking and sends the photos', asyn
   await expect(page.getByRole('button', { name: 'Send the photos' })).toBeVisible()
   expect(writes.at(-1)).toMatchObject({
     method: 'PUT',
-    path: '/api/admin/bookings/b1/delivery',
+    path: '/api/studio/bookings/b1/delivery',
     body: { url: DELIVERY_LINK, note: 'The raw files are in the second folder.' },
     authorization: `Bearer ${TOKEN}`,
   })
@@ -485,7 +495,7 @@ test('saves the delivery link on a completed booking and sends the photos', asyn
   await expect(photos).toContainText('Last sent')
   await expect(photos).toContainText('7 Oct 2026, 10:00')
   await expect(page.getByRole('button', { name: 'Send again' })).toBeVisible()
-  expect(writes.at(-1)).toMatchObject({ method: 'POST', path: '/api/admin/bookings/b1/delivery/send', body: {} })
+  expect(writes.at(-1)).toMatchObject({ method: 'POST', path: '/api/studio/bookings/b1/delivery/send', body: {} })
 
   // And nothing anywhere claims to know how often the photos were fetched.
   await expect(photos).not.toContainText(/downloaded|downloads/i)

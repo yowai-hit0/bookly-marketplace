@@ -12,7 +12,7 @@ import { useBreadcrumbTail } from './breadcrumb-tail'
  * reference the booking page reports once it has loaded.
  */
 
-const SESSION_KEY = 'bookly.admin.session'
+const SESSION_KEY = 'bookly.studio.session'
 const SESSION = JSON.stringify({ token: 'test.token.signature', expiresAt: '2099-01-01T00:00:00.000Z' })
 
 /** Stands in for the booking page: reports loading, then the reference or nothing. */
@@ -39,7 +39,7 @@ function renderAt(path: string) {
   const router = createMemoryRouter(
     [
       {
-        path: '/admin',
+        path: '/studio',
         element: <AdminLayout />,
         children: [
           { path: 'calendar', element: page('Calendar') },
@@ -72,11 +72,11 @@ afterEach(() => {
 
 describe('the admin breadcrumb', () => {
   it.each([
-    ['/admin/calendar', 'Calendar'],
-    ['/admin/bookings', 'Bookings'],
-    ['/admin/catalogue', 'Catalogue'],
-    ['/admin/availability', 'Availability'],
-    ['/admin/settings', 'Settings'],
+    ['/studio/calendar', 'Calendar'],
+    ['/studio/bookings', 'Bookings'],
+    ['/studio/catalogue', 'Catalogue'],
+    ['/studio/availability', 'Availability'],
+    ['/studio/settings', 'Settings'],
   ])('on %s reads Admin > %s, with the section as the current page', (path, section) => {
     renderAt(path)
 
@@ -84,7 +84,7 @@ describe('the admin breadcrumb', () => {
     expect(items.map((item) => item.textContent)).toEqual(['Admin', section])
 
     const admin = within(items[0] as HTMLElement).getByRole('link', { name: 'Admin' })
-    expect(admin).toHaveAttribute('href', '/admin')
+    expect(admin).toHaveAttribute('href', '/studio')
 
     // The page itself is plain text, not a link to where you already are.
     expect(items[1]?.querySelector('[aria-current="page"]')).toHaveTextContent(section)
@@ -92,7 +92,7 @@ describe('the admin breadcrumb', () => {
   })
 
   it('adds the booking reference once the booking page has it, and links back to the list', () => {
-    renderAt('/admin/bookings/b1')
+    renderAt('/studio/bookings/b1')
 
     // While the booking loads: a placeholder, hidden from assistive tech, and
     // Bookings stays the current page.
@@ -105,13 +105,13 @@ describe('the admin breadcrumb', () => {
 
     items = crumbs()
     expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Bookings', 'BKY-2610-00042'])
-    expect(within(items[1] as HTMLElement).getByRole('link', { name: 'Bookings' })).toHaveAttribute('href', '/admin/bookings')
+    expect(within(items[1] as HTMLElement).getByRole('link', { name: 'Bookings' })).toHaveAttribute('href', '/studio/bookings')
     expect(items[2]?.querySelector('[aria-current="page"]')).toHaveTextContent('BKY-2610-00042')
     expect(items[1]?.querySelector('[aria-current]')).toBeNull()
   })
 
   it('drops the reference crumb when the booking fails to load', () => {
-    renderAt('/admin/bookings/missing')
+    renderAt('/studio/bookings/missing')
 
     act(() => finishLoad(null))
 
@@ -119,16 +119,16 @@ describe('the admin breadcrumb', () => {
   })
 
   it('forgets the reference when leaving the booking', async () => {
-    const router = renderAt('/admin/bookings/b1')
+    const router = renderAt('/studio/bookings/b1')
     act(() => finishLoad('BKY-2610-00042'))
 
-    await act(() => router.navigate('/admin/bookings'))
+    await act(() => router.navigate('/studio/bookings'))
 
     expect(crumbs().map((item) => item.textContent)).toEqual(['Admin', 'Bookings'])
   })
 
   it('hides separators from assistive tech, and is not a second "Admin" navigation', () => {
-    renderAt('/admin/bookings')
+    renderAt('/studio/bookings')
 
     const nav = screen.getByRole('navigation', { name: 'Breadcrumb' })
     for (const svg of nav.querySelectorAll('svg')) expect(svg).toHaveAttribute('aria-hidden', 'true')

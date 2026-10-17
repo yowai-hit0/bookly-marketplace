@@ -15,7 +15,18 @@ import { EYEBROW, META, TITLE } from './classes'
  * There is no header and so no skip link: the mark is the first stop, and the
  * form follows it directly.
  */
-export function AdminAuthFrame({ title, intro, children }: { title: string; intro?: ReactNode; children: ReactNode }) {
+export function AdminAuthFrame({
+  title,
+  intro,
+  eyebrow,
+  children,
+}: {
+  title: string
+  intro?: ReactNode
+  /** The area's mono label; `ADMIN` for the studio, `PLATFORM` for the platform console (Phase 2). */
+  eyebrow?: string
+  children: ReactNode
+}) {
   const { t } = useTranslation()
 
   return (
@@ -36,7 +47,7 @@ export function AdminAuthFrame({ title, intro, children }: { title: string; intr
           <span className="underline-offset-4 group-hover/mark:underline">{t('common:appName')}</span>
         </Link>
         <div className="flex flex-col gap-3">
-          <p className={EYEBROW}>{t('admin:nav.label')}</p>
+          <p className={EYEBROW}>{eyebrow ?? t('admin:nav.label')}</p>
           <h1 className={cn(TITLE, 'text-2xl wrap-break-word')}>{title}</h1>
           {intro !== undefined && <p className={META}>{intro}</p>}
         </div>

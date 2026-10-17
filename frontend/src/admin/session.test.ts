@@ -7,7 +7,7 @@ import { clearSession, readSession, saveSession } from './session'
  * expired or unreadable entry reads as signed out and is forgotten.
  */
 
-const KEY = 'bookly.admin.session'
+const KEY = 'bookly.studio.session'
 const NOW = new Date('2026-10-07T08:00:00.000Z')
 const SESSION = { token: 'header.payload.signature', expiresAt: '2026-10-07T16:00:00.000Z' }
 

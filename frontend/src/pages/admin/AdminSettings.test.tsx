@@ -20,7 +20,7 @@ import { routes } from '@/routes'
 
 const NOW = new Date('2026-10-07T08:00:00.000Z')
 const TOKEN = 'header.payload.signature'
-const SETTINGS_API = '/api/admin/settings'
+const SETTINGS_API = '/api/studio/settings'
 
 const STORED: Settings = {
   bookingFeeRate: 0.4,
@@ -66,7 +66,7 @@ const writes = (api: Api) => api.sent.filter((sent) => sent.method !== 'GET')
 
 function renderPage() {
   saveSession({ token: TOKEN, expiresAt: '2026-10-07T16:00:00.000Z' })
-  const router = createMemoryRouter(routes, { initialEntries: ['/admin/settings'] })
+  const router = createMemoryRouter(routes, { initialEntries: ['/studio/settings'] })
   render(<RouterProvider router={router} />)
   return router
 }
@@ -170,7 +170,7 @@ describe('AdminSettings', () => {
   it('confirms the save and redraws the form from what the API stored', async () => {
     const api = stubApi({
       // The API answers with a value of its own, which is what must be shown.
-      'PATCH /api/admin/settings': () =>
+      'PATCH /api/studio/settings': () =>
         json({ settings: { ...STORED, clientCancelCutoffHours: 12, bookingFeeRefundableOnClientCancel: true } }),
     })
     renderPage()
@@ -212,7 +212,7 @@ describe('AdminSettings', () => {
 
   it('marks the field a 422 names, mapping the stored rate back to the typed percentage', async () => {
     stubApi({
-      'PATCH /api/admin/settings': () => json({ error: 'validation_failed', fields: ['bookingFeeRate'] }, 422),
+      'PATCH /api/studio/settings': () => json({ error: 'validation_failed', fields: ['bookingFeeRate'] }, 422),
     })
     renderPage()
 
@@ -224,7 +224,7 @@ describe('AdminSettings', () => {
   })
 
   it('says so when the save fails for a reason it cannot place on a field', async () => {
-    stubApi({ 'PATCH /api/admin/settings': () => json({ error: 'internal_error' }, 500) })
+    stubApi({ 'PATCH /api/studio/settings': () => json({ error: 'internal_error' }, 500) })
     renderPage()
 
     await screen.findByRole('heading', { name: 'Settings' })
@@ -236,7 +236,7 @@ describe('AdminSettings', () => {
   it('offers a retry when the settings cannot be loaded, and shows them once it works', async () => {
     let fail = true
     stubApi({
-      'GET /api/admin/settings': () => (fail ? json({ error: 'internal_error' }, 500) : json({ settings: STORED })),
+      'GET /api/studio/settings': () => (fail ? json({ error: 'internal_error' }, 500) : json({ settings: STORED })),
     })
     renderPage()
 
@@ -249,10 +249,10 @@ describe('AdminSettings', () => {
   })
 
   it('sends him to sign in when the token has gone stale', async () => {
-    stubApi({ 'GET /api/admin/settings': () => json({ error: 'unauthenticated' }, 401) })
+    stubApi({ 'GET /api/studio/settings': () => json({ error: 'unauthenticated' }, 401) })
     const router = renderPage()
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/login'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/login'))
     expect(sessionStorage.length).toBe(0)
   })
 })

@@ -5,18 +5,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import { readSession } from '@/admin/session'
 import { routes } from '@/routes'
+import { isStudioMe, studioMe } from '@/test/studio-me'
 
 /**
- * `/admin/login` (plan.md Task 9, spec A-11): email and password against
- * `POST /api/admin/auth/login`, the token kept in sessionStorage, then the
- * calendar. The API refuses a wrong password, an unknown email and a locked
- * account identically, so the page shows one message for all of them.
+ * `/studio/login` (plan.md Task 9, spec A-11; `/admin/login` until Phase 2):
+ * email and password against `POST /api/studio/auth/login`, the token kept in
+ * sessionStorage under the studio's key, then the calendar, or where the
+ * studio's guard sent him from. The API refuses a wrong password, an unknown
+ * email, a locked account and an unverified address identically, so the page
+ * shows one message for all of them.
  */
 
 const NOW = new Date('2026-10-07T08:00:00.000Z')
-const LOGIN_URL = '/api/admin/auth/login'
+const LOGIN_URL = '/api/studio/auth/login'
 const INVALID = 'That email and password did not work.'
 const FAILED = 'Could not sign in. Check your connection and try again.'
+const RATE_LIMITED = 'Too many attempts from here. Wait a few minutes and try again.'
 
 type FetchArgs = [input: string | URL | Request, init?: RequestInit]
 type Handler = (url: string, init: RequestInit) => Response | Promise<Response>
@@ -32,19 +36,24 @@ function json(body: unknown, status = 200): Response {
 }
 
 const LOGIN_OK = {
-  admin: { id: 'a1', email: 'photographer@bookly.example' },
+  user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null },
   token: 'issued.jwt.token',
   tokenType: 'Bearer',
   expiresAt: '2026-10-07T16:00:00.000Z',
 }
 
-/** Login answers `respond`; the calendar, once reached, answers empty. */
+/** Login answers `respond`; the layout's banner request answers approved; the calendar, once reached, answers empty. */
 function stubLogin(respond: () => Response | Promise<Response>) {
-  return stubFetch((url) => (url === LOGIN_URL ? respond() : json({ bookings: [], blocks: [] })))
+  return stubFetch((url) => (url === LOGIN_URL ? respond() : isStudioMe(url) ? studioMe() : json({ bookings: [], blocks: [] })))
 }
 
-function renderLogin() {
-  const router = createMemoryRouter(routes, { initialEntries: ['/admin/login'] })
+/** The requests the pages made, the layout's banner request left out. */
+function pageCalls(mock: ReturnType<typeof stubFetch>) {
+  return mock.mock.calls.filter(([input]) => !isStudioMe(input))
+}
+
+function renderLogin(path = '/studio/login') {
+  const router = createMemoryRouter(routes, { initialEntries: [path] })
   render(<RouterProvider router={router} />)
   return router
 }
@@ -68,7 +77,7 @@ afterEach(() => {
   localStorage.clear()
 })
 
-describe('AdminLogin', () => {
+describe('the studio login', () => {
   it('renders the sign-in form', () => {
     stubLogin(() => json(LOGIN_OK))
     renderLogin()
@@ -85,7 +94,7 @@ describe('AdminLogin', () => {
   // guarded the header and the skip link that only skipped it.
   it('wears no client top bar or footer, only its own main', () => {
     stubLogin(() => json(LOGIN_OK))
-    const { container } = render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: ['/admin/login'] })} />)
+    const { container } = render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: ['/studio/login'] })} />)
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Book now' })).not.toBeInTheDocument()
@@ -119,7 +128,7 @@ describe('AdminLogin', () => {
     const user = userEvent.setup({ delay: null })
     await user.click(within(screen.getByRole('banner')).getByRole('link', { name: 'Admin login' }))
 
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
     expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
   })
 
@@ -131,7 +140,7 @@ describe('AdminLogin', () => {
     renderLogin()
 
     const forgot = screen.getByRole('link', { name: 'Forgot your password?' })
-    expect(forgot).toHaveAttribute('href', '/admin/reset-password')
+    expect(forgot).toHaveAttribute('href', '/studio/reset-password')
     // No email, no token, no query: the reset page asks for the address itself.
     expect(forgot.getAttribute('href')).not.toMatch(/[?#]/)
   })
@@ -157,17 +166,17 @@ describe('AdminLogin', () => {
     await submit()
 
     expect(await screen.findByRole('heading', { name: 'October 2026' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/admin/calendar')
+    expect(router.state.location.pathname).toBe('/studio/calendar')
     expect(readSession()).toEqual({ token: 'issued.jwt.token', expiresAt: '2026-10-07T16:00:00.000Z' })
-    expect(JSON.parse(sessionStorage.getItem('bookly.admin.session') ?? 'null')).toEqual({
+    expect(JSON.parse(sessionStorage.getItem('bookly.studio.session') ?? 'null')).toEqual({
       token: 'issued.jwt.token',
       expiresAt: '2026-10-07T16:00:00.000Z',
     })
     expect(localStorage.length).toBe(0)
 
-    await waitFor(() => expect(mock).toHaveBeenCalledTimes(2))
-    const [calendarUrl, calendarInit] = mock.mock.calls[1] ?? []
-    expect(String(calendarUrl)).toMatch(/^\/api\/admin\/calendar\?/)
+    await waitFor(() => expect(pageCalls(mock)).toHaveLength(2))
+    const [calendarUrl, calendarInit] = pageCalls(mock)[1] ?? []
+    expect(String(calendarUrl)).toMatch(/^\/api\/studio\/calendar\?/)
     expect(new Headers(calendarInit?.headers).get('Authorization')).toBe('Bearer issued.jwt.token')
   })
 
@@ -191,13 +200,12 @@ describe('AdminLogin', () => {
     await submit()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(INVALID)
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
     expect(sessionStorage.length).toBe(0)
   })
 
   it.each<[string, () => Response | Promise<Response>]>([
     ['a 500', () => json({ error: 'internal_error' }, 500)],
-    ['a 429', () => new Response('Too many requests', { status: 429 })],
     ['a network failure', () => Promise.reject(new TypeError('Failed to fetch'))],
   ])('on %s says it could not sign in, storing nothing', async (_label, respond) => {
     stubLogin(respond)
@@ -206,8 +214,56 @@ describe('AdminLogin', () => {
     await submit()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(FAILED)
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
     expect(sessionStorage.length).toBe(0)
+  })
+
+  it('on a 429 says to wait, storing nothing', async () => {
+    stubLogin(() => json({ error: 'rate_limited' }, 429))
+    const router = renderLogin()
+
+    await submit()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(RATE_LIMITED)
+    expect(router.state.location.pathname).toBe('/studio/login')
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it('lands where the studio guard sent him from, query included', async () => {
+    stubLogin(() => json(LOGIN_OK))
+    const router = renderLogin('/studio/login?next=%2Fstudio%2Fbookings%3Fstage%3Dconfirmed')
+
+    await submit()
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/bookings'))
+    expect(router.state.location.search).toBe('?stage=confirmed')
+  })
+
+  it.each<[string, string]>([
+    ['another site', 'https://evil.example/studio'],
+    ['a protocol-relative address', '//evil.example/studio'],
+    ['a backslash trick', '/\\evil.example'],
+    ['another area', '/platform/photographers'],
+    ['the client site', '/my-booking'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+  ])('ignores a return path to %s and opens the calendar', async (_label, next) => {
+    stubLogin(() => json(LOGIN_OK))
+    const router = renderLogin(`/studio/login?next=${encodeURIComponent(next)}`)
+
+    await submit()
+
+    expect(await screen.findByRole('heading', { name: 'October 2026' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/studio/calendar')
+  })
+
+  it('offers the studio signup, and no Google sign-in', () => {
+    const mock = stubLogin(() => json(LOGIN_OK))
+    renderLogin()
+
+    expect(screen.getByRole('link', { name: 'New photographer? Create your studio' })).toHaveAttribute('href', '/studio/signup')
+    expect(screen.queryByRole('button', { name: 'Continue with Google' })).not.toBeInTheDocument()
+    // The providers endpoint is the account's; the studio never asks it.
+    expect(mock).not.toHaveBeenCalled()
   })
 
   it('disables the button while signing in', async () => {
@@ -239,7 +295,7 @@ describe('AdminLogin', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
     await screen.findByRole('heading', { name: 'October 2026' })
-    expect(router.state.location.pathname).toBe('/admin/calendar')
+    expect(router.state.location.pathname).toBe('/studio/calendar')
     expect(readSession()?.token).toBe('issued.jwt.token')
   })
 })

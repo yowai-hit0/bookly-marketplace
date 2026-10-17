@@ -61,7 +61,7 @@ export function AdminSettings() {
       .catch((error: unknown) => {
         if (cancelled) return
         if (error instanceof UnauthenticatedError) {
-          navigate('/admin/login', { replace: true })
+          navigate('/studio/login', { replace: true })
           return
         }
         setLoaded({ values: null })
@@ -97,7 +97,7 @@ export function AdminSettings() {
       setSaved(true)
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        navigate('/admin/login', { replace: true })
+        navigate('/studio/login', { replace: true })
         return
       }
       const named = error instanceof ApiError ? error.fields.map((field) => FORM_FIELD_FOR[field] ?? field) : []

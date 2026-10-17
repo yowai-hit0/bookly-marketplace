@@ -1,5 +1,11 @@
 import { type Page, expect, test } from '@playwright/test'
 
+/** The studio layout's status banner asks this (Phase 2); approved, so no banner shows. */
+const STUDIO_ME = {
+  user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null },
+  photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status: 'approved' },
+}
+
 /**
  * The admin calendar in Chromium (plan.md Task 9; spec §3.3 step 1, §6.4,
  * §6.5), drawn by FullCalendar. The API is answered here with `page.route`;
@@ -12,7 +18,7 @@ import { type Page, expect, test } from '@playwright/test'
 
 const NOW = new Date('2026-10-06T22:30:00.000Z')
 const SESSION = { token: 'e2e.header.signature', expiresAt: '2026-10-07T06:30:00.000Z' }
-const SESSION_KEY = 'bookly.admin.session'
+const SESSION_KEY = 'bookly.studio.session'
 
 /** Three confirmed bookings, one live hold and one block, in October 2026. */
 const OCTOBER = {
@@ -96,7 +102,11 @@ async function mockApi(page: Page, login: LoginAnswer = { status: 401, body: { e
     async (route) => {
       const request = route.request()
       const url = new URL(request.url())
-      if (request.method() === 'GET' && url.pathname === '/api/admin/calendar') {
+      if (request.method() === 'GET' && url.pathname === '/api/studio/me') {
+        await route.fulfill({ json: STUDIO_ME })
+        return
+      }
+      if (request.method() === 'GET' && url.pathname === '/api/studio/calendar') {
         calendarRequests.push({
           from: url.searchParams.get('from'),
           to: url.searchParams.get('to'),
@@ -105,7 +115,7 @@ async function mockApi(page: Page, login: LoginAnswer = { status: 401, body: { e
         await route.fulfill({ json: OCTOBER })
         return
       }
-      if (request.method() === 'POST' && url.pathname === '/api/admin/auth/login') {
+      if (request.method() === 'POST' && url.pathname === '/api/studio/auth/login') {
         await route.fulfill({ status: login.status, json: login.body })
         return
       }
@@ -163,7 +173,7 @@ for (const [timezoneId, localHourAtNow] of [
       await seedSession(page)
       await mockApi(page)
 
-      await page.goto('/admin/calendar?view=month&date=2026-10-07')
+      await page.goto('/studio/calendar?view=month&date=2026-10-07')
 
       // The emulation is real: the browser's own clock reads a different hour.
       expect(
@@ -180,7 +190,7 @@ for (const [timezoneId, localHourAtNow] of [
       // "Today" is Kigali's today, whatever date the browser's zone is on.
       await expect(page.locator('.fc-daygrid-day.fc-day-today')).toHaveAttribute('data-date', '2026-10-07')
 
-      await page.goto('/admin/calendar?view=week&date=2026-10-07')
+      await page.goto('/studio/calendar?view=week&date=2026-10-07')
 
       const thursday = page.locator('.fc-timegrid-col[data-date="2026-10-08"] [data-kind]')
       await expect(thursday).toHaveCount(1)
@@ -188,7 +198,7 @@ for (const [timezoneId, localHourAtNow] of [
       await expect(thursday).toContainText('Claudine Ingabire')
       await expect(page.locator('.fc-timegrid-col[data-date="2026-10-07"] [data-kind="booking"]')).toContainText('09:00 - 10:00')
 
-      await page.goto('/admin/calendar?view=week&date=2026-10-23')
+      await page.goto('/studio/calendar?view=week&date=2026-10-23')
 
       await expect(page.locator('.fc-timegrid-col[data-date="2026-10-23"] [data-kind]')).toContainText('23:30 - 00:00')
       await expect(page.locator('.fc-timegrid-col[data-date="2026-10-24"] [data-kind]')).toHaveCount(0)
@@ -208,7 +218,7 @@ test.describe('fitted to a 1280x720 screen', () => {
     await seedSession(page)
     await mockApi(page)
 
-    await page.goto('/admin/calendar?view=month&date=2026-10-07')
+    await page.goto('/studio/calendar?view=month&date=2026-10-07')
     await expect(page.locator('.fc-toolbar-title')).toHaveText('October 2026')
     await expect(page.locator('.fc-daygrid-day[data-date="2026-10-07"] .fc-daygrid-more-link')).toBeVisible()
     const scroll = () => page.evaluate(() => document.documentElement.scrollHeight - document.documentElement.clientHeight)
@@ -221,7 +231,7 @@ test.describe('fitted to a 1280x720 screen', () => {
     await page.locator('.fc-daygrid-day[data-date="2026-10-07"] .fc-daygrid-more-link').click()
     await expect(page.locator('.fc-popover .bookly-event--conflict')).toContainText('Conflicts with a block')
 
-    await page.goto('/admin/calendar?view=week&date=2026-10-07')
+    await page.goto('/studio/calendar?view=week&date=2026-10-07')
     await expect(page.locator('.fc-timegrid-slot').first()).toBeAttached()
     expect(await scroll()).toBe(0)
   })
@@ -234,7 +244,7 @@ test.describe('with every month event in full (below 1280x720)', () => {
     await seedSession(page)
     await mockApi(page)
 
-    await page.goto('/admin/calendar?view=month&date=2026-10-07')
+    await page.goto('/studio/calendar?view=month&date=2026-10-07')
 
     const marker = page.getByText('Conflicts with a block')
     await expect(marker).toHaveCount(1)
@@ -248,7 +258,7 @@ test('switches views and dates with the toolbar, fetching only ranges it does no
   await seedSession(page)
   const requests = await mockApi(page)
 
-  await page.goto('/admin/calendar?view=month&date=2026-10-07')
+  await page.goto('/studio/calendar?view=month&date=2026-10-07')
   await expect(page.locator('[data-kind]')).toHaveCount(5)
   await expect(page).toHaveURL(/\?view=month&date=2026-10-01$/)
 
@@ -291,15 +301,16 @@ test.describe('signing in', () => {
   test('sends a signed-out visitor to sign in, then to the calendar with the issued token', async ({ page }) => {
     const requests = await mockApi(page, {
       status: 200,
-      body: { admin: { id: 'a1', email: 'photographer@bookly.example' }, ...SESSION, tokenType: 'Bearer' },
+      body: { user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null }, ...SESSION, tokenType: 'Bearer' },
     })
 
-    await page.goto('/admin/calendar?view=month&date=2026-10-07')
+    await page.goto('/studio/calendar?view=month&date=2026-10-07')
 
-    await expect(page).toHaveURL(/\/admin\/login$/)
+    // The studio's guard carries where he was going (Phase 2).
+    await expect(page).toHaveURL(/\/studio\/login\?next=%2Fstudio%2Fcalendar%3Fview%3Dmonth%26date%3D2026-10-07$/)
     expect(requests).toEqual([])
 
-    const loginRequest = page.waitForRequest((request) => request.url().endsWith('/api/admin/auth/login'))
+    const loginRequest = page.waitForRequest((request) => request.url().endsWith('/api/studio/auth/login'))
     await page.getByLabel('Email').fill('photographer@bookly.example')
     await page.getByLabel('Password').fill('correct horse battery staple')
     await page.getByRole('button', { name: 'Sign in' }).click()
@@ -308,7 +319,7 @@ test.describe('signing in', () => {
       email: 'photographer@bookly.example',
       password: 'correct horse battery staple',
     })
-    await expect(page).toHaveURL(/\/admin\/calendar\?view=month&date=2026-10-01$/)
+    await expect(page).toHaveURL(/\/studio\/calendar\?view=month&date=2026-10-01$/)
     await expect(page.getByRole('heading', { level: 1, name: 'Calendar' })).toBeVisible()
     await expect(page.locator('.fc-toolbar-title')).toHaveText('October 2026')
     await expect(page.locator('[data-kind]')).toHaveCount(5)
@@ -323,19 +334,19 @@ test.describe('signing in', () => {
 
     await page.getByRole('button', { name: 'Sign out' }).click()
 
-    await expect(page).toHaveURL(/\/admin\/login$/)
+    await expect(page).toHaveURL(/\/studio\/login$/)
     expect(await page.evaluate((key) => window.sessionStorage.getItem(key), SESSION_KEY)).toBeNull()
   })
 
   test('shows one message for refused credentials and stays on the form', async ({ page }) => {
     await mockApi(page, { status: 401, body: { error: 'invalid_credentials' } })
 
-    await page.goto('/admin/login')
+    await page.goto('/studio/login')
     await page.getByLabel('Email').fill('photographer@bookly.example')
     await page.getByLabel('Password').fill('wrong password')
     await page.getByRole('button', { name: 'Sign in' }).click()
 
     await expect(page.getByRole('alert')).toHaveText('That email and password did not work.')
-    await expect(page).toHaveURL(/\/admin\/login$/)
+    await expect(page).toHaveURL(/\/studio\/login$/)
   })
 })

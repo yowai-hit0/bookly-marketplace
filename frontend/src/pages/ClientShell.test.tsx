@@ -1,8 +1,10 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { act } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
+import { forgetAccountMe } from '@/auth/account'
+import { clearSession, saveSession } from '@/auth/session'
 import { STORED_BOOKING_KEY, rememberBookingToken } from '@/lib/stored-booking'
 import { ClientShell } from './ClientShell'
 
@@ -30,6 +32,9 @@ function renderShell(path = '/') {
 
 afterEach(() => {
   localStorage.clear()
+  sessionStorage.clear()
+  forgetAccountMe()
+  vi.unstubAllGlobals()
   delete document.documentElement.dataset.theme
   vi.restoreAllMocks()
 })
@@ -60,28 +65,30 @@ describe('the client shell', () => {
     expect(target).toHaveAttribute('tabindex', '-1')
   })
 
-  it('carries the photographers list, how booking works, My booking and the admin login, and nothing else', () => {
+  it('carries the photographers list, how booking works, My booking, sign in and the admin login, and nothing else', () => {
     renderShell()
 
     const banner = screen.getByRole('banner')
     expect(within(banner).getByRole('link', { name: 'Bookly' })).toHaveAttribute('href', '/')
     expect(within(banner).getByRole('link', { name: 'Book now' })).toHaveAttribute('href', '/photographers')
     // Added 2026-09-25: the photographer's way into admin from the site.
-    expect(within(banner).getByRole('link', { name: 'Admin login' })).toHaveAttribute('href', '/admin/login')
+    expect(within(banner).getByRole('link', { name: 'Admin login' })).toHaveAttribute('href', '/studio/login')
     // Added 2026-09-25, now that a public resend exists (item 4).
     expect(within(banner).getByRole('link', { name: 'My booking' })).toBeInTheDocument()
     // Added 2026-09-27 (client front redesign): the two page links of the board.
     // The catalogue is per photographer since brief decision 9, so the first leads to them.
     expect(within(banner).getByRole('link', { name: 'Photographers' })).toHaveAttribute('href', '/photographers')
     expect(within(banner).getByRole('link', { name: 'How booking works' })).toHaveAttribute('href', '/#how')
-    expect(within(banner).getAllByRole('link')).toHaveLength(6)
+    // Added in Phase 2: the client's account.
+    expect(within(banner).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/account/login')
+    expect(within(banner).getAllByRole('link')).toHaveLength(7)
   })
 
   it('keeps "Book now" last in the bar, the primary action after the quieter links', () => {
     renderShell()
 
     const links = within(screen.getByRole('banner')).getAllByRole('link').map((link) => link.textContent)
-    expect(links).toEqual(['Bookly', 'Photographers', 'How booking works', 'My booking', 'Admin login', 'Book now'])
+    expect(links).toEqual(['Bookly', 'Photographers', 'How booking works', 'My booking', 'Sign in', 'Admin login', 'Book now'])
   })
 
   it('moves the admin login to the footer below sm, where the bar has no room for it (2026-09-25)', () => {
@@ -89,7 +96,7 @@ describe('the client shell', () => {
 
     expect(within(screen.getByRole('banner')).getByRole('link', { name: 'Admin login' })).toHaveClass('hidden', 'sm:inline-flex')
     const footerLink = within(screen.getByRole('contentinfo')).getByRole('link', { name: 'Admin login' })
-    expect(footerLink).toHaveAttribute('href', '/admin/login')
+    expect(footerLink).toHaveAttribute('href', '/studio/login')
     expect(footerLink.closest('li')).toHaveClass('sm:hidden')
   })
 
@@ -170,6 +177,93 @@ describe('the client shell', () => {
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(screen.getByRole('contentinfo')).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'Photographers' })).toBeInTheDocument()
+  })
+})
+
+describe('the account link (Phase 2)', () => {
+  const SESSION = { token: 'account.jwt.token', expiresAt: '2099-01-01T00:00:00.000Z' }
+  const ME = { user: { id: 'c1', email: 'aline@example.com', lastLoginAt: null, fullName: 'Aline Uwase' } }
+
+  function stubMe(respond: () => Response | Promise<Response>) {
+    const mock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => respond())
+    vi.stubGlobal('fetch', mock)
+    return mock
+  }
+
+  it('says Sign in with no account session, and asks the API nothing', () => {
+    const mock = stubMe(() => new Response(JSON.stringify(ME)))
+    renderShell()
+
+    const header = within(screen.getByRole('banner')).getByRole('link', { name: 'Sign in' })
+    expect(header).toHaveAttribute('href', '/account/login')
+    // Below `sm` the bar has no room for it: the footer carries it there.
+    expect(header).toHaveClass('hidden', 'sm:inline-flex')
+    const footer = within(screen.getByRole('contentinfo')).getByRole('link', { name: 'Sign in' })
+    expect(footer).toHaveAttribute('href', '/account/login')
+    expect(footer.closest('li')).toHaveClass('sm:hidden')
+    expect(mock).not.toHaveBeenCalled()
+  })
+
+  it('shows the client’s name once signed in, from one request with the account token', async () => {
+    saveSession('account', SESSION)
+    const mock = stubMe(() => new Response(JSON.stringify(ME), { status: 200 }))
+    renderShell()
+
+    const link = await within(screen.getByRole('banner')).findByRole('link', { name: 'Aline Uwase' })
+    expect(link).toHaveAttribute('href', '/account')
+    expect(within(screen.getByRole('contentinfo')).getByRole('link', { name: 'Aline Uwase' })).toHaveAttribute('href', '/account')
+    expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument()
+    // The header and the footer share one answer.
+    expect(mock).toHaveBeenCalledTimes(1)
+    const [url, init] = mock.mock.calls[0] ?? []
+    expect(String(url)).toBe('/api/account/me')
+    expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${SESSION.token}`)
+  })
+
+  it('falls back to the address when the account has no name', async () => {
+    saveSession('account', SESSION)
+    stubMe(() => new Response(JSON.stringify({ user: { ...ME.user, fullName: null } })))
+    renderShell()
+
+    expect(await within(screen.getByRole('banner')).findByRole('link', { name: 'aline@example.com' })).toHaveAttribute('href', '/account')
+  })
+
+  it('says Your account while the name loads', () => {
+    saveSession('account', SESSION)
+    stubMe(() => new Promise<Response>(() => {}))
+    renderShell()
+
+    expect(within(screen.getByRole('banner')).getByRole('link', { name: 'Your account' })).toHaveAttribute('href', '/account')
+  })
+
+  it('goes back to Sign in when the API refuses the token, and forgets it', async () => {
+    saveSession('account', SESSION)
+    stubMe(() => new Response(JSON.stringify({ error: 'invalid_token' }), { status: 401 }))
+    renderShell()
+
+    expect(await within(screen.getByRole('banner')).findByRole('link', { name: 'Sign in' })).toBeInTheDocument()
+    expect(sessionStorage.getItem('bookly.account.session')).toBeNull()
+  })
+
+  it('follows sign-out in this tab', async () => {
+    saveSession('account', SESSION)
+    stubMe(() => new Response(JSON.stringify(ME)))
+    renderShell()
+    await within(screen.getByRole('banner')).findByRole('link', { name: 'Aline Uwase' })
+
+    act(() => clearSession('account'))
+
+    await waitFor(() => expect(within(screen.getByRole('banner')).getByRole('link', { name: 'Sign in' })).toBeInTheDocument())
+  })
+
+  it('ignores a studio or platform session: only the account’s counts', () => {
+    saveSession('studio', SESSION)
+    saveSession('platform', SESSION)
+    const mock = stubMe(() => new Response(JSON.stringify(ME)))
+    renderShell()
+
+    expect(within(screen.getByRole('banner')).getByRole('link', { name: 'Sign in' })).toBeInTheDocument()
+    expect(mock).not.toHaveBeenCalled()
   })
 })
 

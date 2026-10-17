@@ -75,7 +75,7 @@ export function WorkingHoursForm({ title, submitLabel, values, onSave, onCancel 
       await onSave(parsed.data)
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        navigate('/admin/login', { replace: true })
+        navigate('/studio/login', { replace: true })
         return
       }
       if (error instanceof ApiError && error.message === 'working_hours_exists') {

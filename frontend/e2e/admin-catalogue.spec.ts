@@ -1,5 +1,11 @@
 import { type Page, expect, test } from '@playwright/test'
 
+/** The studio layout's status banner asks this (Phase 2); approved, so no banner shows. */
+const STUDIO_ME = {
+  user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null },
+  photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status: 'approved' },
+}
+
 /**
  * The catalogue CMS in Chromium (plan.md Task 10; spec §3.4, §6.8, §6.14).
  * `/api/*` is answered here by a small in-memory catalogue that behaves like
@@ -9,7 +15,7 @@ import { type Page, expect, test } from '@playwright/test'
 
 const NOW = new Date('2026-10-07T08:00:00.000Z')
 const SESSION = { token: 'e2e.header.signature', expiresAt: '2026-10-07T16:00:00.000Z' }
-const SESSION_KEY = 'bookly.admin.session'
+const SESSION_KEY = 'bookly.studio.session'
 const LONGEST_WINDOW = { opensMinute: 540, closesMinute: 1020 }
 
 type Row = Record<string, unknown> & { id: string }
@@ -28,11 +34,15 @@ async function mockApi(page: Page) {
       const method = request.method()
       const path = new URL(request.url()).pathname
 
-      if (method === 'GET' && path === '/api/admin/catalogue') {
+      if (method === 'GET' && path === '/api/studio/me') {
+        await route.fulfill({ json: STUDIO_ME })
+        return
+      }
+      if (method === 'GET' && path === '/api/studio/catalogue') {
         await route.fulfill({ json: { services, sharedAddons: [] } })
         return
       }
-      if (method === 'GET' && path === '/api/admin/calendar') {
+      if (method === 'GET' && path === '/api/studio/calendar') {
         await route.fulfill({ json: { bookings: [], blocks: [] } })
         return
       }
@@ -40,13 +50,13 @@ async function mockApi(page: Page) {
       const body = request.postDataJSON() as Record<string, unknown> | null
       writes.push({ method, path, body, authorization: await request.headerValue('authorization') })
 
-      if (method === 'POST' && path === '/api/admin/services') {
+      if (method === 'POST' && path === '/api/studio/services') {
         const service = { nameFr: null, descriptionFr: null, ...body, id: `s${nextId++}`, packages: [], addons: [] }
         services.push(service)
         await route.fulfill({ status: 201, json: { service } })
         return
       }
-      if (method === 'POST' && path === '/api/admin/packages') {
+      if (method === 'POST' && path === '/api/studio/packages') {
         const pkg: Row = { nameFr: null, descriptionFr: null, ...body, id: `p${nextId++}` }
         services.find((service) => service.id === pkg.serviceId)?.packages.push(pkg)
         const tooLong = Number(pkg.durationMinutes) > LONGEST_WINDOW.closesMinute - LONGEST_WINDOW.opensMinute
@@ -54,7 +64,7 @@ async function mockApi(page: Page) {
         await route.fulfill({ status: 201, json: { package: pkg, warning } })
         return
       }
-      const serviceId = /^\/api\/admin\/services\/([^/]+)$/.exec(path)?.[1]
+      const serviceId = /^\/api\/studio\/services\/([^/]+)$/.exec(path)?.[1]
       const service = services.find((row) => row.id === serviceId)
       if (method === 'PATCH' && service !== undefined) {
         Object.assign(service, body)
@@ -83,7 +93,7 @@ test.beforeEach(async ({ page }) => {
 
 test('creates a service, adds a package that earns the §6.8 warning, then deactivates the service', async ({ page }) => {
   const writes = await mockApi(page)
-  await page.goto('/admin/catalogue')
+  await page.goto('/studio/catalogue')
 
   await expect(page.getByText('No services yet. Add the first one.')).toBeVisible()
 
@@ -123,7 +133,7 @@ test('creates a service, adds a package that earns the §6.8 warning, then deact
   expect(writes).toEqual([
     {
       method: 'POST',
-      path: '/api/admin/services',
+      path: '/api/studio/services',
       body: {
         nameEn: 'Weddings',
         slug: 'weddings',
@@ -137,7 +147,7 @@ test('creates a service, adds a package that earns the §6.8 warning, then deact
     },
     {
       method: 'POST',
-      path: '/api/admin/packages',
+      path: '/api/studio/packages',
       body: {
         nameEn: 'Full day',
         descriptionEn: null,
@@ -150,13 +160,13 @@ test('creates a service, adds a package that earns the §6.8 warning, then deact
       },
       authorization: `Bearer ${SESSION.token}`,
     },
-    { method: 'PATCH', path: '/api/admin/services/s1', body: { isActive: false }, authorization: `Bearer ${SESSION.token}` },
+    { method: 'PATCH', path: '/api/studio/services/s1', body: { isActive: false }, authorization: `Bearer ${SESSION.token}` },
   ])
 })
 
 test('moves between Calendar and Catalogue from the admin header', async ({ page }) => {
   await mockApi(page)
-  await page.goto('/admin/calendar')
+  await page.goto('/studio/calendar')
 
   const nav = page.getByRole('navigation', { name: 'Admin' })
   await expect(page.getByRole('heading', { level: 1, name: 'Calendar' })).toBeVisible()
@@ -165,7 +175,7 @@ test('moves between Calendar and Catalogue from the admin header', async ({ page
 
   await nav.getByRole('link', { name: 'Catalogue' }).click()
 
-  await expect(page).toHaveURL(/\/admin\/catalogue$/)
+  await expect(page).toHaveURL(/\/studio\/catalogue$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Catalogue' })).toBeVisible()
   await expect(nav.getByRole('link', { name: 'Catalogue' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('link', { name: 'Calendar' })).not.toHaveAttribute('aria-current', 'page')
@@ -173,6 +183,6 @@ test('moves between Calendar and Catalogue from the admin header', async ({ page
   await nav.getByRole('link', { name: 'Calendar' }).click()
 
   // The calendar records its view and date in the URL once it has drawn.
-  await expect(page).toHaveURL(/\/admin\/calendar\?view=month&date=2026-10-01$/)
+  await expect(page).toHaveURL(/\/studio\/calendar\?view=month&date=2026-10-01$/)
   await expect(page.locator('.fc-toolbar-title')).toHaveText('October 2026')
 })

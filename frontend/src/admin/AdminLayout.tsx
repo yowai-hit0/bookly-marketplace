@@ -1,21 +1,31 @@
-import { CalendarCheck, LogOut } from 'lucide-react'
+import { CalendarCheck, CircleX, Clock, LogOut } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router'
+import { NavLink, Outlet, useLocation } from 'react-router'
+import { RequireSession } from '@/auth/RequireSession'
+import { useSignOut } from '@/auth/useSignOut'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { SkipLink } from '@/components/ui/skip-link'
 import { StatusBadgeVariantContext } from '@/components/ui/status-badge-context'
 import { cn } from '@/lib/utils'
 import { BreadcrumbTailContext, useBreadcrumbTailState } from './breadcrumb-tail'
 import { Breadcrumbs } from './breadcrumbs'
 import { NAV_ITEMS } from './nav'
-import { clearSession, readSession } from './session'
+import { adminFetch } from './api'
 import { ThemeToggle } from './ThemeToggle'
 import { useAdminTheme } from './theme'
 
 /**
- * Every `/admin/*` page renders inside this. Without a live token it sends him
- * to sign in; this is a convenience, not the protection -- the API refuses the
- * data itself (spec §2.2: no permission is enforced by hiding UI alone).
+ * Every `/studio/*` page renders inside this. Without a live studio token it
+ * sends him to the studio's sign in, carrying where he was going
+ * (`RequireSession`); this is a convenience, not the protection -- the API
+ * refuses the data itself (spec §2.2: no permission is enforced by hiding UI
+ * alone).
+ *
+ * Above every page sits the studio's status from `GET /api/studio/me`
+ * (marketplace spec R2.2): a pending photographer can sign in and set up, but
+ * is not listed or bookable until approved, and a suspended one is hidden.
  *
  * Layout (`design-system/bookly/admin-console.md` section 6.1, on top of
  * `pages/admin-shell.md`): a 56px top bar of bordered cells (the mark, the
@@ -26,18 +36,20 @@ import { useAdminTheme } from './theme'
  * order at every width, so tab order and reading order agree.
  */
 export function AdminLayout() {
+  return (
+    <RequireSession area="studio">
+      <StudioShell />
+    </RequireSession>
+  )
+}
+
+function StudioShell() {
   const { t } = useTranslation()
-  const navigate = useNavigate()
+  const signOut = useSignOut('studio')
   const { pathname } = useLocation()
   const { preference, setPreference } = useAdminTheme()
   const [tail, setTail] = useBreadcrumbTailState()
 
-  if (readSession() === null) return <Navigate to="/admin/login" replace />
-
-  function signOut() {
-    clearSession()
-    navigate('/admin/login', { replace: true })
-  }
 
   return (
     <div className="bg-background text-foreground min-h-svh lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[3.5rem_1fr]">
@@ -73,7 +85,7 @@ export function AdminLayout() {
             {NAV_ITEMS.map(({ page, icon: Icon }) => (
               <NavLink
                 key={page}
-                to={`/admin/${page}`}
+                to={`/studio/${page}`}
                 className={({ isActive }) =>
                   cn(
                     'flex min-h-11 items-center gap-3 rounded-xs px-3.5 text-base motion-safe:transition-colors motion-safe:duration-150',
@@ -92,7 +104,7 @@ export function AdminLayout() {
           <div className="order-2 ml-auto lg:order-3 lg:mt-auto lg:ml-0 lg:border-t lg:pt-3">
             <Button
               variant="ghost"
-              onClick={signOut}
+              onClick={() => signOut()}
               // Red text and a red hover tint mark it as leaving (2026-09-25);
               // ghost weight, not a solid fill: it is not a destructive confirmation.
               className="text-destructive hover:bg-destructive/10 hover:text-destructive h-11 gap-3 rounded-xs px-3.5 text-base font-normal active:not-aria-[haspopup]:translate-y-0 lg:w-full lg:justify-start [&_svg:not([class*='size-'])]:size-4.5"
@@ -105,6 +117,7 @@ export function AdminLayout() {
       </aside>
 
       <div id="admin-content" tabIndex={-1} className="min-w-0 outline-none">
+        <StatusBanner />
         <BreadcrumbTailContext.Provider value={setTail}>
           {/* Every status badge in the admin takes the console look, the legend's popover included. */}
           <StatusBadgeVariantContext.Provider value="console">
@@ -112,6 +125,50 @@ export function AdminLayout() {
           </StatusBadgeVariantContext.Provider>
         </BreadcrumbTailContext.Provider>
       </div>
+    </div>
+  )
+}
+
+type StudioStatus = 'pending' | 'approved' | 'suspended'
+
+/**
+ * The studio's moderation status, once `/api/studio/me` has answered; null
+ * until then and on any failure (no banner is better than a wrong one). A 401
+ * drops the session in `apiFetch`, and the guard above takes him to sign in.
+ */
+function useStudioStatus(): StudioStatus | null {
+  const [status, setStatus] = useState<StudioStatus | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    adminFetch<{ photographer?: { status?: unknown } }>('/studio/me').then(
+      (body) => {
+        const value = body?.photographer?.status
+        if (!cancelled && (value === 'pending' || value === 'approved' || value === 'suspended')) setStatus(value)
+      },
+      () => {},
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  return status
+}
+
+/** Pending or suspended, said above every studio page; nothing once approved. */
+function StatusBanner() {
+  const { t } = useTranslation()
+  const status = useStudioStatus()
+  if (status !== 'pending' && status !== 'suspended') return null
+  return (
+    <div className="px-4 pt-4 lg:px-12 lg:pt-6">
+      <Callout
+        variant="console"
+        tone={status === 'pending' ? 'info' : 'destructive'}
+        icon={status === 'pending' ? Clock : CircleX}
+        data-studio-status={status}
+      >
+        <p>{t(`studio:banner.${status}`)}</p>
+      </Callout>
     </div>
   )
 }

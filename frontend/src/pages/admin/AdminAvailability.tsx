@@ -79,7 +79,7 @@ export function AdminAvailability() {
       .catch((error: unknown) => {
         if (cancelled) return
         if (error instanceof UnauthenticatedError) {
-          navigate('/admin/login', { replace: true })
+          navigate('/studio/login', { replace: true })
           return
         }
         setLoaded({ data: null })
@@ -106,7 +106,7 @@ export function AdminAvailability() {
       reload()
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        navigate('/admin/login', { replace: true })
+        navigate('/studio/login', { replace: true })
         return
       }
       setActionError(t('admin:availability.actionFailed'))

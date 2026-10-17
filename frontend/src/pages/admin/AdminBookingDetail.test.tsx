@@ -7,6 +7,7 @@ import type { AdminBooking, AdminPayment } from '@/admin/bookings'
 import type { AdminAddon, CatalogueData, CatalogueService } from '@/admin/catalogue'
 import { readSession, saveSession } from '@/admin/session'
 import { routes } from '@/routes'
+import { isStudioMe, studioMe } from '@/test/studio-me'
 
 /**
  * One booking and everything the photographer does to it (plan.md Task 19;
@@ -29,8 +30,8 @@ import { routes } from '@/routes'
 const SESSION = { token: 'header.payload.signature', expiresAt: '2999-01-01T00:00:00.000Z' }
 const BOOKING_ID = 'b1a7c2d4-0000-4000-8000-000000000001'
 const PAYMENT_ID = 'c2b8d3e5-0000-4000-8000-000000000002'
-const DETAIL_PATH = `/admin/bookings/${BOOKING_ID}`
-const DETAIL_API = `/api/admin/bookings/${BOOKING_ID}`
+const DETAIL_PATH = `/studio/bookings/${BOOKING_ID}`
+const DETAIL_API = `/api/studio/bookings/${BOOKING_ID}`
 
 const BOOKING_FEE: AdminPayment = {
   id: PAYMENT_ID,
@@ -187,13 +188,15 @@ function stubApi(
   const current = { value: options.booking ?? BOOKING }
   const sent: Sent[] = []
   const mock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+    // The layout's banner request is answered, and left out of what the page sent.
+    if (isStudioMe(input)) return studioMe()
     const call: Sent = {
       method: init.method ?? 'GET',
       url: String(input),
       body: typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined,
     }
     sent.push(call)
-    if (call.url === '/api/admin/catalogue') {
+    if (call.url === '/api/studio/catalogue') {
       const catalogue = options.catalogue === undefined ? CATALOGUE : options.catalogue
       return catalogue === null ? json({ error: 'internal_error' }, 500) : json(catalogue)
     }
@@ -267,7 +270,7 @@ describe('the booking', () => {
     await renderLoaded()
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('BKY-2701-00042')
-    expect(screen.getByRole('link', { name: /All bookings/ })).toHaveAttribute('href', '/admin/bookings')
+    expect(screen.getByRole('link', { name: /All bookings/ })).toHaveAttribute('href', '/studio/bookings')
     expect(document.body).toHaveTextContent('Confirmed')
   })
 
@@ -696,7 +699,7 @@ describe('recording a refund (spec §6.16)', () => {
 
     await waitFor(() => expect(section('Payments')).toHaveTextContent('Refunded'))
     expect(writes(sent)).toEqual([
-      { method: 'POST', url: `/api/admin/payments/${PAYMENT_ID}/refund`, body: { reference: 'MOMO-REF-7781' } },
+      { method: 'POST', url: `/api/studio/payments/${PAYMENT_ID}/refund`, body: { reference: 'MOMO-REF-7781' } },
     ])
     expect(section('Payments')).toHaveTextContent('refund MOMO-REF-7781')
     expect(screen.queryByLabelText('Refund reference')).not.toBeInTheDocument()
@@ -913,7 +916,7 @@ describe('the post-shoot add-on editor', () => {
     await openDialog('Add an add-on')
     await screen.findByLabelText('Add-on')
 
-    expect(gets(sent).filter((call) => call.url === '/api/admin/catalogue')).toHaveLength(1)
+    expect(gets(sent).filter((call) => call.url === '/api/studio/catalogue')).toHaveLength(1)
   })
 
   it('offers this service’s own add-ons and the shared ones, and nothing else', async () => {
@@ -961,7 +964,7 @@ describe('the post-shoot add-on editor', () => {
 
     await waitFor(() => expect(section('Money')).toHaveTextContent('Total65,000 RWF'))
     expect(writes(sent)).toEqual([
-      { method: 'POST', url: `/api/admin/bookings/${BOOKING_ID}/addons`, body: { addonId: OWN_ADDON_ID, quantity: 2 } },
+      { method: 'POST', url: `/api/studio/bookings/${BOOKING_ID}/addons`, body: { addonId: OWN_ADDON_ID, quantity: 2 } },
     ])
     expect(section('Money')).toHaveTextContent('Twenty prints (added after the shoot)')
     expect(section('Money')).toHaveTextContent('Still to pay45,000 RWF')
@@ -1070,7 +1073,7 @@ describe('removing a post-shoot add-on', () => {
 
     await waitFor(() => expect(section('Money')).toHaveTextContent('Total50,000 RWF'))
     expect(writes(sent)).toEqual([
-      { method: 'DELETE', url: `/api/admin/bookings/${BOOKING_ID}/addons/ba2`, body: undefined },
+      { method: 'DELETE', url: `/api/studio/bookings/${BOOKING_ID}/addons/ba2`, body: undefined },
     ])
     // The line is gone with its remove link; only the picker still names it.
     expect(within(section('Money')).queryByRole('button', { name: 'Remove' })).toBeNull()
@@ -1178,7 +1181,7 @@ describe('requesting the session fee', () => {
     await user().click(screen.getByRole('button', { name: 'Request 30,000 RWF session fee' }))
 
     await waitFor(() => expect(section('Payments')).toHaveTextContent('Session fee'))
-    expect(writes(sent)).toEqual([{ method: 'POST', url: `/api/admin/bookings/${BOOKING_ID}/session-fee`, body: {} }])
+    expect(writes(sent)).toEqual([{ method: 'POST', url: `/api/studio/bookings/${BOOKING_ID}/session-fee`, body: {} }])
     expect(section('Payments')).toHaveTextContent('30,000 RWF')
     expect(section('Messages sent')).toHaveTextContent('Session fee request')
   })
@@ -1354,7 +1357,7 @@ describe('recording a cash payment (item 7, 2026-09-27)', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(writes(sent)).toEqual([
-      { method: 'POST', url: `/api/admin/bookings/${BOOKING_ID}/payments/cash`, body: { amountRwf: 30_000, note: 'Paid at the studio.' } },
+      { method: 'POST', url: `/api/studio/bookings/${BOOKING_ID}/payments/cash`, body: { amountRwf: 30_000, note: 'Paid at the studio.' } },
     ])
     const payments = section('Payments')
     expect(payments).toHaveTextContent('Cash · 30,000 RWF')
@@ -1615,7 +1618,7 @@ describe('saving the link', () => {
     await waitFor(() => expect(writes(sent)).toHaveLength(1))
     expect(writes(sent)[0]).toEqual({
       method: 'PUT',
-      url: `/api/admin/bookings/${BOOKING_ID}/delivery`,
+      url: `/api/studio/bookings/${BOOKING_ID}/delivery`,
       body: { url: DELIVERY_LINK, expiresOn: '2027-03-15', note: DELIVERY_NOTE },
     })
   })
@@ -1711,7 +1714,7 @@ describe('sending the photos', () => {
     await sendThroughConfirm()
 
     await waitFor(() => expect(writes(sent)).toHaveLength(1))
-    expect(writes(sent)[0]).toEqual({ method: 'POST', url: `/api/admin/bookings/${BOOKING_ID}/delivery/send`, body: {} })
+    expect(writes(sent)[0]).toEqual({ method: 'POST', url: `/api/studio/bookings/${BOOKING_ID}/delivery/send`, body: {} })
   })
 
   it('reads "Send again" once it has been sent (spec §6.20)', async () => {
@@ -1891,7 +1894,7 @@ describe('notes to the client (2026-09-25)', () => {
     await user().click(within(notes()).getByRole('button', { name: 'Add the note' }))
 
     await waitFor(() => expect(writes(sent)).toHaveLength(1))
-    expect(writes(sent)[0]).toEqual({ method: 'POST', url: `/api/admin/bookings/${BOOKING_ID}/notes`, body: { body: 'Bring a jacket.', email: true } })
+    expect(writes(sent)[0]).toEqual({ method: 'POST', url: `/api/studio/bookings/${BOOKING_ID}/notes`, body: { body: 'Bring a jacket.', email: true } })
     await waitFor(() => expect(within(notes()).getByLabelText('New note')).toHaveValue(''))
   })
 
@@ -1940,7 +1943,7 @@ describe('notes to the client (2026-09-25)', () => {
     await user().click(within(notes()).getByRole('button', { name: 'Delete the note' }))
 
     await waitFor(() => expect(writes(sent)).toHaveLength(1))
-    expect(writes(sent)[0]).toMatchObject({ method: 'DELETE', url: `/api/admin/bookings/${BOOKING_ID}/notes/n1` })
+    expect(writes(sent)[0]).toMatchObject({ method: 'DELETE', url: `/api/studio/bookings/${BOOKING_ID}/notes/n1` })
     await waitFor(() => expect(notes()).toHaveTextContent('No notes yet.'))
   })
 

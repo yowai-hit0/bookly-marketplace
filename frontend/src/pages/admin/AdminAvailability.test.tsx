@@ -20,8 +20,8 @@ import { routes } from '@/routes'
 
 const NOW = new Date('2026-10-07T08:00:00.000Z')
 const TOKEN = 'header.payload.signature'
-const HOURS_API = '/api/admin/working-hours'
-const BLOCKS_API = '/api/admin/blocks'
+const HOURS_API = '/api/studio/working-hours'
+const BLOCKS_API = '/api/studio/blocks'
 
 // --- Fixtures ---------------------------------------------------------------
 
@@ -115,7 +115,7 @@ function stubApi(
     if (sent.method === 'GET' && sent.url === HOURS_API) return json({ workingHours: api.workingHours })
     if (sent.method === 'GET' && sent.url === BLOCKS_API) return json({ blocks: api.blocks })
     if (sent.method === 'DELETE') return new Response(null, { status: 204 })
-    if (sent.url === '/api/admin/settings') {
+    if (sent.url === '/api/studio/settings') {
       return json({
         settings: {
           bookingFeeRate: 0.4,
@@ -126,7 +126,7 @@ function stubApi(
         },
       })
     }
-    if (sent.url.startsWith('/api/admin/calendar')) return json({ bookings: [], blocks: [] })
+    if (sent.url.startsWith('/api/studio/calendar')) return json({ bookings: [], blocks: [] })
     if (sent.url.startsWith(HOURS_API)) return json({ workingHours: MONDAY }, sent.method === 'POST' ? 201 : 200)
     if (sent.url.startsWith(BLOCKS_API)) return json({ block: AWAY }, sent.method === 'POST' ? 201 : 200)
     return json({})
@@ -142,7 +142,7 @@ const loads = (api: Api) => api.sent.filter((sent) => sent.method === 'GET' && s
 
 function renderPage() {
   saveSession({ token: TOKEN, expiresAt: '2026-10-07T16:00:00.000Z' })
-  const router = createMemoryRouter(routes, { initialEntries: ['/admin/availability'] })
+  const router = createMemoryRouter(routes, { initialEntries: ['/studio/availability'] })
   render(<RouterProvider router={router} />)
   return router
 }
@@ -229,7 +229,7 @@ describe('AdminAvailability, reading what is stored', () => {
   it('offers a retry when it cannot be loaded, and shows the rows once it works', async () => {
     let fail = true
     stubApi({
-      'GET /api/admin/working-hours': () =>
+      'GET /api/studio/working-hours': () =>
         fail ? json({ error: 'internal_error' }, 500) : json({ workingHours: [MONDAY] }),
     })
     renderPage()
@@ -243,10 +243,10 @@ describe('AdminAvailability, reading what is stored', () => {
   })
 
   it('sends him to sign in when the token has gone stale', async () => {
-    stubApi({ 'GET /api/admin/working-hours': () => json({ error: 'unauthenticated' }, 401) })
+    stubApi({ 'GET /api/studio/working-hours': () => json({ error: 'unauthenticated' }, 401) })
     const router = renderPage()
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/admin/login'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/login'))
   })
 })
 
@@ -338,7 +338,7 @@ describe('AdminAvailability, working hours', () => {
   })
 
   it('says which day already has hours when the API refuses a duplicate', async () => {
-    stubApi({ 'POST /api/admin/working-hours': () => json({ error: 'working_hours_exists' }, 409) })
+    stubApi({ 'POST /api/studio/working-hours': () => json({ error: 'working_hours_exists' }, 409) })
     await openPage()
 
     await user().click(screen.getByRole('button', { name: 'Add hours' }))
@@ -477,7 +477,7 @@ describe('AdminAvailability, a block over a confirmed booking (spec §6.4)', () 
   /** Refuses the first save, accepts the one that carries `confirm`. */
   function stubOverlap() {
     return stubApi({
-      'POST /api/admin/blocks': (sent) =>
+      'POST /api/studio/blocks': (sent) =>
         (sent.body as { confirm?: boolean }).confirm === true
           ? json({ block: AWAY }, 201)
           : json(OVERLAPPING, 409),
@@ -562,7 +562,7 @@ describe('the admin navigation', () => {
     await user().click(within(nav).getByRole('link', { name: 'Settings' }))
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/admin/settings')
+    expect(router.state.location.pathname).toBe('/studio/settings')
     expect(within(nav).getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page')
     expect(within(nav).getByRole('link', { name: 'Availability' })).not.toHaveAttribute('aria-current')
   })

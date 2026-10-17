@@ -76,7 +76,7 @@ export function EntityForm<T>({ title, submitLabel, fields, values, schema, onSa
       await onSave(parsed.data)
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        navigate('/admin/login', { replace: true })
+        navigate('/studio/login', { replace: true })
         return
       }
       const named = error instanceof ApiError ? error.fields.map((f) => FORM_FIELD_FOR[f] ?? f) : []

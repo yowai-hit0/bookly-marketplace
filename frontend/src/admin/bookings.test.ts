@@ -107,7 +107,7 @@ describe('bookingsApi.list', () => {
 
     await bookingsApi.list()
 
-    expect(sent(mock).url).toBe('/api/admin/bookings')
+    expect(sent(mock).url).toBe('/api/studio/bookings')
   })
 
   it('repeats status rather than joining it, in the order given', async () => {
@@ -115,7 +115,7 @@ describe('bookingsApi.list', () => {
 
     await bookingsApi.list({ statuses: ['confirmed', 'no_show', 'cancelled_by_photographer'] })
 
-    expect(sent(mock).url).toBe('/api/admin/bookings?status=confirmed&status=no_show&status=cancelled_by_photographer')
+    expect(sent(mock).url).toBe('/api/studio/bookings?status=confirmed&status=no_show&status=cancelled_by_photographer')
   })
 
   it('sends every status the API knows, unchanged', async () => {
@@ -132,7 +132,7 @@ describe('bookingsApi.list', () => {
 
     await bookingsApi.list({ from: '2027-01-01', to: '2027-01-31', search: 'Uwase', page: 3, pageSize: 50 })
 
-    expect(sent(mock).url).toBe('/api/admin/bookings?from=2027-01-01&to=2027-01-31&search=Uwase&page=3&pageSize=50')
+    expect(sent(mock).url).toBe('/api/studio/bookings?from=2027-01-01&to=2027-01-31&search=Uwase&page=3&pageSize=50')
   })
 
   it('leaves out anything empty or absent', async () => {
@@ -140,7 +140,7 @@ describe('bookingsApi.list', () => {
 
     await bookingsApi.list({ statuses: [], from: '', to: '', search: '' })
 
-    expect(sent(mock).url).toBe('/api/admin/bookings')
+    expect(sent(mock).url).toBe('/api/studio/bookings')
   })
 
   it('escapes what it is given rather than pasting it into the URL', async () => {
@@ -180,24 +180,24 @@ describe('every call’s method, path and body', () => {
   type Call = [label: string, run: () => Promise<unknown>, method: string, url: string, body: unknown]
 
   it.each<Call>([
-    ['get', () => bookingsApi.get(BOOKING_ID), 'GET', `/api/admin/bookings/${BOOKING_ID}`, undefined],
+    ['get', () => bookingsApi.get(BOOKING_ID), 'GET', `/api/studio/bookings/${BOOKING_ID}`, undefined],
     [
       'reschedule',
       () => bookingsApi.reschedule(BOOKING_ID, '2027-01-07T09:00:00+02:00'),
       'POST',
-      `/api/admin/bookings/${BOOKING_ID}/reschedule`,
+      `/api/studio/bookings/${BOOKING_ID}/reschedule`,
       { startsAt: '2027-01-07T09:00:00+02:00' },
     ],
-    ['cancel with a reason', () => bookingsApi.cancel(BOOKING_ID, 'Studio flooded.'), 'POST', `/api/admin/bookings/${BOOKING_ID}/cancel`, { reason: 'Studio flooded.' }],
-    ['cancel with none', () => bookingsApi.cancel(BOOKING_ID, null), 'POST', `/api/admin/bookings/${BOOKING_ID}/cancel`, { reason: null }],
-    ['complete', () => bookingsApi.complete(BOOKING_ID), 'POST', `/api/admin/bookings/${BOOKING_ID}/complete`, {}],
-    ['markNoShow', () => bookingsApi.markNoShow(BOOKING_ID), 'POST', `/api/admin/bookings/${BOOKING_ID}/no-show`, {}],
-    ['resendLink', () => bookingsApi.resendLink(BOOKING_ID), 'POST', `/api/admin/bookings/${BOOKING_ID}/resend-link`, {}],
+    ['cancel with a reason', () => bookingsApi.cancel(BOOKING_ID, 'Studio flooded.'), 'POST', `/api/studio/bookings/${BOOKING_ID}/cancel`, { reason: 'Studio flooded.' }],
+    ['cancel with none', () => bookingsApi.cancel(BOOKING_ID, null), 'POST', `/api/studio/bookings/${BOOKING_ID}/cancel`, { reason: null }],
+    ['complete', () => bookingsApi.complete(BOOKING_ID), 'POST', `/api/studio/bookings/${BOOKING_ID}/complete`, {}],
+    ['markNoShow', () => bookingsApi.markNoShow(BOOKING_ID), 'POST', `/api/studio/bookings/${BOOKING_ID}/no-show`, {}],
+    ['resendLink', () => bookingsApi.resendLink(BOOKING_ID), 'POST', `/api/studio/bookings/${BOOKING_ID}/resend-link`, {}],
     [
       'recordRefund',
       () => bookingsApi.recordRefund(PAYMENT_ID, 'MOMO-REF-7781'),
       'POST',
-      `/api/admin/payments/${PAYMENT_ID}/refund`,
+      `/api/studio/payments/${PAYMENT_ID}/refund`,
       { reference: 'MOMO-REF-7781' },
     ],
     // Task 20. No amount travels: the API prices the add-on from the catalogue.
@@ -205,28 +205,28 @@ describe('every call’s method, path and body', () => {
       'addAddon with the quantity left out',
       () => bookingsApi.addAddon(BOOKING_ID, ADDON_ID),
       'POST',
-      `/api/admin/bookings/${BOOKING_ID}/addons`,
+      `/api/studio/bookings/${BOOKING_ID}/addons`,
       { addonId: ADDON_ID, quantity: 1 },
     ],
     [
       'addAddon with a quantity',
       () => bookingsApi.addAddon(BOOKING_ID, ADDON_ID, 3),
       'POST',
-      `/api/admin/bookings/${BOOKING_ID}/addons`,
+      `/api/studio/bookings/${BOOKING_ID}/addons`,
       { addonId: ADDON_ID, quantity: 3 },
     ],
     [
       'removeAddon',
       () => bookingsApi.removeAddon(BOOKING_ID, LINE_ID),
       'DELETE',
-      `/api/admin/bookings/${BOOKING_ID}/addons/${LINE_ID}`,
+      `/api/studio/bookings/${BOOKING_ID}/addons/${LINE_ID}`,
       undefined,
     ],
     [
       'requestSessionFee',
       () => bookingsApi.requestSessionFee(BOOKING_ID),
       'POST',
-      `/api/admin/bookings/${BOOKING_ID}/session-fee`,
+      `/api/studio/bookings/${BOOKING_ID}/session-fee`,
       {},
     ],
     // Task 21. Saving is a PUT: the delivery is one record replaced, not an
@@ -235,28 +235,28 @@ describe('every call’s method, path and body', () => {
       'saveDelivery with only the link',
       () => bookingsApi.saveDelivery(BOOKING_ID, { url: DELIVERY_LINK }),
       'PUT',
-      `/api/admin/bookings/${BOOKING_ID}/delivery`,
+      `/api/studio/bookings/${BOOKING_ID}/delivery`,
       { url: DELIVERY_LINK },
     ],
     [
       'saveDelivery with a date and a note',
       () => bookingsApi.saveDelivery(BOOKING_ID, { url: DELIVERY_LINK, expiresOn: '2027-03-15', note: 'Thank you!' }),
       'PUT',
-      `/api/admin/bookings/${BOOKING_ID}/delivery`,
+      `/api/studio/bookings/${BOOKING_ID}/delivery`,
       { url: DELIVERY_LINK, expiresOn: '2027-03-15', note: 'Thank you!' },
     ],
     [
       'sendDelivery',
       () => bookingsApi.sendDelivery(BOOKING_ID),
       'POST',
-      `/api/admin/bookings/${BOOKING_ID}/delivery/send`,
+      `/api/studio/bookings/${BOOKING_ID}/delivery/send`,
       {},
     ],
     [
       'sendDelivery to another address',
       () => bookingsApi.sendDelivery(BOOKING_ID, 'other@example.com'),
       'POST',
-      `/api/admin/bookings/${BOOKING_ID}/delivery/send`,
+      `/api/studio/bookings/${BOOKING_ID}/delivery/send`,
       { recipient: 'other@example.com' },
     ],
   ])('%s', async (_label, run, method, url, body) => {
@@ -393,7 +393,7 @@ describe('the post-shoot calls', () => {
     await bookingsApi.removeAddon(BOOKING_ID, LINE_ID)
 
     const call = sent(mock)
-    expect([call.method, call.url]).toEqual(['DELETE', `/api/admin/bookings/${BOOKING_ID}/addons/${LINE_ID}`])
+    expect([call.method, call.url]).toEqual(['DELETE', `/api/studio/bookings/${BOOKING_ID}/addons/${LINE_ID}`])
     expect(call.body).toBeUndefined()
     expect(call.headers.has('Content-Type')).toBe(false)
     expect(call.headers.get('Authorization')).toBe(`Bearer ${SESSION.token}`)
@@ -411,7 +411,7 @@ describe('the post-shoot calls', () => {
     const answer = await bookingsApi.requestSessionFee(BOOKING_ID)
 
     expect(sent(mock).body).toEqual({})
-    expect(sent(mock).url).toBe(`/api/admin/bookings/${BOOKING_ID}/session-fee`)
+    expect(sent(mock).url).toBe(`/api/studio/bookings/${BOOKING_ID}/session-fee`)
     expect(answer.booking.actions.canRequestSessionFee).toBe(true)
   })
 
@@ -462,7 +462,7 @@ describe('the delivery calls', () => {
     await bookingsApi.saveDelivery(BOOKING_ID, { url: DELIVERY_LINK })
 
     const call = sent(mock)
-    expect([call.method, call.url]).toEqual(['PUT', `/api/admin/bookings/${BOOKING_ID}/delivery`])
+    expect([call.method, call.url]).toEqual(['PUT', `/api/studio/bookings/${BOOKING_ID}/delivery`])
     expect(call.body).toEqual({ url: DELIVERY_LINK })
     // Not merely undefined: the key is absent from the JSON altogether.
     expect(Object.keys(call.body as object)).toEqual(['url'])
@@ -506,7 +506,7 @@ describe('the delivery calls', () => {
     const answer = await bookingsApi.sendDelivery(BOOKING_ID)
 
     const call = sent(mock)
-    expect([call.method, call.url]).toEqual(['POST', `/api/admin/bookings/${BOOKING_ID}/delivery/send`])
+    expect([call.method, call.url]).toEqual(['POST', `/api/studio/bookings/${BOOKING_ID}/delivery/send`])
     expect(call.body).toEqual({})
     expect(answer.booking.delivery.sentAt).toBe('2027-01-02T09:15:00.000Z')
   })

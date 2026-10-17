@@ -176,60 +176,60 @@ export const bookingsApi = {
       if (value !== undefined && value !== '') query.set(key, value)
     }
     const suffix = query.toString()
-    return adminFetch<BookingsPage>(`/admin/bookings${suffix === '' ? '' : `?${suffix}`}`)
+    return adminFetch<BookingsPage>(`/studio/bookings${suffix === '' ? '' : `?${suffix}`}`)
   },
 
   get(id: string): Promise<{ booking: AdminBooking }> {
-    return adminFetch<{ booking: AdminBooking }>(`/admin/bookings/${id}`)
+    return adminFetch<{ booking: AdminBooking }>(`/studio/bookings/${id}`)
   },
 
   reschedule(id: string, startsAt: string): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${id}/reschedule`, { startsAt })
+    return post(`/studio/bookings/${id}/reschedule`, { startsAt })
   },
 
   cancel(id: string, reason: string | null): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${id}/cancel`, { reason })
+    return post(`/studio/bookings/${id}/cancel`, { reason })
   },
 
   complete(id: string): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${id}/complete`, {})
+    return post(`/studio/bookings/${id}/complete`, {})
   },
 
   markNoShow(id: string): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${id}/no-show`, {})
+    return post(`/studio/bookings/${id}/no-show`, {})
   },
 
   resendLink(id: string): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${id}/resend-link`, {})
+    return post(`/studio/bookings/${id}/resend-link`, {})
   },
 
   /** A post-shoot add-on, priced from the catalogue by the API (spec §6.15). */
   addAddon(bookingId: string, addonId: string, quantity = 1): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${bookingId}/addons`, { addonId, quantity })
+    return post(`/studio/bookings/${bookingId}/addons`, { addonId, quantity })
   },
 
   removeAddon(bookingId: string, addonId: string): Promise<{ booking: AdminBooking }> {
-    return adminFetch<{ booking: AdminBooking }>(`/admin/bookings/${bookingId}/addons/${addonId}`, { method: 'DELETE' })
+    return adminFetch<{ booking: AdminBooking }>(`/studio/bookings/${bookingId}/addons/${addonId}`, { method: 'DELETE' })
   },
 
   /** A note to the client: on their booking page, and emailed unless `email` is false (2026-09-25). */
   addNote(bookingId: string, note: { body: string; email: boolean }): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${bookingId}/notes`, note)
+    return post(`/studio/bookings/${bookingId}/notes`, note)
   },
 
   /** Hides a note from the client's page. An email already sent stays sent. */
   deleteNote(bookingId: string, noteId: string): Promise<{ booking: AdminBooking }> {
-    return adminFetch<{ booking: AdminBooking }>(`/admin/bookings/${bookingId}/notes/${noteId}`, { method: 'DELETE' })
+    return adminFetch<{ booking: AdminBooking }>(`/studio/bookings/${bookingId}/notes/${noteId}`, { method: 'DELETE' })
   },
 
   /** Asks the client for what is outstanding, and emails them a link (spec §3.5 step 3). */
   requestSessionFee(bookingId: string): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${bookingId}/session-fee`, {})
+    return post(`/studio/bookings/${bookingId}/session-fee`, {})
   },
 
   /** The link to the photos on their own host, and the day it stops working (spec A-7, A-8). */
   saveDelivery(bookingId: string, body: { url: string; expiresOn?: string; note?: string | null }): Promise<{ booking: AdminBooking }> {
-    return adminFetch<{ booking: AdminBooking }>(`/admin/bookings/${bookingId}/delivery`, {
+    return adminFetch<{ booking: AdminBooking }>(`/studio/bookings/${bookingId}/delivery`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -242,17 +242,17 @@ export const bookingsApi = {
    * booking keeps its own contact email (decided 2026-09-25).
    */
   sendDelivery(bookingId: string, recipient?: string): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${bookingId}/delivery/send`, recipient === undefined ? {} : { recipient })
+    return post(`/studio/bookings/${bookingId}/delivery/send`, recipient === undefined ? {} : { recipient })
   },
 
   /** Records a refund the photographer has already sent (spec §6.16). */
   /** Cash the client handed over, up to what is owed; the client is not emailed (item 7). */
   recordCash(bookingId: string, amountRwf: number, note: string | null): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/bookings/${bookingId}/payments/cash`, { amountRwf, note })
+    return post(`/studio/bookings/${bookingId}/payments/cash`, { amountRwf, note })
   },
 
   recordRefund(paymentId: string, reference: string): Promise<{ booking: AdminBooking }> {
-    return post(`/admin/payments/${paymentId}/refund`, { reference })
+    return post(`/studio/payments/${paymentId}/refund`, { reference })
   },
 }
 

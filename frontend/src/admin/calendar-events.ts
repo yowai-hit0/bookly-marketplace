@@ -2,7 +2,7 @@ import type { EventInput } from '@fullcalendar/core'
 import { type KigaliDate, addDays, kigaliDateOf } from './calendar-dates'
 
 /**
- * `GET /api/admin/calendar` as FullCalendar events (plan.md Task 9).
+ * `GET /api/studio/calendar` as FullCalendar events (plan.md Task 9).
  *
  * The API response is turned into events here and nowhere else, so the page
  * only wires FullCalendar up. Each event carries its source row as

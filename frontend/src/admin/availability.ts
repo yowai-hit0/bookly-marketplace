@@ -93,18 +93,18 @@ function send<T>(method: 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown
 }
 
 export const availabilityApi = {
-  loadWorkingHours: () => adminFetch<{ workingHours: AdminWorkingHours[] }>('/admin/working-hours'),
+  loadWorkingHours: () => adminFetch<{ workingHours: AdminWorkingHours[] }>('/studio/working-hours'),
   createWorkingHours: (body: WorkingHoursPayload) =>
-    send<{ workingHours: AdminWorkingHours }>('POST', '/admin/working-hours', body),
+    send<{ workingHours: AdminWorkingHours }>('POST', '/studio/working-hours', body),
   /** A PUT replaces the whole row, key included, so a rule can move to another day. */
   updateWorkingHours: (id: string, body: WorkingHoursPayload) =>
-    send<{ workingHours: AdminWorkingHours }>('PUT', `/admin/working-hours/${id}`, body),
-  deleteWorkingHours: (id: string) => send<void>('DELETE', `/admin/working-hours/${id}`),
+    send<{ workingHours: AdminWorkingHours }>('PUT', `/studio/working-hours/${id}`, body),
+  deleteWorkingHours: (id: string) => send<void>('DELETE', `/studio/working-hours/${id}`),
 
-  loadBlocks: () => adminFetch<{ blocks: AdminBlock[] }>('/admin/blocks'),
-  createBlock: (body: BlockPayload) => send<{ block: AdminBlock }>('POST', '/admin/blocks', body),
-  updateBlock: (id: string, body: BlockPayload) => send<{ block: AdminBlock }>('PUT', `/admin/blocks/${id}`, body),
-  deleteBlock: (id: string) => send<void>('DELETE', `/admin/blocks/${id}`),
+  loadBlocks: () => adminFetch<{ blocks: AdminBlock[] }>('/studio/blocks'),
+  createBlock: (body: BlockPayload) => send<{ block: AdminBlock }>('POST', '/studio/blocks', body),
+  updateBlock: (id: string, body: BlockPayload) => send<{ block: AdminBlock }>('PUT', `/studio/blocks/${id}`, body),
+  deleteBlock: (id: string) => send<void>('DELETE', `/studio/blocks/${id}`),
 }
 
 // --- Times and dates -------------------------------------------------------------

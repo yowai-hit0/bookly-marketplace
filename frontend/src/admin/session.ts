@@ -1,57 +1,23 @@
-import { z } from 'zod'
+import { type Session, clearSession as clearAreaSession, readSession as readAreaSession, saveSession as saveAreaSession } from '@/auth/session'
 
 /**
- * Where the admin UI keeps its bearer token (plan.md Task 7, Assumptions).
- *
- * `sessionStorage`, so a reload does not sign him out while closing the tab
- * does. Never `localStorage`: a token that outlives the browser session is a
- * token that outlives the person who signed in. There is no server-side logout
- * -- signing out is this module forgetting the token.
+ * The studio's session (Phase 2 brief decision 10): the per-area store in
+ * `auth/session.ts`, bound to the studio, under `bookly.studio.session`. The
+ * studio pages and their modules were written against these three functions
+ * when the area was `/admin`, so they stay as the studio's names.
  */
 
-const STORAGE_KEY = 'bookly.admin.session'
+export type AdminSession = Session
 
-const sessionSchema = z.object({
-  token: z.string().min(1),
-  expiresAt: z.iso.datetime(),
-})
-
-export type AdminSession = z.infer<typeof sessionSchema>
-
-/** The stored session, or null if there is none, it is unreadable, or it has expired. */
+/** The stored studio session, or null if there is none, it is unreadable, or it has expired. */
 export function readSession(now: Date = new Date()): AdminSession | null {
-  let raw: string | null
-  try {
-    raw = sessionStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
-  }
-  if (raw === null) return null
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    clearSession()
-    return null
-  }
-
-  const result = sessionSchema.safeParse(parsed)
-  if (!result.success || Date.parse(result.data.expiresAt) <= now.getTime()) {
-    clearSession()
-    return null
-  }
-  return result.data
+  return readAreaSession('studio', now)
 }
 
 export function saveSession(session: AdminSession): void {
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+  saveAreaSession('studio', session)
 }
 
 export function clearSession(): void {
-  try {
-    sessionStorage.removeItem(STORAGE_KEY)
-  } catch {
-    // Storage unavailable: there is nothing stored to forget.
-  }
+  clearAreaSession('studio')
 }

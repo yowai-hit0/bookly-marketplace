@@ -122,7 +122,7 @@ export function AdminCatalogue() {
       .catch((error: unknown) => {
         if (cancelled) return
         if (error instanceof UnauthenticatedError) {
-          navigate('/admin/login', { replace: true })
+          navigate('/studio/login', { replace: true })
           return
         }
         setLoaded({ data: null })
@@ -158,7 +158,7 @@ export function AdminCatalogue() {
       reload()
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        navigate('/admin/login', { replace: true })
+        navigate('/studio/login', { replace: true })
         return
       }
       const inUse = error instanceof ApiError && error.message === 'in_use'

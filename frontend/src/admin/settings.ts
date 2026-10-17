@@ -29,9 +29,9 @@ export type AdminSettings = {
 export type SettingsPayload = AdminSettings
 
 export const settingsApi = {
-  load: () => adminFetch<{ settings: AdminSettings }>('/admin/settings'),
+  load: () => adminFetch<{ settings: AdminSettings }>('/studio/settings'),
   save: (body: SettingsPayload) =>
-    adminFetch<{ settings: AdminSettings }>('/admin/settings', {
+    adminFetch<{ settings: AdminSettings }>('/studio/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

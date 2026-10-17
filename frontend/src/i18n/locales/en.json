@@ -936,7 +936,9 @@
       "bookNow": "Book now",
       "adminLogin": "Admin login",
       "myBooking": "My booking",
-      "photographers": "Photographers"
+      "photographers": "Photographers",
+      "signIn": "Sign in",
+      "account": "Your account"
     },
     "footer": {
       "label": "Footer",
@@ -1066,6 +1068,173 @@
       "refundable": "The booking fee is refunded if you cancel.",
       "refundableUntil": "The booking fee is refunded if you cancel before {{date}}, {{time}}, Kigali time.",
       "nonRefundableUntil": "The booking fee is non-refundable if you cancel. You can cancel until {{date}}, {{time}}, Kigali time."
+    }
+  },
+  "auth": {
+    "eyebrow": {
+      "platform": "Platform",
+      "account": "Account"
+    },
+    "rateLimited": "Too many attempts from here. Wait a few minutes and try again.",
+    "backToSignIn": "Back to sign in",
+    "signIn": {
+      "platformTitle": "Platform sign in",
+      "accountTitle": "Sign in",
+      "accountIntro": "Sign in to keep your bookings in one place. You can still book without an account.",
+      "createStudio": "New photographer? Create your studio",
+      "createAccount": "New here? Create an account",
+      "or": "or",
+      "google": "Continue with Google",
+      "googleStarting": "Opening Google…",
+      "googleUnavailable": "Google sign-in is not available right now. Sign in with your email and password.",
+      "googleFailed": "Could not open Google sign-in. Check your connection and try again."
+    },
+    "signup": {
+      "studioTitle": "Create your studio",
+      "studioIntro": "Clients can find and book you once the Bookly team approves your profile. Until then you can sign in and set things up.",
+      "accountTitle": "Create an account",
+      "accountIntro": "Keep your bookings in one place. You can still book without an account.",
+      "email": "Email",
+      "password": "Password",
+      "passwordHint": "12 to 1024 characters. A short sentence you will remember beats a short scramble you will not.",
+      "displayName": "Display name",
+      "displayNameHint": "The name clients see on your profile, up to 80 characters.",
+      "fullName": "Full name",
+      "handle": "Handle",
+      "handlePreview": "Your profile address: {{path}}",
+      "handleRules": {
+        "label": "A handle needs",
+        "length": "3 to 30 characters",
+        "chars": "Only lowercase letters, numbers and hyphens",
+        "edges": "A letter or number at the start and the end"
+      },
+      "ruleMet": "Met:",
+      "ruleUnmet": "Not met yet:",
+      "studioSubmit": "Create studio",
+      "accountSubmit": "Create account",
+      "submitting": "Creating…",
+      "errors": {
+        "email": "Enter a valid email address.",
+        "password": "Use 12 to 1024 characters.",
+        "displayName": "Enter a name of up to 80 characters.",
+        "fullName": "Enter your name, up to 200 characters.",
+        "handle": "Use 3 to 30 lowercase letters, numbers and hyphens, with a letter or number at each end.",
+        "handleTaken": "That handle is unavailable. Try another.",
+        "invalid": "Some details were not accepted. Check the form and try again.",
+        "failed": "Could not create the account. Check your connection and try again."
+      },
+      "sentTitle": "Check your inbox",
+      "sentBody": "If an account needs it, we've sent an email with a link to confirm the address. The link works for 24 hours. Check the spam folder too.",
+      "resend": "Send the link again",
+      "resending": "Sending…",
+      "resent": "If an account needs it, we've sent an email with a new link.",
+      "resendFailed": "Could not send the link. Check your connection and try again.",
+      "haveAccount": "Already have an account? Sign in"
+    },
+    "verify": {
+      "title": "Confirm your email",
+      "intro": "Enter the password you chose when you signed up. It proves the account is yours.",
+      "password": "Password",
+      "submit": "Confirm and sign in",
+      "submitting": "Confirming…",
+      "invalid": "That did not work. The link may have expired or been used already, or the password is not the one chosen at sign-up.",
+      "failed": "Could not confirm the address. Check your connection and try again.",
+      "recoverTitle": "Still stuck?",
+      "forgot": "Forgot your password? Reset it",
+      "forgotHint": "Never chose this password? Resetting it confirms the address too.",
+      "sendNew": "Send a new link",
+      "resendIntro": "Enter the email you signed up with.",
+      "email": "Email",
+      "resendSubmit": "Send a new link",
+      "resending": "Sending…",
+      "resent": "If an account needs it, we've sent an email with a new link.",
+      "resendFailed": "Could not send the link. Check your connection and try again."
+    },
+    "google": {
+      "title": "Signing in with Google",
+      "working": "Finishing sign-in…",
+      "failedTitle": "Google sign-in did not finish",
+      "invalidState": "This sign-in has expired or did not start in this browser tab. Start again from the sign-in page.",
+      "cancelled": "Google sign-in was cancelled.",
+      "signInFailed": "Google sign-in did not work. Try again, or sign in with your email and password.",
+      "emailUnverified": "The email address on your Google account is not verified. Verify it with Google first, or sign up with your email.",
+      "conflict": "This email address cannot be used with Google sign-in here. Sign in with your email and password instead.",
+      "unavailable": "Google sign-in is not available right now. Sign in with your email and password.",
+      "failed": "Could not finish signing in. Check your connection and try again."
+    }
+  },
+  "studio": {
+    "banner": {
+      "pending": "Your profile is waiting for approval: clients can't find or book you yet.",
+      "suspended": "Your studio is suspended: clients can't find or book you. Bookings you already have carry on."
+    }
+  },
+  "platform": {
+    "skipToContent": "Skip to content",
+    "nav": {
+      "label": "Platform",
+      "photographers": "Photographers",
+      "signOut": "Sign out"
+    },
+    "photographers": {
+      "title": "Photographers",
+      "filter": {
+        "label": "Status",
+        "all": "All"
+      },
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "suspended": "Suspended"
+      },
+      "columns": {
+        "photographer": "Photographer",
+        "email": "Email",
+        "status": "Status",
+        "applied": "Applied",
+        "actions": "Actions"
+      },
+      "loading": "Loading photographers…",
+      "loadFailed": "Could not load the photographers. Check your connection and try again.",
+      "retry": "Try again",
+      "empty": "No photographers yet.",
+      "emptyFiltered": "No photographers with this status.",
+      "suspendedReason": "Reason: {{reason}}",
+      "approve": "Approve",
+      "suspend": "Suspend",
+      "reactivate": "Reactivate",
+      "confirm": {
+        "approveTitle": "Approve {{name}}?",
+        "approveBody": "Their profile is listed and clients can book them from now on. They get an email saying so.",
+        "suspendTitle": "Suspend {{name}}?",
+        "suspendBody": "Their profile is hidden and new bookings are refused. Bookings they already have carry on. They get an email with the reason.",
+        "reason": "Reason",
+        "reasonHint": "Sent to the photographer. Up to 500 characters.",
+        "reasonRequired": "Give a reason, up to 500 characters.",
+        "reactivateTitle": "Reactivate {{name}}?",
+        "reactivateBody": "Their profile goes back to approved, or to pending if it was never approved. No email is sent.",
+        "cancel": "Cancel",
+        "working": "Saving…"
+      },
+      "done": {
+        "approved": "{{name}} is approved.",
+        "suspended": "{{name}} is suspended.",
+        "reactivated": "{{name}} is reactivated."
+      },
+      "stale": "That change no longer applies: {{name}} is now {{status}}.",
+      "notFound": "That photographer no longer exists.",
+      "failed": "Could not save the change. Check your connection and try again."
+    }
+  },
+  "account": {
+    "home": {
+      "greeting": "Hello, {{name}}",
+      "greetingNoName": "Hello",
+      "email": "Email",
+      "signOut": "Sign out",
+      "loading": "Loading your account…",
+      "loadFailed": "Could not load your account. Check your connection and try again.",
+      "retry": "Try again"
     }
   }
 }

@@ -63,7 +63,7 @@ export function BlockForm({ title, submitLabel, values, onSave, onCancel }: Prop
       await onSave(payload)
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        navigate('/admin/login', { replace: true })
+        navigate('/studio/login', { replace: true })
         return
       }
       const bookings = overlappingBookingsOf(error)

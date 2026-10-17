@@ -98,7 +98,7 @@ export function AdminBookings() {
       .catch((error: unknown) => {
         if (cancelled) return
         if (error instanceof UnauthenticatedError) {
-          void navigate('/admin/login', { replace: true })
+          void navigate('/studio/login', { replace: true })
           return
         }
         setFailed(true)
@@ -289,7 +289,7 @@ export function AdminBookings() {
                 >
                   <td role="cell" className={cn(TD, TIGHT, CELL, '@max-[56rem]:pl-0 @min-[56rem]:whitespace-nowrap')}>
                     <Link
-                      to={`/admin/bookings/${booking.id}`}
+                      to={`/studio/bookings/${booking.id}`}
                       className="absolute inset-0 z-10 rounded-xs focus-visible:-outline-offset-2!"
                     >
                       {/* The reference names the link; it is no longer a column. */}

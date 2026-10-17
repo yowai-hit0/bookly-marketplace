@@ -112,11 +112,11 @@ export function AdminCalendar() {
     async ({ startStr, endStr }: EventSourceFuncArg) => {
       const { from, to } = kigaliRangeOf(startStr, endStr)
       try {
-        const data = await adminFetch<CalendarData>(`/admin/calendar?from=${from}&to=${to}`)
+        const data = await adminFetch<CalendarData>(`/studio/calendar?from=${from}&to=${to}`)
         setFailed(false)
         return toEventInputs(data)
       } catch (error) {
-        if (error instanceof UnauthenticatedError) navigate('/admin/login', { replace: true })
+        if (error instanceof UnauthenticatedError) navigate('/studio/login', { replace: true })
         else setFailed(true)
         throw error
       }
@@ -157,7 +157,7 @@ export function AdminCalendar() {
     (arg: EventClickArg) => {
       arg.jsEvent.preventDefault()
       const entry = arg.event.extendedProps.entry as CalendarEntry
-      navigate(entry.kind === 'booking' ? `/admin/bookings/${entry.booking.id}` : '/admin/availability')
+      navigate(entry.kind === 'booking' ? `/studio/bookings/${entry.booking.id}` : '/studio/availability')
     },
     [navigate],
   )

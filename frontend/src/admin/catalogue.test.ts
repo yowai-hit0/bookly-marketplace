@@ -408,16 +408,16 @@ describe('catalogueApi', () => {
   const addon = { nameEn: 'Rush edit', priceRwf: 5_000, sortOrder: 0, isActive: true }
 
   it.each<Call>([
-    ['load', () => catalogueApi.load(), 'GET', '/api/admin/catalogue', undefined],
-    ['createService', () => catalogueApi.createService(service), 'POST', '/api/admin/services', service],
-    ['updateService', () => catalogueApi.updateService('s1', { isActive: false }), 'PATCH', '/api/admin/services/s1', { isActive: false }],
-    ['deleteService', () => catalogueApi.deleteService('s1'), 'DELETE', '/api/admin/services/s1', undefined],
-    ['createPackage', () => catalogueApi.createPackage({ ...pkg, serviceId: 's1' }), 'POST', '/api/admin/packages', { ...pkg, serviceId: 's1' }],
-    ['updatePackage', () => catalogueApi.updatePackage('p1', { priceRwf: 1 }), 'PATCH', '/api/admin/packages/p1', { priceRwf: 1 }],
-    ['deletePackage', () => catalogueApi.deletePackage('p1'), 'DELETE', '/api/admin/packages/p1', undefined],
-    ['createAddon', () => catalogueApi.createAddon({ ...addon, serviceId: null }), 'POST', '/api/admin/addons', { ...addon, serviceId: null }],
-    ['updateAddon', () => catalogueApi.updateAddon('a1', { sortOrder: 2 }), 'PATCH', '/api/admin/addons/a1', { sortOrder: 2 }],
-    ['deleteAddon', () => catalogueApi.deleteAddon('a1'), 'DELETE', '/api/admin/addons/a1', undefined],
+    ['load', () => catalogueApi.load(), 'GET', '/api/studio/catalogue', undefined],
+    ['createService', () => catalogueApi.createService(service), 'POST', '/api/studio/services', service],
+    ['updateService', () => catalogueApi.updateService('s1', { isActive: false }), 'PATCH', '/api/studio/services/s1', { isActive: false }],
+    ['deleteService', () => catalogueApi.deleteService('s1'), 'DELETE', '/api/studio/services/s1', undefined],
+    ['createPackage', () => catalogueApi.createPackage({ ...pkg, serviceId: 's1' }), 'POST', '/api/studio/packages', { ...pkg, serviceId: 's1' }],
+    ['updatePackage', () => catalogueApi.updatePackage('p1', { priceRwf: 1 }), 'PATCH', '/api/studio/packages/p1', { priceRwf: 1 }],
+    ['deletePackage', () => catalogueApi.deletePackage('p1'), 'DELETE', '/api/studio/packages/p1', undefined],
+    ['createAddon', () => catalogueApi.createAddon({ ...addon, serviceId: null }), 'POST', '/api/studio/addons', { ...addon, serviceId: null }],
+    ['updateAddon', () => catalogueApi.updateAddon('a1', { sortOrder: 2 }), 'PATCH', '/api/studio/addons/a1', { sortOrder: 2 }],
+    ['deleteAddon', () => catalogueApi.deleteAddon('a1'), 'DELETE', '/api/studio/addons/a1', undefined],
   ])('%s sends the right method, path and JSON body', async (_label, run, method, url, body) => {
     const fetchMock = vi.fn(async (..._args: [string, RequestInit?]) =>
       method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json({ ok: true }),

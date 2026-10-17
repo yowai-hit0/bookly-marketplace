@@ -20,7 +20,7 @@ import { routes } from '@/routes'
 
 const NOW = new Date('2026-10-07T08:00:00.000Z')
 const TOKEN = 'header.payload.signature'
-const CATALOGUE_API = '/api/admin/catalogue'
+const CATALOGUE_API = '/api/studio/catalogue'
 
 // --- Fixtures ---------------------------------------------------------------
 
@@ -139,9 +139,9 @@ function stubApi(routes: Record<string, Route> = {}, catalogue: CatalogueData = 
     const route = routes[`${sent.method} ${sent.url}`]
     if (route !== undefined) return route(sent)
     if (sent.method === 'GET' && sent.url === CATALOGUE_API) return json(api.catalogue)
-    if (sent.method === 'GET' && sent.url.startsWith('/api/admin/calendar')) return json({ bookings: [], blocks: [] })
+    if (sent.method === 'GET' && sent.url.startsWith('/api/studio/calendar')) return json({ bookings: [], blocks: [] })
     if (sent.method === 'DELETE') return new Response(null, { status: 204 })
-    if (sent.url.startsWith('/api/admin/packages')) {
+    if (sent.url.startsWith('/api/studio/packages')) {
       return json({ package: { ...STANDARD, id: sent.url.split('/')[4] ?? 'p-new' }, warning: null })
     }
     return json({})
@@ -165,7 +165,7 @@ function signIn() {
   saveSession({ token: TOKEN, expiresAt: '2026-10-07T16:00:00.000Z' })
 }
 
-function renderAt(path = '/admin/catalogue') {
+function renderAt(path = '/studio/catalogue') {
   const router = createMemoryRouter(routes, { initialEntries: [path] })
   render(<RouterProvider router={router} />)
   return router
@@ -398,7 +398,7 @@ describe('services', () => {
     await u.click(within(newService).getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(catalogueLoads(api)).toBe(2))
-    expect(writes(api)).toEqual([{ method: 'POST', url: '/api/admin/services', body: payload }])
+    expect(writes(api)).toEqual([{ method: 'POST', url: '/api/studio/services', body: payload }])
     expect(screen.queryByRole('form')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add service' })).toBeInTheDocument()
   })
@@ -425,7 +425,7 @@ describe('services', () => {
     expect(writes(api)).toEqual([
       {
         method: 'PATCH',
-        url: '/api/admin/services/s2',
+        url: '/api/studio/services/s2',
         body: {
           nameEn: 'Events',
           slug: 'corporate-events',
@@ -486,12 +486,12 @@ describe('services', () => {
 
 describe('activate and deactivate', () => {
   it.each<[string, string, unknown]>([
-    ['Deactivate Portraits', '/api/admin/services/s1', { isActive: false }],
-    ['Activate Corporate events', '/api/admin/services/s2', { isActive: true }],
-    ['Deactivate Standard', '/api/admin/packages/p1', { isActive: false }],
-    ['Activate Retired', '/api/admin/packages/p2', { isActive: true }],
-    ['Deactivate Extra hour', '/api/admin/addons/a1', { isActive: false }],
-    ['Activate Rush edit', '/api/admin/addons/a2', { isActive: true }],
+    ['Deactivate Portraits', '/api/studio/services/s1', { isActive: false }],
+    ['Activate Corporate events', '/api/studio/services/s2', { isActive: true }],
+    ['Deactivate Standard', '/api/studio/packages/p1', { isActive: false }],
+    ['Activate Retired', '/api/studio/packages/p2', { isActive: true }],
+    ['Deactivate Extra hour', '/api/studio/addons/a1', { isActive: false }],
+    ['Activate Rush edit', '/api/studio/addons/a2', { isActive: true }],
   ])('%s PATCHes that one field, then refetches', async (button, url, body) => {
     signIn()
     const api = stubApi()
@@ -507,7 +507,7 @@ describe('activate and deactivate', () => {
   it('shows the action error when a toggle fails, and clears it on the next success', async () => {
     signIn()
     let calls = 0
-    stubApi({ 'PATCH /api/admin/services/s1': () => (++calls === 1 ? json({ error: 'internal_error' }, 500) : json({})) })
+    stubApi({ 'PATCH /api/studio/services/s1': () => (++calls === 1 ? json({ error: 'internal_error' }, 500) : json({})) })
     await renderLoaded()
     const u = user()
 
@@ -539,7 +539,7 @@ describe('packages', () => {
     expect(writes(api)).toEqual([
       {
         method: 'POST',
-        url: '/api/admin/packages',
+        url: '/api/studio/packages',
         body: {
           nameEn: 'Half day',
           descriptionEn: null,
@@ -571,7 +571,7 @@ describe('packages', () => {
     expect(writes(api)).toEqual([
       {
         method: 'PATCH',
-        url: '/api/admin/packages/p1',
+        url: '/api/studio/packages/p1',
         body: {
           nameEn: 'Standard',
           descriptionEn: 'One look, one location.',
@@ -607,7 +607,7 @@ describe('add-ons', () => {
     expect(writes(api)).toEqual([
       {
         method: 'POST',
-        url: '/api/admin/addons',
+        url: '/api/studio/addons',
         body: { nameEn: 'Printed album', priceRwf: 25_000, sortOrder: 1, isActive: true, serviceId },
       },
     ])
@@ -626,7 +626,7 @@ describe('add-ons', () => {
 
     await waitFor(() => expect(catalogueLoads(api)).toBe(2))
     expect(writes(api)).toEqual([
-      { method: 'PATCH', url: '/api/admin/addons/a2', body: { nameEn: 'Rush edit', priceRwf: 5_000, sortOrder: 3, isActive: true } },
+      { method: 'PATCH', url: '/api/studio/addons/a2', body: { nameEn: 'Rush edit', priceRwf: 5_000, sortOrder: 3, isActive: true } },
     ])
   })
 })
@@ -635,10 +635,10 @@ describe('add-ons', () => {
 
 describe('delete', () => {
   it.each<[string, string, string]>([
-    ['Portraits', '/api/admin/services/s1', 'Delete Portraits? This cannot be undone.'],
-    ['Standard', '/api/admin/packages/p1', 'Delete Standard? This cannot be undone.'],
-    ['Extra hour', '/api/admin/addons/a1', 'Delete Extra hour? This cannot be undone.'],
-    ['Rush edit', '/api/admin/addons/a2', 'Delete Rush edit? This cannot be undone.'],
+    ['Portraits', '/api/studio/services/s1', 'Delete Portraits? This cannot be undone.'],
+    ['Standard', '/api/studio/packages/p1', 'Delete Standard? This cannot be undone.'],
+    ['Extra hour', '/api/studio/addons/a1', 'Delete Extra hour? This cannot be undone.'],
+    ['Rush edit', '/api/studio/addons/a2', 'Delete Rush edit? This cannot be undone.'],
   ])('deletes %s after confirming, then refetches', async (name, url, question) => {
     signIn()
     const api = stubApi()
@@ -668,7 +668,7 @@ describe('delete', () => {
 
   it('explains a 409 in_use and suggests deactivating, keeping the row', async () => {
     signIn()
-    const api = stubApi({ 'DELETE /api/admin/packages/p1': () => json({ error: 'in_use' }, 409) })
+    const api = stubApi({ 'DELETE /api/studio/packages/p1': () => json({ error: 'in_use' }, 409) })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     await renderLoaded()
 
@@ -683,7 +683,7 @@ describe('delete', () => {
 
   it('shows the generic action error for any other failure', async () => {
     signIn()
-    stubApi({ 'DELETE /api/admin/addons/a1': () => Promise.reject(new TypeError('Failed to fetch')) })
+    stubApi({ 'DELETE /api/studio/addons/a1': () => Promise.reject(new TypeError('Failed to fetch')) })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     await renderLoaded()
 
@@ -764,7 +764,7 @@ describe('form validation', () => {
   it('marks the fields a 422 names, the fee rate on its percentage input, and keeps the form open', async () => {
     signIn()
     const api = stubApi({
-      'POST /api/admin/services': () => json({ error: 'validation_failed', fields: ['bookingFeeRateOverride', 'coverImageUrl'] }, 422),
+      'POST /api/studio/services': () => json({ error: 'validation_failed', fields: ['bookingFeeRateOverride', 'coverImageUrl'] }, 422),
     })
     await renderLoaded()
     const u = user()
@@ -787,7 +787,7 @@ describe('form validation', () => {
 
   it('marks the slug when another service has it', async () => {
     signIn()
-    stubApi({ 'PATCH /api/admin/services/s2': () => json({ error: 'slug_taken' }, 409) })
+    stubApi({ 'PATCH /api/studio/services/s2': () => json({ error: 'slug_taken' }, 409) })
     await renderLoaded()
     const u = user()
 
@@ -803,10 +803,10 @@ describe('form validation', () => {
   })
 
   it.each<[string, string, Route]>([
-    ['a 422 naming a field the form does not have', 'POST /api/admin/packages', () => json({ error: 'validation_failed', fields: ['serviceId'] }, 422)],
-    ['a 500', 'POST /api/admin/packages', () => json({ error: 'internal_error' }, 500)],
-    ['a 409 that is not a taken slug', 'POST /api/admin/packages', () => json({ error: 'in_use' }, 409)],
-    ['a network failure', 'POST /api/admin/packages', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['a 422 naming a field the form does not have', 'POST /api/studio/packages', () => json({ error: 'validation_failed', fields: ['serviceId'] }, 422)],
+    ['a 500', 'POST /api/studio/packages', () => json({ error: 'internal_error' }, 500)],
+    ['a 409 that is not a taken slug', 'POST /api/studio/packages', () => json({ error: 'in_use' }, 409)],
+    ['a network failure', 'POST /api/studio/packages', () => Promise.reject(new TypeError('Failed to fetch'))],
   ])('shows a form-level alert for %s, marking no field', async (_label, key, route) => {
     signIn()
     stubApi({ [key]: route })
@@ -825,7 +825,7 @@ describe('form validation', () => {
   it('shows Saving… and disables the button while the save is in flight', async () => {
     signIn()
     let answer: (res: Response) => void = () => {}
-    stubApi({ 'POST /api/admin/addons': () => new Promise<Response>((resolve) => (answer = resolve)) })
+    stubApi({ 'POST /api/studio/addons': () => new Promise<Response>((resolve) => (answer = resolve)) })
     await renderLoaded()
     const u = user()
 
@@ -862,11 +862,11 @@ describe('the duration warning (spec §6.8)', () => {
   ])('appears under the package saved past %s, and goes once a save fits', async (_label, warning, text) => {
     signIn()
     const api = stubApi({
-      'POST /api/admin/packages': () => {
+      'POST /api/studio/packages': () => {
         api.catalogue = WITH_FULL_DAY
         return json({ package: FULL_DAY, warning }, 201)
       },
-      'PATCH /api/admin/packages/p9': () => {
+      'PATCH /api/studio/packages/p9': () => {
         api.catalogue = { ...CATALOGUE, services: [{ ...PORTRAITS, packages: [STANDARD, RETIRED, { ...FULL_DAY, durationMinutes: 480 }] }, EVENTS] }
         return json({ package: { ...FULL_DAY, durationMinutes: 480 }, warning: null })
       },
@@ -934,21 +934,21 @@ describe('loading and auth', () => {
     const router = renderAt()
 
     expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
     expect(readSession()).toBeNull()
   })
 
   it.each<[string, string, (u: ReturnType<typeof user>) => Promise<void>]>([
     [
       'a save',
-      'PATCH /api/admin/services/s1',
+      'PATCH /api/studio/services/s1',
       async (u) => {
         await u.click(screen.getByRole('button', { name: 'Edit Portraits' }))
         await u.click(within(form('Edit service')).getByRole('button', { name: 'Save' }))
       },
     ],
-    ['a toggle', 'PATCH /api/admin/services/s1', (u) => u.click(screen.getByRole('button', { name: 'Deactivate Portraits' }))],
-    ['a delete', 'DELETE /api/admin/services/s1', (u) => u.click(screen.getByRole('button', { name: 'Delete Portraits' }))],
+    ['a toggle', 'PATCH /api/studio/services/s1', (u) => u.click(screen.getByRole('button', { name: 'Deactivate Portraits' }))],
+    ['a delete', 'DELETE /api/studio/services/s1', (u) => u.click(screen.getByRole('button', { name: 'Delete Portraits' }))],
   ])('on a 401 from %s sends him to sign in', async (_label, key, act) => {
     signIn()
     stubApi({ [key]: () => json({ error: 'unauthenticated' }, 401) })
@@ -958,7 +958,7 @@ describe('loading and auth', () => {
     await act(user())
 
     expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
     expect(readSession()).toBeNull()
   })
 
@@ -967,7 +967,7 @@ describe('loading and auth', () => {
     const router = renderAt()
 
     expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/admin/login')
+    expect(router.state.location.pathname).toBe('/studio/login')
     expect(api.sent).toEqual([])
   })
 })
@@ -989,12 +989,12 @@ describe('the admin navigation', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Calendar' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { level: 2, name: 'October 2026' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/admin/calendar')
+    expect(router.state.location.pathname).toBe('/studio/calendar')
     expect(within(nav).getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page')
 
     await u.click(within(nav).getByRole('link', { name: 'Catalogue' }))
 
     expect(await screen.findByRole('heading', { level: 2, name: 'Portraits Active' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/admin/catalogue')
+    expect(router.state.location.pathname).toBe('/studio/catalogue')
   })
 })

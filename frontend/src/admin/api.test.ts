@@ -53,7 +53,7 @@ afterEach(() => {
 
 describe('apiUrl', () => {
   it('prefixes the configured base, /api by default', () => {
-    expect(apiUrl('/admin/calendar?from=2026-10-01&to=2026-10-31')).toBe('/api/admin/calendar?from=2026-10-01&to=2026-10-31')
+    expect(apiUrl('/studio/calendar?from=2026-10-01&to=2026-10-31')).toBe('/api/studio/calendar?from=2026-10-01&to=2026-10-31')
   })
 })
 
@@ -62,11 +62,11 @@ describe('adminFetch', () => {
     saveSession(SESSION)
     const mock = stubFetch(() => json({ bookings: [], blocks: [] }))
 
-    const body = await adminFetch<{ bookings: unknown[] }>('/admin/calendar?from=2026-10-07&to=2026-10-07')
+    const body = await adminFetch<{ bookings: unknown[] }>('/studio/calendar?from=2026-10-07&to=2026-10-07')
 
     expect(body).toEqual({ bookings: [], blocks: [] })
     const { url, headers } = sentRequest(mock)
-    expect(url).toBe('/api/admin/calendar?from=2026-10-07&to=2026-10-07')
+    expect(url).toBe('/api/studio/calendar?from=2026-10-07&to=2026-10-07')
     expect(headers.get('Authorization')).toBe(`Bearer ${SESSION.token}`)
     expect(headers.get('Accept')).toBe('application/json')
     expect(url).not.toContain(SESSION.token)
@@ -77,7 +77,7 @@ describe('adminFetch', () => {
     const mock = stubFetch(() => json({ ok: true }))
     const controller = new AbortController()
 
-    await adminFetch('/admin/blocks', {
+    await adminFetch('/studio/blocks', {
       method: 'POST',
       body: '{"isAllDay":true}',
       signal: controller.signal,
@@ -97,7 +97,7 @@ describe('adminFetch', () => {
     arrange()
     const mock = stubFetch(() => json({}))
 
-    const error = await rejectionOf(adminFetch('/admin/calendar'))
+    const error = await rejectionOf(adminFetch('/studio/calendar'))
 
     expect(error).toBeInstanceOf(UnauthenticatedError)
     expect(mock).not.toHaveBeenCalled()
@@ -107,7 +107,7 @@ describe('adminFetch', () => {
     saveSession(SESSION)
     stubFetch(() => json({ error: 'unauthenticated' }, 401))
 
-    const error = await rejectionOf(adminFetch('/admin/calendar'))
+    const error = await rejectionOf(adminFetch('/studio/calendar'))
 
     expect(error).toBeInstanceOf(UnauthenticatedError)
     expect(error).toBeInstanceOf(ApiError)
@@ -125,7 +125,7 @@ describe('adminFetch', () => {
     saveSession(SESSION)
     stubFetch(respond)
 
-    const error = await rejectionOf(adminFetch('/admin/calendar'))
+    const error = await rejectionOf(adminFetch('/studio/calendar'))
 
     expect(error).toBeInstanceOf(ApiError)
     expect(error).not.toBeInstanceOf(UnauthenticatedError)
@@ -137,7 +137,7 @@ describe('adminFetch', () => {
     saveSession(SESSION)
     stubFetch(() => new Response(null, { status: 204 }))
 
-    await expect(adminFetch('/admin/services/s1', { method: 'DELETE' })).resolves.toBeUndefined()
+    await expect(adminFetch('/studio/services/s1', { method: 'DELETE' })).resolves.toBeUndefined()
   })
 
   it.each<[string, () => Response, string[]]>([
@@ -150,7 +150,7 @@ describe('adminFetch', () => {
     saveSession(SESSION)
     stubFetch(respond)
 
-    const error = await rejectionOf(adminFetch('/admin/services', { method: 'POST' }))
+    const error = await rejectionOf(adminFetch('/studio/services', { method: 'POST' }))
 
     expect(error).toBeInstanceOf(ApiError)
     expect((error as ApiError).fields).toEqual(fields)
@@ -160,7 +160,7 @@ describe('adminFetch', () => {
     saveSession(SESSION)
     stubFetch(() => json({ error: 'unauthenticated', fields: ['token'] }, 401))
 
-    const error = await rejectionOf(adminFetch('/admin/catalogue'))
+    const error = await rejectionOf(adminFetch('/studio/catalogue'))
 
     expect(error).toBeInstanceOf(UnauthenticatedError)
     expect((error as ApiError).fields).toEqual([])
@@ -171,7 +171,7 @@ describe('adminFetch', () => {
     const failure = new TypeError('Failed to fetch')
     stubFetch(() => Promise.reject(failure))
 
-    await expect(adminFetch('/admin/calendar')).rejects.toBe(failure)
+    await expect(adminFetch('/studio/calendar')).rejects.toBe(failure)
     expect(readSession()).toEqual(SESSION)
   })
 })

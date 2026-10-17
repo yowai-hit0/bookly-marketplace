@@ -6,6 +6,7 @@ import '@/i18n'
 import type { BookingListRow } from '@/admin/bookings'
 import { readSession, saveSession } from '@/admin/session'
 import { routes } from '@/routes'
+import { isStudioMe, studioMe } from '@/test/studio-me'
 
 /**
  * The bookings list (plan.md Task 19; spec §3.6), rendered through the real
@@ -24,7 +25,7 @@ import { routes } from '@/routes'
  */
 
 const SESSION = { token: 'header.payload.signature', expiresAt: '2999-01-01T00:00:00.000Z' }
-const BOOKINGS_API = '/api/admin/bookings'
+const BOOKINGS_API = '/api/studio/bookings'
 
 const CONFIRMED: BookingListRow = {
   id: 'b1',
@@ -88,7 +89,8 @@ function json(body: unknown, status = 200): Response {
 
 function stubFetch(handler: Handler = () => json(PAGE)) {
   const mock = vi.fn((input: string | URL | Request, _init?: RequestInit) =>
-    Promise.resolve().then(() => handler(String(input))),
+    // The layout's banner request is answered here, so `handler` sees only the page's own.
+    Promise.resolve().then(() => (isStudioMe(input) ? studioMe() : handler(String(input)))),
   )
   vi.stubGlobal('fetch', mock)
   return mock
@@ -102,7 +104,7 @@ function signIn() {
   saveSession(SESSION)
 }
 
-function renderAt(path = '/admin/bookings') {
+function renderAt(path = '/studio/bookings') {
   const router = createMemoryRouter(routes, { initialEntries: [path] })
   render(<RouterProvider router={router} />)
   return router
@@ -160,8 +162,8 @@ describe('the list', () => {
     expect(second).toHaveTextContent('Tuesday, 5 January 2027')
     expect(second).toHaveTextContent('14:00 – 15:30')
     expect(third).toHaveTextContent('Monday, 4 January 2027')
-    expect(screen.getByRole('link', { name: 'BKY-2701-00042' })).toHaveAttribute('href', '/admin/bookings/b1')
-    expect(screen.getByRole('link', { name: 'BKY-2701-00043' })).toHaveAttribute('href', '/admin/bookings/b2')
+    expect(screen.getByRole('link', { name: 'BKY-2701-00042' })).toHaveAttribute('href', '/studio/bookings/b1')
+    expect(screen.getByRole('link', { name: 'BKY-2701-00043' })).toHaveAttribute('href', '/studio/bookings/b2')
     // One real link per row, stretched over it; the reference is not a column any more.
     for (const row of [first, second, third]) expect(within(row as HTMLElement).getAllByRole('link')).toHaveLength(1)
     expect(screen.queryByRole('columnheader', { name: 'Reference' })).not.toBeInTheDocument()
@@ -293,7 +295,7 @@ describe('filtering', () => {
 
   it('toggles a stage back off', async () => {
     const mock = stubFetch()
-    const router = renderAt('/admin/bookings?stage=confirmed')
+    const router = renderAt('/studio/bookings?stage=confirmed')
     await rows()
     await openStatusFilter()
     expect(stageBox('Confirmed')).toBeChecked()
@@ -307,7 +309,7 @@ describe('filtering', () => {
 
   it('keeps several stages at once, repeated in the query', async () => {
     const mock = stubFetch()
-    const router = renderAt('/admin/bookings?stage=confirmed')
+    const router = renderAt('/studio/bookings?stage=confirmed')
     await rows()
 
     await openStatusFilter()
@@ -320,7 +322,7 @@ describe('filtering', () => {
 
   it('opens a link made before stages on the stages its statuses now span', async () => {
     const mock = stubFetch()
-    renderAt('/admin/bookings?status=confirmed&status=completed')
+    renderAt('/studio/bookings?status=confirmed&status=completed')
     await rows()
 
     expect(listCalls(mock)).toEqual([`${BOOKINGS_API}?stage=confirmed&stage=in_progress&stage=needs_review&stage=completed&stage=closed`])
@@ -333,7 +335,7 @@ describe('filtering', () => {
 
   it('reads the whole filter out of the URL on first render', async () => {
     const mock = stubFetch()
-    renderAt('/admin/bookings?stage=confirmed&stage=completed&from=2027-01-01&to=2027-01-31&search=Uwase')
+    renderAt('/studio/bookings?stage=confirmed&stage=completed&from=2027-01-01&to=2027-01-31&search=Uwase')
     await rows()
 
     expect(listCalls(mock)).toEqual([
@@ -347,7 +349,7 @@ describe('filtering', () => {
 
   it('ignores a status in the URL that is not one of ours', async () => {
     const mock = stubFetch()
-    renderAt('/admin/bookings?status=declined')
+    renderAt('/studio/bookings?status=declined')
     await rows()
 
     expect(listCalls(mock)).toEqual([BOOKINGS_API])
@@ -367,7 +369,7 @@ describe('filtering', () => {
 
   it('writes a to date beside it, keeping the from date', async () => {
     const mock = stubFetch()
-    const router = renderAt('/admin/bookings?from=2027-01-01')
+    const router = renderAt('/studio/bookings?from=2027-01-01')
     await rows()
 
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '2027-01-31' } })
@@ -378,7 +380,7 @@ describe('filtering', () => {
 
   it('searches on submit, trimming what was typed, and keeps the stage filter', async () => {
     const mock = stubFetch()
-    const router = renderAt('/admin/bookings?stage=confirmed')
+    const router = renderAt('/studio/bookings?stage=confirmed')
     await rows()
 
     await user().type(screen.getByLabelText('Search'), '  Uwase  ')
@@ -391,7 +393,7 @@ describe('filtering', () => {
 
   it('clears every filter at once', async () => {
     const mock = stubFetch()
-    const router = renderAt('/admin/bookings?stage=confirmed&from=2027-01-01&search=Uwase')
+    const router = renderAt('/studio/bookings?stage=confirmed&from=2027-01-01&search=Uwase')
     await rows()
 
     await user().click(screen.getByRole('button', { name: 'Clear filters' }))
@@ -457,7 +459,7 @@ describe('numbered pages', () => {
 
   it('moves by arrow, and keeps the filter while it pages', async () => {
     const mock = paged()
-    const router = renderAt('/admin/bookings?stage=confirmed&search=Uwase')
+    const router = renderAt('/studio/bookings?stage=confirmed&search=Uwase')
     await rows()
 
     await user().click(within(pager()).getByRole('button', { name: 'Next page' }))
@@ -468,7 +470,7 @@ describe('numbered pages', () => {
 
   it('goes back to page 1 when the filter changes', async () => {
     const mock = paged()
-    const router = renderAt('/admin/bookings?page=3')
+    const router = renderAt('/studio/bookings?page=3')
     await rows()
 
     await openStatusFilter()
@@ -483,7 +485,7 @@ describe('numbered pages', () => {
       const asked = Number(new URL(url, 'http://x').searchParams.get('page') ?? '1')
       return json({ bookings: [CONFIRMED], total: 26, page: Math.min(asked, 2), pageSize: 25, pageCount: 2 })
     })
-    const router = renderAt('/admin/bookings?page=9')
+    const router = renderAt('/studio/bookings?page=9')
 
     await waitFor(() => expect(router.state.location.search).toBe('?page=2'))
     expect(await screen.findByRole('navigation', { name: 'Pages' })).toHaveTextContent('Showing 26–26 of 26')

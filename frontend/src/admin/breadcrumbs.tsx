@@ -29,7 +29,7 @@ export function Breadcrumbs({ pathname, tail, className }: { pathname: string; t
   const crumbs: Crumb[] = [
     {
       key: 'admin',
-      to: '/admin',
+      to: '/studio',
       // Icon-only below `sm`, so it needs its own width to be a 44px target.
       className: 'max-sm:min-w-11 max-sm:justify-center',
       content: (
@@ -45,7 +45,7 @@ export function Breadcrumbs({ pathname, tail, className }: { pathname: string; t
     const Icon = section.icon
     crumbs.push({
       key: section.page,
-      to: `/admin/${section.page}`,
+      to: `/studio/${section.page}`,
       content: (
         <>
           <Icon aria-hidden="true" className="size-4 shrink-0" />

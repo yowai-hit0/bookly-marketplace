@@ -79,23 +79,23 @@ function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unkno
 }
 
 export const catalogueApi = {
-  load: () => adminFetch<CatalogueData>('/admin/catalogue'),
+  load: () => adminFetch<CatalogueData>('/studio/catalogue'),
 
-  createService: (body: ServicePayload) => send<{ service: AdminService }>('POST', '/admin/services', body),
+  createService: (body: ServicePayload) => send<{ service: AdminService }>('POST', '/studio/services', body),
   updateService: (id: string, body: Partial<ServicePayload>) =>
-    send<{ service: AdminService }>('PATCH', `/admin/services/${id}`, body),
-  deleteService: (id: string) => send<void>('DELETE', `/admin/services/${id}`),
+    send<{ service: AdminService }>('PATCH', `/studio/services/${id}`, body),
+  deleteService: (id: string) => send<void>('DELETE', `/studio/services/${id}`),
 
-  createPackage: (body: PackagePayload & { serviceId: string }) => send<PackageSaved>('POST', '/admin/packages', body),
+  createPackage: (body: PackagePayload & { serviceId: string }) => send<PackageSaved>('POST', '/studio/packages', body),
   updatePackage: (id: string, body: Partial<PackagePayload>) =>
-    send<PackageSaved>('PATCH', `/admin/packages/${id}`, body),
-  deletePackage: (id: string) => send<void>('DELETE', `/admin/packages/${id}`),
+    send<PackageSaved>('PATCH', `/studio/packages/${id}`, body),
+  deletePackage: (id: string) => send<void>('DELETE', `/studio/packages/${id}`),
 
   createAddon: (body: AddonPayload & { serviceId: string | null }) =>
-    send<{ addon: AdminAddon }>('POST', '/admin/addons', body),
+    send<{ addon: AdminAddon }>('POST', '/studio/addons', body),
   updateAddon: (id: string, body: Partial<AddonPayload>) =>
-    send<{ addon: AdminAddon }>('PATCH', `/admin/addons/${id}`, body),
-  deleteAddon: (id: string) => send<void>('DELETE', `/admin/addons/${id}`),
+    send<{ addon: AdminAddon }>('PATCH', `/studio/addons/${id}`, body),
+  deleteAddon: (id: string) => send<void>('DELETE', `/studio/addons/${id}`),
 }
 
 // --- Form schemas ----------------------------------------------------------------

@@ -1,7 +1,11 @@
-import { render, screen, within } from '@testing-library/react'
-import { RouterProvider, createMemoryRouter } from 'react-router'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { RouterProvider, createMemoryRouter, useLocation } from 'react-router'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
+import { readSession, saveSession } from '@/auth/session'
+import { json, stubApi } from '@/test/fetch'
+import { type StudioStatus, studioMeBody } from '@/test/studio-me'
 import { AdminLayout } from './AdminLayout'
 
 /**
@@ -14,33 +18,51 @@ import { AdminLayout } from './AdminLayout'
  * their accessible names, which `e2e/admin-catalogue.spec.ts` navigates by.
  */
 
-const SESSION_KEY = 'bookly.admin.session'
+const SESSION_KEY = 'bookly.studio.session'
 const SESSION = JSON.stringify({ token: 'test.token.signature', expiresAt: '2099-01-01T00:00:00.000Z' })
 
-function renderShell(path = '/admin/availability') {
+function renderShell(path = '/studio/availability') {
   const router = createMemoryRouter(
     [
       {
-        path: '/admin',
+        path: '/studio',
         element: <AdminLayout />,
         children: [
           { path: 'availability', element: <main><h1>Availability</h1></main> },
           { path: 'bookings', element: <main><h1>Bookings</h1></main> },
         ],
       },
-      { path: '/admin/login', element: <main><h1>Admin sign in</h1></main> },
+      { path: '/studio/login', element: <LoginProbe /> },
     ],
     { initialEntries: [path] },
   )
-  return render(<RouterProvider router={router} />)
+  render(<RouterProvider router={router} />)
+  return router
+}
+
+function LoginProbe() {
+  const { search } = useLocation()
+  return (
+    <main>
+      <h1>Admin sign in</h1>
+      <p>{search}</p>
+    </main>
+  )
+}
+
+/** `/api/studio/me` answers `status`; nothing else is asked. */
+function stubMe(status: StudioStatus = 'approved') {
+  return stubApi(({ url }) => (url === '/api/studio/me' ? json(studioMeBody(status)) : undefined))
 }
 
 beforeEach(() => {
   sessionStorage.setItem(SESSION_KEY, SESSION)
+  stubMe()
 })
 
 afterEach(() => {
   sessionStorage.clear()
+  vi.unstubAllGlobals()
 })
 
 describe('the admin shell', () => {
@@ -78,11 +100,11 @@ describe('the admin shell', () => {
       'Settings',
     ])
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
-      '/admin/calendar',
-      '/admin/bookings',
-      '/admin/catalogue',
-      '/admin/availability',
-      '/admin/settings',
+      '/studio/calendar',
+      '/studio/bookings',
+      '/studio/catalogue',
+      '/studio/availability',
+      '/studio/settings',
     ])
   })
 
@@ -113,5 +135,97 @@ describe('the admin shell', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Admin sign in' })).toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: 'Admin' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Skip to content' })).not.toBeInTheDocument()
+  })
+
+  it('carries where he was going to the sign in, and asks the API nothing', () => {
+    sessionStorage.clear()
+    const api = stubMe()
+    const router = renderShell('/studio/bookings?stage=confirmed')
+
+    expect(router.state.location.pathname).toBe('/studio/login')
+    expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/studio/bookings?stage=confirmed')
+    expect(api.sent).toHaveLength(0)
+  })
+
+  it('does not open for a platform or account session', () => {
+    sessionStorage.clear()
+    saveSession('platform', JSON.parse(SESSION))
+    saveSession('account', JSON.parse(SESSION))
+    const router = renderShell()
+
+    expect(router.state.location.pathname).toBe('/studio/login')
+  })
+
+  it('signs out of the studio alone, to its sign in with no return path', async () => {
+    saveSession('account', JSON.parse(SESSION))
+    const router = renderShell()
+
+    await userEvent.setup({ delay: null }).click(screen.getByRole('button', { name: 'Sign out' }))
+
+    await waitFor(() => expect(readSession('studio')).toBeNull())
+    expect(router.state.location.pathname).toBe('/studio/login')
+    expect(router.state.location.search).toBe('')
+    expect(readSession('account')).not.toBeNull()
+  })
+})
+
+describe('the studio status banner (Phase 2)', () => {
+  it('asks /api/studio/me with the studio token', async () => {
+    const api = stubMe('pending')
+    renderShell()
+
+    await screen.findByText(/Your profile is waiting for approval/)
+    expect(api.sent).toEqual([expect.objectContaining({ method: 'GET', url: '/api/studio/me' })])
+    expect(api.sent[0]?.headers.get('Authorization')).toBe('Bearer test.token.signature')
+  })
+
+  it('says a pending profile cannot be found or booked yet', async () => {
+    stubMe('pending')
+    renderShell()
+
+    expect(await screen.findByText("Your profile is waiting for approval: clients can't find or book you yet.")).toBeInTheDocument()
+    // Above the page, inside the content the skip link leads to.
+    const banner = document.querySelector('[data-studio-status="pending"]')
+    expect(banner?.closest('#admin-content')).not.toBeNull()
+  })
+
+  it('says a suspended studio is hidden, and that its bookings carry on', async () => {
+    stubMe('suspended')
+    renderShell()
+
+    expect(
+      await screen.findByText("Your studio is suspended: clients can't find or book you. Bookings you already have carry on."),
+    ).toBeInTheDocument()
+  })
+
+  it('shows nothing once approved', async () => {
+    const api = stubMe('approved')
+    renderShell()
+
+    await waitFor(() => expect(api.sent).toHaveLength(1))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document.querySelector('[data-studio-status]')).toBeNull()
+  })
+
+  it.each<[string, () => Response | Promise<Response>]>([
+    ['a 500', () => json({ error: 'internal_error' }, 500)],
+    ['a body without a photographer', () => json({ user: {} })],
+    ['a network failure', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('shows nothing on %s, and keeps the shell', async (_label, respond) => {
+    const api = stubApi(() => respond())
+    renderShell()
+
+    await waitFor(() => expect(api.sent).toHaveLength(1))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document.querySelector('[data-studio-status]')).toBeNull()
+    expect(screen.getByRole('navigation', { name: 'Admin' })).toBeInTheDocument()
+  })
+
+  it('on a 401 drops the studio session and leaves for the sign in', async () => {
+    stubApi(() => json({ error: 'invalid_token' }, 401))
+    const router = renderShell()
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/login'))
+    expect(readSession('studio')).toBeNull()
   })
 })
