@@ -15,8 +15,10 @@ import {
   PLATFORM_ADMIN_EMAIL,
   type PaymentWorld,
   TEST_SECRET,
+  insertBooking,
   insertBookingWithToken,
   insertPayment,
+  routeTo,
   seedWorld,
   stubProvider,
 } from './test/payment-fixtures.js';
@@ -66,7 +68,7 @@ function app(): Express {
   return createApp({
     corsOrigin: WEB_ORIGIN,
     auth: { prisma, sessionSecret: TEST_SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
-    publicApi: { prisma, now: () => NOW, payments: { provider: stubProvider(), secret: TEST_SECRET } },
+    publicApi: { prisma, now: () => NOW, payments: { routing: routeTo(stubProvider()), secret: TEST_SECRET } },
     webhooks: { prisma, providers: { mtn_momo_direct: stubProvider() } },
   });
 }
@@ -189,6 +191,25 @@ describe('responses match the spec', () => {
         consent: true,
       });
     await expectMatchesSpec(created, 'createBooking', 201);
+  });
+
+  it('the Phase 3 payment-safety answers (marketplace-spec.md R3.4, T3.3)', async () => {
+    const booking = await insertBooking(prisma, world);
+    await prisma.photographer.update({ where: { id: world.photographerId }, data: { status: 'suspended', suspendedAt: NOW } });
+    const token = checkoutToken(TEST_SECRET, booking.reference);
+    await expectMatchesSpec(
+      await request(app()).post(`/api/checkout/${booking.reference}/${token}/payments`).send({ method: 'momo_mtn', phone: '0788123456' }),
+      'startCheckoutPayment',
+      409,
+    );
+
+    const refusing = createApp({ webhooks: { prisma, providers: { mtn_momo_direct: stubProvider({ verifyWebhook: () => false }) } } });
+    const ref = '3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8';
+    await expectMatchesSpec(
+      await request(refusing).post(`/api/webhooks/mtn-momo/${ref}/sig`).set('Content-Type', 'application/json').send('{}'),
+      'mtnMomoWebhookPost',
+      401,
+    );
   });
 
   it("a client's own booking", async () => {

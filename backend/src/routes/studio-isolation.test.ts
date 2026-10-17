@@ -15,6 +15,7 @@ import {
   insertPayment,
   seedSecondPhotographer,
   seedWorld,
+  routeTo,
   stubProvider,
 } from '../test/payment-fixtures.js';
 
@@ -106,7 +107,7 @@ beforeEach(async () => {
   app = createApp({
     corsOrigin: WEB_ORIGIN,
     auth: { prisma, sessionSecret: TEST_SECRET, webOrigin: WEB_ORIGIN, now: () => NOW },
-    publicApi: { prisma, now: () => NOW, payments: { provider: stubProvider(), secret: TEST_SECRET } },
+    publicApi: { prisma, now: () => NOW, payments: { routing: routeTo(stubProvider()), secret: TEST_SECRET } },
   });
 });
 

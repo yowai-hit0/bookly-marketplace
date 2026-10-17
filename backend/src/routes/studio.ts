@@ -27,7 +27,7 @@ import { parseOrReject } from './validation.js';
  */
 
 export type StudioRouterDeps = AuthDeps & {
-  /** The active payment provider, when one is configured (plan.md Task 20). */
+  /** Whom a session-fee request is recorded against, when any method is on offer (plan.md Task 20; R3.1). */
   paymentProviderId?: PaymentProviderId;
 };
 

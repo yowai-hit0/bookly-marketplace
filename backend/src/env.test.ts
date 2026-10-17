@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EnvValidationError, parseEnv } from './env.js';
+import { EnvValidationError, offeredMethods, parseEnv } from './env.js';
 
 const valid = {
   DATABASE_URL: 'postgresql://bookly:bookly@localhost:5432/bookly',
@@ -12,7 +12,8 @@ describe('parseEnv', () => {
     const env = parseEnv(valid);
     expect(env.PORT).toBe(4000);
     expect(env.NODE_ENV).toBe('development');
-    expect(env.PAYMENT_PROVIDER).toBe('mtn_momo_direct');
+    expect(env.MOMO_MTN_PROVIDER).toBe('mtn_momo_direct');
+    expect(env.PAYMENT_METHODS_ENABLED).toBeUndefined();
   });
 
   it('throws a named error when DATABASE_URL is missing', () => {
@@ -42,8 +43,10 @@ describe('parseEnv', () => {
     expect(() => parseEnv({ ...valid, [key]: 'https://bookly.example/?x=1' })).toThrow(new RegExp(key));
   });
 
-  it('rejects an unknown payment provider', () => {
-    expect(() => parseEnv({ ...valid, PAYMENT_PROVIDER: 'stripe' })).toThrow(EnvValidationError);
+  it('rejects an unknown MOMO_MTN_PROVIDER, naming it', () => {
+    for (const MOMO_MTN_PROVIDER of ['stripe', 'mtn', 'MTN_MOMO_DIRECT', 'flutterwave_checkout', 'cash', '']) {
+      expect(() => parseEnv({ ...valid, MOMO_MTN_PROVIDER })).toThrow(/MOMO_MTN_PROVIDER/);
+    }
   });
 });
 
@@ -117,7 +120,7 @@ describe('parseEnv: payments (plan.md Tasks 16 and 17)', () => {
   it('defaults to the MTN sandbox, with no origin, credentials or currency set', () => {
     const env = parseEnv(valid);
     expect(env).toMatchObject({
-      PAYMENT_PROVIDER: 'mtn_momo_direct',
+      MOMO_MTN_PROVIDER: 'mtn_momo_direct',
       MTN_MOMO_BASE_URL: 'https://sandbox.momodeveloper.mtn.com',
       MTN_MOMO_TARGET_ENVIRONMENT: 'sandbox',
     });
@@ -163,33 +166,82 @@ describe('parseEnv: payments (plan.md Tasks 16 and 17)', () => {
   });
 
   it.each(['MTN_MOMO_SUBSCRIPTION_KEY', 'MTN_MOMO_API_USER', 'MTN_MOMO_API_KEY'] as const)(
-    'requires %s in production while MTN direct takes payments, naming the credentials',
+    'refuses production with %s missing while MTN direct would collect MTN MoMo, naming the credentials',
     (key) => {
       const without: Record<string, string> = { ...production };
       delete without[key];
       expect(() => parseEnv(without)).toThrow(EnvValidationError);
-      expect(() => parseEnv(without)).toThrow(/MTN_MOMO_SUBSCRIPTION_KEY, MTN_MOMO_API_USER and MTN_MOMO_API_KEY are required/);
+      expect(() => parseEnv(without)).toThrow(/MTN_MOMO_SUBSCRIPTION_KEY, MTN_MOMO_API_USER and MTN_MOMO_API_KEY/);
+      expect(() => parseEnv(without)).toThrow(new RegExp(`${key} missing`));
     },
   );
 
   const flutterwave = { FLUTTERWAVE_CLIENT_ID: 'id', FLUTTERWAVE_CLIENT_SECRET: 'secret', FLUTTERWAVE_WEBHOOK_HASH: 'hash' };
 
-  it('does not require MTN credentials in production once Flutterwave takes payments', () => {
+  it('does not require MTN credentials in production once Flutterwave collects MTN MoMo', () => {
     const { MTN_MOMO_SUBSCRIPTION_KEY: _s, MTN_MOMO_API_USER: _u, MTN_MOMO_API_KEY: _k, ...withoutMtn } = production;
-    expect(parseEnv({ ...withoutMtn, ...flutterwave, PAYMENT_PROVIDER: 'flutterwave' }).PAYMENT_PROVIDER).toBe('flutterwave');
+    expect(parseEnv({ ...withoutMtn, ...flutterwave, MOMO_MTN_PROVIDER: 'flutterwave' }).MOMO_MTN_PROVIDER).toBe('flutterwave');
   });
 
-  it.each(['FLUTTERWAVE_CLIENT_ID', 'FLUTTERWAVE_CLIENT_SECRET', 'FLUTTERWAVE_WEBHOOK_HASH'] as const)(
-    'requires %s in production while Flutterwave takes payments, naming the credentials',
+  it.each(['FLUTTERWAVE_CLIENT_ID', 'FLUTTERWAVE_CLIENT_SECRET'] as const)(
+    'refuses production with %s missing while Flutterwave collects MTN MoMo, naming the credentials',
     (key) => {
-      const without: Record<string, string> = { ...production, ...flutterwave, PAYMENT_PROVIDER: 'flutterwave' };
+      const { MTN_MOMO_SUBSCRIPTION_KEY: _s, MTN_MOMO_API_USER: _u, MTN_MOMO_API_KEY: _k, ...withoutMtn } = production;
+      const without: Record<string, string> = { ...withoutMtn, ...flutterwave, MOMO_MTN_PROVIDER: 'flutterwave' };
       delete without[key];
-      expect(() => parseEnv(without)).toThrow(/FLUTTERWAVE_CLIENT_ID, FLUTTERWAVE_CLIENT_SECRET and FLUTTERWAVE_WEBHOOK_HASH are required/);
+      expect(() => parseEnv(without)).toThrow(/FLUTTERWAVE_CLIENT_ID and FLUTTERWAVE_CLIENT_SECRET/);
+      expect(() => parseEnv(without)).toThrow(new RegExp(`${key} missing`));
     },
   );
 
-  it('does not require Flutterwave credentials in production while MTN direct takes payments', () => {
+  it('refuses production without FLUTTERWAVE_WEBHOOK_HASH while Flutterwave collects anything, naming what it collects', () => {
+    const { FLUTTERWAVE_WEBHOOK_HASH: _h, ...noHash } = flutterwave;
+    expect(() => parseEnv({ ...production, ...noHash })).toThrow(/FLUTTERWAVE_WEBHOOK_HASH is required in production while Flutterwave collects momo_airtel/);
+    expect(() => parseEnv({ ...production, ...noHash, MOMO_MTN_PROVIDER: 'flutterwave' })).toThrow(/collects momo_mtn and momo_airtel/);
+  });
+
+  it('does not ask for the webhook hash while Flutterwave collects nothing', () => {
+    const { FLUTTERWAVE_WEBHOOK_HASH: _h, ...noHash } = flutterwave;
+    expect(() => parseEnv({ ...production, ...noHash, PAYMENT_METHODS_ENABLED: 'momo_mtn' })).not.toThrow();
+  });
+
+  it('does not require Flutterwave credentials in production while MTN direct collects MTN MoMo', () => {
     expect(() => parseEnv(production)).not.toThrow();
+  });
+
+  it('accepts production with both providers configured, offering both methods', () => {
+    expect(offeredMethods(parseEnv({ ...production, ...flutterwave }))).toEqual(['momo_mtn', 'momo_airtel']);
+  });
+
+  it('refuses production with no payment method on offer, naming what each method needs', () => {
+    const { MTN_MOMO_SUBSCRIPTION_KEY: _s, MTN_MOMO_API_USER: _u, MTN_MOMO_API_KEY: _k, ...withoutMtn } = production;
+    let message = '';
+    try {
+      parseEnv(withoutMtn);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/no payment method can be offered: MTN_MOMO_SUBSCRIPTION_KEY, MTN_MOMO_API_USER and MTN_MOMO_API_KEY are required in production to offer momo_mtn through mtn_momo_direct/);
+    expect(message).toMatch(/FLUTTERWAVE_CLIENT_ID and FLUTTERWAVE_CLIENT_SECRET are required in production to offer momo_airtel through flutterwave/);
+  });
+
+  it('refuses production when an explicitly enabled method cannot be collected', () => {
+    expect(() => parseEnv({ ...production, PAYMENT_METHODS_ENABLED: 'momo_mtn,momo_airtel' })).toThrow(
+      /FLUTTERWAVE_CLIENT_ID and FLUTTERWAVE_CLIENT_SECRET are required in production to offer momo_airtel through flutterwave/,
+    );
+    expect(() => parseEnv({ ...production, PAYMENT_METHODS_ENABLED: 'momo_airtel' })).toThrow(/to offer momo_airtel/);
+  });
+
+  it('lets production enable only what it can collect', () => {
+    expect(offeredMethods(parseEnv({ ...production, PAYMENT_METHODS_ENABLED: 'momo_mtn' }))).toEqual(['momo_mtn']);
+    expect(offeredMethods(parseEnv({ ...production, ...flutterwave, PAYMENT_METHODS_ENABLED: 'momo_airtel' }))).toEqual(['momo_airtel']);
+  });
+
+  it.each(['development', 'test'])('in %s, offers only what is configured and refuses nothing for it', (NODE_ENV) => {
+    expect(offeredMethods(parseEnv({ ...valid, NODE_ENV }))).toEqual([]);
+    expect(offeredMethods(parseEnv({ ...valid, NODE_ENV, PAYMENT_METHODS_ENABLED: 'momo_airtel' }))).toEqual([]);
+    expect(offeredMethods(parseEnv({ ...valid, NODE_ENV, MTN_MOMO_SUBSCRIPTION_KEY: 's' }))).toEqual([]);
+    expect(offeredMethods(parseEnv({ ...valid, NODE_ENV, MTN_MOMO_SUBSCRIPTION_KEY: 's', MTN_MOMO_API_USER: 'u', MTN_MOMO_API_KEY: 'k' }))).toEqual(['momo_mtn']);
   });
 
   it('defaults Flutterwave to its sandbox, its token endpoint and RWF', () => {
@@ -238,6 +290,54 @@ describe('parseEnv: payments (plan.md Tasks 16 and 17)', () => {
 
   it.each(['MTN_MOMO_SUBSCRIPTION_KEY', 'MTN_MOMO_API_USER', 'MTN_MOMO_API_KEY', 'MTN_MOMO_TARGET_ENVIRONMENT'])('rejects an empty %s, naming it', (key) => {
     expect(() => parseEnv({ ...valid, [key]: '' })).toThrow(new RegExp(key));
+  });
+});
+
+describe('parseEnv: method routing (marketplace-spec.md R3.1, 2026-10-17)', () => {
+  it('tolerates the retired PAYMENT_PROVIDER=mtn_momo_direct, which is the new default, and lets it change nothing', () => {
+    const env = parseEnv({ ...valid, PAYMENT_PROVIDER: 'mtn_momo_direct', MOMO_MTN_PROVIDER: 'flutterwave' });
+    expect(env.MOMO_MTN_PROVIDER).toBe('flutterwave');
+    expect(parseEnv({ ...valid, PAYMENT_PROVIDER: 'mtn_momo_direct' }).MOMO_MTN_PROVIDER).toBe('mtn_momo_direct');
+  });
+
+  it('refuses any other PAYMENT_PROVIDER, saying what replaces it, rather than silently routing MTN MoMo elsewhere', () => {
+    for (const PAYMENT_PROVIDER of ['flutterwave', 'stripe', 'MTN_MOMO_DIRECT', '']) {
+      expect(() => parseEnv({ ...valid, PAYMENT_PROVIDER })).toThrow(EnvValidationError);
+      expect(() => parseEnv({ ...valid, PAYMENT_PROVIDER })).toThrow(/PAYMENT_PROVIDER is retired.*MOMO_MTN_PROVIDER.*PAYMENT_METHODS_ENABLED/);
+    }
+  });
+
+  it('reads MOMO_MTN_PROVIDER', () => {
+    expect(parseEnv({ ...valid, MOMO_MTN_PROVIDER: 'flutterwave' }).MOMO_MTN_PROVIDER).toBe('flutterwave');
+    expect(parseEnv({ ...valid, MOMO_MTN_PROVIDER: 'mtn_momo_direct' }).MOMO_MTN_PROVIDER).toBe('mtn_momo_direct');
+  });
+
+  it.each([
+    ['momo_mtn', ['momo_mtn']],
+    ['momo_airtel', ['momo_airtel']],
+    ['momo_mtn,momo_airtel', ['momo_mtn', 'momo_airtel']],
+    ['momo_airtel,momo_mtn', ['momo_mtn', 'momo_airtel']],
+    [' momo_mtn , momo_airtel ', ['momo_mtn', 'momo_airtel']],
+    ['momo_mtn,momo_mtn', ['momo_mtn']],
+    ['momo_mtn,', ['momo_mtn']],
+  ])('reads PAYMENT_METHODS_ENABLED=%j as %j', (PAYMENT_METHODS_ENABLED, expected) => {
+    expect(parseEnv({ ...valid, PAYMENT_METHODS_ENABLED }).PAYMENT_METHODS_ENABLED).toEqual(expected);
+  });
+
+  it.each(['card', 'momo_mtn,card', 'card,momo_airtel'])('refuses card in PAYMENT_METHODS_ENABLED=%j: it is deferred', (PAYMENT_METHODS_ENABLED) => {
+    expect(() => parseEnv({ ...valid, PAYMENT_METHODS_ENABLED })).toThrow(/PAYMENT_METHODS_ENABLED: card is reserved for the hosted card checkout, which is deferred/);
+  });
+
+  it.each(['paypal', 'momo_mtn,paypal', 'MOMO_MTN', 'momo mtn', 'momo_mtn;momo_airtel'])('refuses an unknown method in PAYMENT_METHODS_ENABLED=%j, naming it', (PAYMENT_METHODS_ENABLED) => {
+    expect(() => parseEnv({ ...valid, PAYMENT_METHODS_ENABLED })).toThrow(/PAYMENT_METHODS_ENABLED: unknown method/);
+  });
+
+  it.each(['', ' ', ',', ' , , '])('refuses PAYMENT_METHODS_ENABLED=%j, which lists nothing', (PAYMENT_METHODS_ENABLED) => {
+    expect(() => parseEnv({ ...valid, PAYMENT_METHODS_ENABLED })).toThrow(/PAYMENT_METHODS_ENABLED: lists no method/);
+  });
+
+  it('does not echo a long unknown value back in full', () => {
+    expect(() => parseEnv({ ...valid, PAYMENT_METHODS_ENABLED: 'x'.repeat(500) })).toThrow(new RegExp(`unknown method "${'x'.repeat(40)}"`));
   });
 });
 

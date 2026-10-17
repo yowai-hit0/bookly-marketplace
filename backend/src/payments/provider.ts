@@ -1,8 +1,10 @@
 /**
  * The payment provider seam (plan.md Task 16; spec §4.3): initiate, verify,
- * read a webhook, look up a status. MTN MoMo direct implements it now and
- * Flutterwave with Task 25; which one takes new payments is configuration
- * (`PAYMENT_PROVIDER`), never a branch in business logic.
+ * read a webhook, look up a status. MTN MoMo direct and Flutterwave implement
+ * it. Which one collects a payment follows the method the client chose
+ * (marketplace-spec.md R3.1, `payments/routing.ts`), and the routing is
+ * configuration (`MOMO_MTN_PROVIDER`, `PAYMENT_METHODS_ENABLED`), never a
+ * branch in business logic.
  *
  * A provider speaks its own dialect at the edges and ours in the middle: what
  * it reports is normalised here to `pending`, `succeeded` or `failed`. It never
@@ -75,14 +77,23 @@ export type ProviderEvent = {
   failureReason: string | null;
   /** The amount the provider says moved, in whole units, when it says. */
   amount: number | null;
+  /**
+   * The currency the provider says it moved, upper-cased, when it says
+   * (marketplace-spec.md T3.3). A value that is no ISO code at all is kept as
+   * `INVALID`, so it can never pass for the currency we charge. Absent is
+   * "not stated", as a missing amount is.
+   */
+  currency?: string | null;
 };
 
 export interface PaymentProvider {
   readonly id: PaymentProviderId;
   /** What the pay page may offer (spec §6.19). Nothing else is rendered. */
   readonly methods: readonly PaymentMethod[];
-  /** False when credentials are missing: initiation then fails at once, recorded. */
+  /** False when credentials are missing. An unconfigured provider is never offered (R3.1, `payments/routing.ts`). */
   readonly configured: boolean;
+  /** What it charges in (`RWF`; `EUR` in MTN's sandbox). A success reported in another currency is ignored (T3.3). */
+  readonly currency: string;
 
   /** Throws when the provider cannot be reached or answers unusably. */
   initiate(request: InitiatePaymentRequest, signal: AbortSignal): Promise<InitiatePaymentResult>;
@@ -100,4 +111,15 @@ export interface PaymentProvider {
 /** The provider was unreachable, timed out or answered in a way no retry of ours can read. */
 export class PaymentProviderError extends Error {
   override readonly name = 'PaymentProviderError';
+}
+
+/**
+ * A provider body's `currency`, as `ProviderEvent.currency` holds it: an ISO
+ * 4217 code upper-cased, null when the body names none, and `INVALID` for
+ * anything else, which no configured currency can equal (T3.3).
+ */
+export function reportedCurrency(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && /^[A-Za-z]{3}$/.test(value.trim())) return value.trim().toUpperCase();
+  return 'INVALID';
 }

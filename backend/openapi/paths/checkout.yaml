@@ -2,23 +2,32 @@ paymentMethods:
   get:
     operationId: getPaymentMethods
     tags: [Checkout & payments]
-    summary: What the active provider collects
-    description: "The active provider and the methods its pay page may offer. `Cache-Control: no-store`. Anonymous."
+    summary: The payment methods on offer
+    description: |
+      The methods the pay pages may offer, in display order, and nothing else
+      (marketplace-spec.md R3.1). Each method is routed to its own provider:
+      MTN MoMo to MTN direct or Flutterwave (`MOMO_MTN_PROVIDER`), Airtel Money
+      always to Flutterwave. `PAYMENT_METHODS_ENABLED` may narrow the list, and
+      a method whose provider is not configured is never listed, so the list
+      may be empty. `card` is deferred and never listed. No provider is named:
+      which one collects a method is not the payer's concern.
+      `Cache-Control: no-store`. Anonymous.
     security: []
     responses:
       '200':
-        description: The provider and its methods.
+        description: The methods on offer.
         content:
           application/json:
             schema:
               type: object
-              required: [provider, methods]
+              required: [methods]
               additionalProperties: false
               properties:
-                provider: { type: string, examples: [mtn_momo_direct] }
                 methods:
                   type: array
+                  uniqueItems: true
                   items: { $ref: ../components/common.yaml#/schemas/PaymentMethod }
+                  examples: [[momo_mtn, momo_airtel], [momo_mtn], [momo_airtel], []]
 
 checkout:
   get:
@@ -44,7 +53,11 @@ checkoutPayments:
     operationId: startCheckoutPayment
     tags: [Checkout & payments]
     summary: Pay the booking fee
-    description: "Starts a booking-fee payment; the payer's phone is prompted. `Cache-Control: no-store`."
+    description: |
+      Starts a booking-fee payment; the payer's phone is prompted through the
+      provider the chosen method routes to (R3.1). The amount is the booking's
+      frozen booking fee: an amount, provider or reference in the body is
+      ignored. `Cache-Control: no-store`.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/Reference
@@ -64,8 +77,10 @@ checkoutPayments:
         $ref: ../components/common.yaml#/responses/NotFound
       '409':
         description: |
-          Nothing to start: `already_paid`, `hold_expired`, `nothing_to_pay`, or
-          `payment_in_progress` (an attempt still waits — its `ourRef` is given).
+          Nothing to start: `already_paid`, `hold_expired`, `nothing_to_pay`,
+          `photographer_unavailable` (the photographer can no longer be booked,
+          R3.4; nothing is charged), or `payment_in_progress` (an attempt still
+          waits — its `ourRef` is given).
         content:
           application/json:
             schema:
@@ -76,9 +91,10 @@ checkoutPayments:
               already_paid: { value: { error: already_paid } }
               hold_expired: { value: { error: hold_expired } }
               nothing_to_pay: { value: { error: nothing_to_pay } }
+              photographer_unavailable: { value: { error: photographer_unavailable } }
               in_progress: { value: { error: payment_in_progress, payment: { ourRef: 00000000-0000-4000-8000-000000000000 } } }
       '422':
-        description: A method not on offer, or an unusable phone number.
+        description: A method not on offer (not enabled, its provider not configured, or `card`), or an unusable phone number.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/ValidationError }

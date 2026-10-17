@@ -5,7 +5,8 @@ import { cancellationDeadline } from '../booking/client-view.js';
 import { normalizePhone } from '../booking/phone.js';
 import { verifyCheckoutToken } from '../payments/checkout-link.js';
 import { startBookingFeePayment } from '../payments/initiate.js';
-import type { PaymentMethod, PaymentProvider } from '../payments/provider.js';
+import type { PaymentMethod } from '../payments/provider.js';
+import type { PaymentRouting } from '../payments/routing.js';
 import { parseOrReject } from './validation.js';
 
 /**
@@ -13,8 +14,11 @@ import { parseOrReject } from './validation.js';
  * anonymous (P-05), all `Cache-Control: no-store`.
  *
  *   GET  /api/payment-methods
- *        200 { provider, methods }   what the active provider collects, and
- *                                    so all the pay page may render
+ *        200 { methods }             the methods on offer (R3.1): each routed
+ *                                    to a configured provider, and so all the
+ *                                    pay page may render. No provider is named:
+ *                                    there is no single one any more, and which
+ *                                    collects a method is not the payer's concern
  *
  *   GET  /api/checkout/:reference/:token
  *        200 { checkout: { reference, serviceName, packageName, startsAt,
@@ -29,6 +33,8 @@ import { parseOrReject } from './validation.js';
  *        201 { payment: { ourRef, status: 'pending' } }   the phone is prompted
  *        404 not_found
  *        409 already_paid | hold_expired | nothing_to_pay
+ *        409 photographer_unavailable   the photographer can no longer be
+ *                                       booked (R3.4, T3.4); nothing is charged
  *        409 payment_in_progress { payment: { ourRef } }  an attempt still waits
  *        422 validation_failed { fields }   a method not on offer, a bad number
  *        502 payment_not_started { reason: rejected | unavailable,
@@ -47,7 +53,8 @@ import { parseOrReject } from './validation.js';
 
 export type CheckoutDeps = {
   prisma: PrismaClient;
-  provider: PaymentProvider;
+  /** Which methods are offered and who collects each (R3.1). */
+  routing: PaymentRouting;
   /** `SESSION_SECRET`: checkout tokens are derived from it. */
   secret: string;
   /** The provider call's deadline; injectable for tests. */
@@ -60,7 +67,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PHONE_MAX_LENGTH = 40;
 
 export function checkoutRouter(deps: CheckoutDeps): Router {
-  const { prisma, provider, secret } = deps;
+  const { prisma, routing, secret } = deps;
   const router = Router();
 
   router.use((_req, res, next) => {
@@ -69,7 +76,7 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
   });
 
   router.get('/payment-methods', (_req, res) => {
-    res.json({ provider: provider.id, methods: provider.methods });
+    res.json({ methods: routing.methods });
   });
 
   /** The reference, when the token is its token; otherwise null and a 404 already sent. */
@@ -122,7 +129,8 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
   });
 
   const paymentBody = z.object({
-    method: z.string().refine((method) => (provider.methods as readonly string[]).includes(method), 'Method not available'),
+    // Only a method on offer: one not enabled, or whose provider is unconfigured, is a 422 (R3.1).
+    method: z.string().refine((method) => routing.providerFor(method) !== undefined, 'Method not available'),
     phone: z
       .string()
       .max(PHONE_MAX_LENGTH)
@@ -136,6 +144,9 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
     const body = parseOrReject(paymentBody, req.body, res);
     if (body === undefined) return;
 
+    // The client's method picks the provider (R3.1); the refinement above has made sure there is one.
+    const provider = routing.providerFor(body.method);
+    if (provider === undefined) throw new Error('A validated method has no provider');
     const result = await startBookingFeePayment(
       { prisma, provider, ...(deps.providerTimeoutMs === undefined ? {} : { timeoutMs: deps.providerTimeoutMs }) },
       { reference, method: body.method as PaymentMethod, payerPhone: body.phone },
@@ -151,6 +162,7 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
       case 'already_paid':
       case 'hold_expired':
       case 'nothing_to_pay':
+      case 'photographer_unavailable':
         res.status(409).json({ error: result.status });
         return;
       case 'in_progress':

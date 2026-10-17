@@ -246,6 +246,59 @@ describe('the methods on offer (spec §6.19)', () => {
   })
 })
 
+// --- Methods per routing (marketplace-spec.md R3.1) ---------------------------------------------
+
+describe('the methods a routing offers (R3.1)', () => {
+  it('offers Airtel Money alone for an Airtel-only configuration, with no trace of MTN MoMo', async () => {
+    stubApi({ methods: () => json({ methods: ['momo_airtel'] }) })
+    await renderLoaded()
+
+    const group = screen.getByRole('group', { name: 'How would you like to pay?' })
+    expect(within(group).getAllByRole('radio')).toHaveLength(1)
+    expect(within(group).getByRole('radio', { name: 'Airtel Money' })).toBeChecked()
+    expect(screen.queryByRole('radio', { name: 'MTN MoMo' })).not.toBeInTheDocument()
+    expect(document.querySelector('input[value="momo_mtn"], input[value="card"]')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/MTN/)
+  })
+
+  it('asks an Airtel payer for their number with the same label, hint and check as MTN MoMo', async () => {
+    const { payBodies } = stubApi({ methods: () => json({ methods: ['momo_airtel'] }) })
+    await renderLoaded()
+
+    expect(phoneField()).toHaveAttribute('type', 'tel')
+    expect(screen.getByText('We will send a payment request to this phone. Approve it with your Mobile Money PIN.')).toBeInTheDocument()
+
+    await user().type(phoneField(), 'abc')
+    await user().click(payButton())
+    expect(phoneField()).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText('Enter the phone number of your Mobile Money account.')).toBeInTheDocument()
+    expect(payBodies).toEqual([])
+
+    await user().clear(phoneField())
+    await user().type(phoneField(), '073 123 4567')
+    await user().click(payButton())
+
+    await screen.findByRole('heading', { name: 'Approve the payment on your phone' })
+    expect(payBodies).toStrictEqual([{ method: 'momo_airtel', phone: '073 123 4567' }])
+  })
+
+  it('offers MTN MoMo alone for an MTN-only configuration, whichever provider collects it', async () => {
+    stubApi({ methods: () => json({ methods: ['momo_mtn'] }) })
+    await renderLoaded()
+
+    expect(screen.getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual(['MTN MoMo'])
+    expect(document.body.textContent).not.toMatch(/airtel/i)
+  })
+
+  it('offers both MoMo methods, MTN first, and no card, when the API lists both', async () => {
+    stubApi({ methods: () => json({ methods: ['momo_airtel', 'momo_mtn'] }) })
+    await renderLoaded()
+
+    expect(screen.getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual(['MTN MoMo', 'Airtel Money'])
+    expect(screen.queryByRole('radio', { name: 'Card' })).not.toBeInTheDocument()
+  })
+})
+
 // --- Paying -----------------------------------------------------------------------------------
 
 describe('paying', () => {
@@ -320,6 +373,23 @@ describe('paying', () => {
 
     await screen.findByRole('heading', { name: 'Approve the payment on your phone' })
     expect(payBodies).toStrictEqual([{ method: 'momo_airtel', phone: '0731234567' }])
+  })
+
+  it('says the photographer is not taking bookings, and stays put, when the API answers photographer_unavailable (R3.4)', async () => {
+    const { calls, payBodies } = stubApi({ pay: () => json({ error: 'photographer_unavailable' }, 409) })
+    const router = await renderLoaded()
+
+    await user().type(phoneField(), '0788123456')
+    await user().click(payButton())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This photographer is not taking bookings right now, so the booking fee cannot be paid. Nothing has been charged.',
+    )
+    expect(payBodies).toHaveLength(1)
+    expect(router.state.location.pathname).toBe(PATH)
+    // Not a stale page: nothing is reloaded, and no payment is followed.
+    expect(calls.filter((call) => call === `GET ${CHECKOUT_API}`)).toHaveLength(1)
+    expect(calls.some((call) => call.startsWith('GET /api/payments/'))).toBe(false)
   })
 
   it('follows the attempt already waiting when the API says one is in progress', async () => {

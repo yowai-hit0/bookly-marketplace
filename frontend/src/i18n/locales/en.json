@@ -738,7 +738,8 @@
       "rejected": "Mobile Money did not accept the request. Check that the number has a Mobile Money account, then try again.",
       "unavailable": "We could not reach Mobile Money just now. Please try again in a moment.",
       "failed": "The payment did not start. Check your connection and try again.",
-      "noMethods": "Online payment is not available right now. Please try again later."
+      "noMethods": "Online payment is not available right now. Please try again later.",
+      "photographerUnavailable": "This photographer is not taking bookings right now, so the booking fee cannot be paid. Nothing has been charged."
     },
     "paid": {
       "title": "This booking is already paid",

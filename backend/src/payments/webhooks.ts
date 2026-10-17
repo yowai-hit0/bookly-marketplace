@@ -70,6 +70,13 @@ export type IncomingEvent = {
   event: ProviderEvent | null;
   /** The body, as stored for dispute evidence. */
   payload: unknown;
+  /**
+   * What the provider charges in (`PaymentProvider.currency`). A success that
+   * names another currency is ignored like a wrong amount (marketplace-spec.md
+   * T3.3): 20,000 of anything else is not the 20,000 RWF we asked for. Every
+   * caller in the app passes it (`receiveWebhook`, `reconcile.ts`).
+   */
+  expectedCurrency?: string;
 };
 
 /** Contention retries, as in the slot claim. */
@@ -88,6 +95,7 @@ export async function receiveWebhook(deps: WebhookDeps, provider: PaymentProvide
     signatureValid: safely(() => provider.verifyWebhook(delivery), false),
     event: safely(() => provider.parseWebhook(delivery), null),
     payload: payloadOf(delivery.rawBody),
+    expectedCurrency: provider.currency,
   });
 }
 
@@ -149,7 +157,7 @@ export async function recordEvent(deps: WebhookDeps, providerId: PaymentProvider
 
   // Steps 3-5.
   try {
-    const applied = await applyWithRetry(deps, providerId, eventRowId, event);
+    const applied = await applyWithRetry(deps, providerId, eventRowId, event, incoming.expectedCurrency);
     for (const entry of applied.logs) log(entry);
     return { status: applied.status, eventRowId, note: applied.note };
   } catch (error) {
@@ -166,10 +174,16 @@ export async function recordEvent(deps: WebhookDeps, providerId: PaymentProvider
 
 type Applied = { status: 'applied' | 'ignored'; note: string; logs: Record<string, unknown>[] };
 
-async function applyWithRetry(deps: WebhookDeps, providerId: PaymentProviderId, eventRowId: string, event: ProviderEvent): Promise<Applied> {
+async function applyWithRetry(
+  deps: WebhookDeps,
+  providerId: PaymentProviderId,
+  eventRowId: string,
+  event: ProviderEvent,
+  expectedCurrency: string | undefined,
+): Promise<Applied> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await deps.prisma.$transaction((tx) => applyEvent(tx, deps, providerId, eventRowId, event), {
+      return await deps.prisma.$transaction((tx) => applyEvent(tx, deps, providerId, eventRowId, event, expectedCurrency), {
         maxWait: APPLY_MAX_WAIT_MS,
         timeout: APPLY_TIMEOUT_MS,
       });
@@ -203,6 +217,7 @@ async function applyEvent(
   providerId: PaymentProviderId,
   eventRowId: string,
   event: ProviderEvent,
+  expectedCurrency: string | undefined,
 ): Promise<Applied> {
   const logs: Record<string, unknown>[] = [];
   const finish = async (status: Applied['status'], note: string): Promise<Applied> => {
@@ -263,6 +278,13 @@ async function applyEvent(
   if (event.amount !== null && event.amount !== payment.amount_rwf) {
     logs.push({ level: 'error', event: 'webhook_amount_mismatch', provider: providerId, paymentId: payment.id, eventRowId, expected: payment.amount_rwf, reported: event.amount });
     return finish('ignored', 'amount_mismatch');
+  }
+  // The same rule for the currency (T3.3). Unstated is accepted, as an
+  // unstated amount is: the provider was asked in its own currency.
+  const currency = event.currency ?? null;
+  if (expectedCurrency !== undefined && currency !== null && currency !== expectedCurrency.toUpperCase()) {
+    logs.push({ level: 'error', event: 'webhook_currency_mismatch', provider: providerId, paymentId: payment.id, eventRowId, expected: expectedCurrency, reported: currency });
+    return finish('ignored', 'currency_mismatch');
   }
 
   const settledAt = (deps.now ?? (() => new Date()))();

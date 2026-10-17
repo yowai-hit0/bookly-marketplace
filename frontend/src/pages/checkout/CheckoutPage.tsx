@@ -24,11 +24,13 @@ import { PaymentFields } from './PaymentFields'
 
 /**
  * The pay page (plan.md Task 16, spec §3.1 step 9, §6.19): a held booking's
- * fee, the methods the active provider collects, and the number to prompt.
+ * fee, the methods on offer, and the number to prompt.
  *
- * Methods come from the API's capability endpoint. With MTN MoMo direct that is
- * MTN MoMo alone, and Airtel Money and card are not in the page at all -- not
- * disabled, absent. Starting a payment moves to its progress page, which waits
+ * Methods come from the API's capability endpoint, which lists only what is
+ * routed to a configured provider (marketplace-spec.md R3.1): MTN MoMo alone,
+ * Airtel Money alone, or both. A method not listed is not in the page at all --
+ * not disabled, absent. A photographer who can no longer be booked is said so
+ * at the button, and nothing is charged (R3.4). Starting a payment moves to its progress page, which waits
  * for the provider; nothing here ever says a payment succeeded.
  *
  * Addressed by the booking's reference and checkout token, so a reload lands
@@ -49,7 +51,7 @@ type Loaded = { key: string } & (
   | { status: 'failed' }
 )
 
-type SubmitError = 'rejected' | 'unavailable' | 'failed'
+type SubmitError = 'rejected' | 'unavailable' | 'failed' | 'photographerUnavailable'
 
 export function CheckoutPage() {
   const { t } = useTranslation()
@@ -180,6 +182,9 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
         return
       case 'not_found':
         onMissing()
+        return
+      case 'photographer_unavailable':
+        setError('photographerUnavailable')
         return
       case 'invalid':
         // Only a field on screen can be marked; anything else must still be said.

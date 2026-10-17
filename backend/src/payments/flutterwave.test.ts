@@ -314,6 +314,7 @@ describe('FlutterwaveProvider.lookupStatus', () => {
       method: 'momo_mtn',
       failureReason: null,
       amount: 19_500,
+      currency: 'RWF',
     });
     expect(found?.payload).toStrictEqual(SUCCEEDED);
   });
@@ -372,7 +373,20 @@ describe('FlutterwaveProvider.parseWebhook', () => {
       method: 'momo_mtn',
       failureReason: null,
       amount: 19_500,
+      currency: 'RWF',
     });
+  });
+
+  it('reads the charge currency, upper-cased, and an unusable one as INVALID (T3.3)', () => {
+    expect(provider().parseWebhook(signed(webhook({ ...SUCCEEDED, currency: 'usd' })))?.currency).toBe('USD');
+    expect(provider().parseWebhook(signed(webhook({ ...SUCCEEDED, currency: 'RWFX' })))?.currency).toBe('INVALID');
+    const { currency: _omitted, ...noCurrency } = SUCCEEDED;
+    expect(provider().parseWebhook(signed(webhook(noCurrency)))?.currency).toBeNull();
+  });
+
+  it('reports the configured currency it charges in, upper-cased', () => {
+    expect(provider().currency).toBe('RWF');
+    expect(provider({ currency: 'ugx' }).currency).toBe('UGX');
   });
 
   it('reads a failure with the processor code, and Airtel as momo_airtel', () => {

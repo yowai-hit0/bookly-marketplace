@@ -7,7 +7,7 @@ import { createMailProvider } from './email/mailer.js';
 import { EnvValidationError, parseEnv } from './env.js';
 import { startOutboxWorker } from './outbox/worker.js';
 import { createPaymentProviders } from './payments/providers.js';
-import { SANDBOX_RECONCILE_MIN_AGE_SECONDS, SANDBOX_RECONCILE_SCHEDULE, startPaymentReconciler } from './payments/reconcile.js';
+import { reconcilerPlans, startPaymentReconciler } from './payments/reconcile.js';
 
 function boot(): void {
   let env;
@@ -41,9 +41,10 @@ function boot(): void {
     publicApi: {
       prisma,
       now: () => new Date(),
-      payments: { provider: payments.active, secret: env.SESSION_SECRET },
+      // The provider of each payment follows the method the client chose (R3.1).
+      payments: { routing: payments.routing, secret: env.SESSION_SECRET },
     },
-    // Every provider's callbacks, not only the active one's (spec §6.18).
+    // Every provider's callbacks, not only those collecting a method today (spec §6.18).
     webhooks: { prisma, providers: payments.all },
     // Client sign-in with Google, when configured (Phase 2 decision 6).
     ...(env.GOOGLE_CLIENT_ID !== undefined && env.GOOGLE_CLIENT_SECRET !== undefined
@@ -61,16 +62,12 @@ function boot(): void {
   const holdSweeper = startHoldSweeper(prisma);
 
   // Lost callbacks, and the MTN sandbox that sends none, settle through a status
-  // lookup. Without credentials there is nothing to ask. In the sandbox the
-  // lookup is the only signal, so it runs every few seconds rather than a minute.
-  const mtnSandbox = env.MTN_MOMO_TARGET_ENVIRONMENT === 'sandbox';
-  const reconcilers = Object.values(payments.all)
-    .filter((provider) => provider.configured)
-    .map((provider) =>
-      provider.id === 'mtn_momo_direct' && mtnSandbox
-        ? startPaymentReconciler({ prisma, provider, minAgeSeconds: SANDBOX_RECONCILE_MIN_AGE_SECONDS }, SANDBOX_RECONCILE_SCHEDULE)
-        : startPaymentReconciler({ prisma, provider }),
-    );
+  // lookup: one reconciler per configured provider (R3.5), including one no
+  // method routes to any more. Without credentials there is nothing to ask. In
+  // the sandbox the lookup is the only signal, so it runs every few seconds.
+  const reconcilers = reconcilerPlans(payments.all, { mtnSandbox: env.MTN_MOMO_TARGET_ENVIRONMENT === 'sandbox' }).map((plan) =>
+    startPaymentReconciler({ prisma, provider: plan.provider, minAgeSeconds: plan.minAgeSeconds }, plan.schedule),
+  );
 
   // Everything the system sends goes through the outbox (plan.md Task 14).
   // Calendar kinds get their handler with Task 22; until then they wait.

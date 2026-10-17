@@ -8,6 +8,7 @@ import {
   type ProviderEvent,
   type ReportedStatus,
   type WebhookDelivery,
+  reportedCurrency,
 } from './provider.js';
 
 /**
@@ -74,9 +75,10 @@ type CachedToken = { value: string; refreshAt: number };
 
 export class FlutterwaveProvider implements PaymentProvider {
   readonly id = 'flutterwave' as const;
-  /** Mobile money only; cards are out of scope (docs/payments-migration.md). */
+  /** Mobile money only; cards are deferred (marketplace-spec.md R3.2, deferred 2026-10-17). */
   readonly methods = ['momo_mtn', 'momo_airtel'] as const;
   readonly configured: boolean;
+  readonly currency: string;
 
   readonly #config: FlutterwaveConfig;
   #token: CachedToken | null = null;
@@ -85,6 +87,7 @@ export class FlutterwaveProvider implements PaymentProvider {
   constructor(config: FlutterwaveConfig) {
     this.#config = config;
     this.configured = Boolean(config.clientId && config.clientSecret);
+    this.currency = config.currency.toUpperCase();
   }
 
   async initiate(request: InitiatePaymentRequest, signal: AbortSignal): Promise<InitiatePaymentResult> {
@@ -306,6 +309,7 @@ export function readCharge(charge: unknown, source: string): ProviderEvent | nul
     method: methodOf(record.payment_method),
     failureReason: reportedStatus === 'failed' ? failureCode(status.toLowerCase(), record.processor_response) : null,
     amount: amountOf(record.amount),
+    currency: reportedCurrency(record.currency),
   };
 }
 

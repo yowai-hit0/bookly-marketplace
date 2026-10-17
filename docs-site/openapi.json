@@ -595,33 +595,40 @@
         "tags": [
           "Checkout & payments"
         ],
-        "summary": "What the active provider collects",
-        "description": "The active provider and the methods its pay page may offer. `Cache-Control: no-store`. Anonymous.",
+        "summary": "The payment methods on offer",
+        "description": "The methods the pay pages may offer, in display order, and nothing else\n(marketplace-spec.md R3.1). Each method is routed to its own provider:\nMTN MoMo to MTN direct or Flutterwave (`MOMO_MTN_PROVIDER`), Airtel Money\nalways to Flutterwave. `PAYMENT_METHODS_ENABLED` may narrow the list, and\na method whose provider is not configured is never listed, so the list\nmay be empty. `card` is deferred and never listed. No provider is named:\nwhich one collects a method is not the payer's concern.\n`Cache-Control: no-store`. Anonymous.\n",
         "security": [],
         "responses": {
           "200": {
-            "description": "The provider and its methods.",
+            "description": "The methods on offer.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "required": [
-                    "provider",
                     "methods"
                   ],
                   "additionalProperties": false,
                   "properties": {
-                    "provider": {
-                      "type": "string",
-                      "examples": [
-                        "mtn_momo_direct"
-                      ]
-                    },
                     "methods": {
                       "type": "array",
+                      "uniqueItems": true,
                       "items": {
                         "$ref": "#/components/schemas/PaymentMethod"
-                      }
+                      },
+                      "examples": [
+                        [
+                          "momo_mtn",
+                          "momo_airtel"
+                        ],
+                        [
+                          "momo_mtn"
+                        ],
+                        [
+                          "momo_airtel"
+                        ],
+                        []
+                      ]
                     }
                   }
                 }
@@ -672,7 +679,7 @@
           "Checkout & payments"
         ],
         "summary": "Pay the booking fee",
-        "description": "Starts a booking-fee payment; the payer's phone is prompted. `Cache-Control: no-store`.",
+        "description": "Starts a booking-fee payment; the payer's phone is prompted through the\nprovider the chosen method routes to (R3.1). The amount is the booking's\nfrozen booking fee: an amount, provider or reference in the body is\nignored. `Cache-Control: no-store`.\n",
         "security": [],
         "parameters": [
           {
@@ -707,7 +714,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Nothing to start: `already_paid`, `hold_expired`, `nothing_to_pay`, or\n`payment_in_progress` (an attempt still waits — its `ourRef` is given).\n",
+            "description": "Nothing to start: `already_paid`, `hold_expired`, `nothing_to_pay`,\n`photographer_unavailable` (the photographer can no longer be booked,\nR3.4; nothing is charged), or `payment_in_progress` (an attempt still\nwaits — its `ourRef` is given).\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -736,6 +743,11 @@
                       "error": "nothing_to_pay"
                     }
                   },
+                  "photographer_unavailable": {
+                    "value": {
+                      "error": "photographer_unavailable"
+                    }
+                  },
                   "in_progress": {
                     "value": {
                       "error": "payment_in_progress",
@@ -749,7 +761,7 @@
             }
           },
           "422": {
-            "description": "A method not on offer, or an unusable phone number.",
+            "description": "A method not on offer (not enabled, its provider not configured, or `card`), or an unusable phone number.",
             "content": {
               "application/json": {
                 "schema": {
@@ -993,7 +1005,7 @@
           "Client booking"
         ],
         "summary": "Pay my session fee",
-        "description": "Starts a session-fee payment for what the booking owes. Only mounted when\na payment provider is configured. The amount is computed server-side from\nthe booking, never sent by the client.\n",
+        "description": "Starts a session-fee payment for what the booking owes, through the\nprovider the chosen method routes to (R3.1). Only mounted when payments\nare. The amount is computed server-side from the booking, never sent by\nthe client. Still payable when the photographer has been suspended since\nthe booking: existing bookings carry on (R5.5, T9.2).\n",
         "security": [],
         "parameters": [
           {
@@ -4073,7 +4085,7 @@
           "Webhooks"
         ],
         "summary": "MTN MoMo callback",
-        "description": "MTN signs nothing it sends, so the proof is in the URL: the path carries\nour reference and `HMAC(our_ref)` keyed from `SESSION_SECRET`, and the\nbody's `externalId` must name the same payment. Only MTN is ever given\nthis URL. A body failing either check is stored and applied to nothing.\n",
+        "description": "MTN signs nothing it sends, so the proof is in the URL: the path carries\nour reference and `HMAC(our_ref)` keyed from `SESSION_SECRET`, and the\nbody's `externalId` must name the same payment. Only MTN is ever given\nthis URL. A body failing either check is stored, applied to nothing,\nand answered 401.\n",
         "security": [],
         "parameters": [
           {
@@ -4122,6 +4134,9 @@
         "responses": {
           "200": {
             "$ref": "#/components/responses/received"
+          },
+          "401": {
+            "$ref": "#/components/responses/invalidSignature"
           },
           "500": {
             "$ref": "#/components/responses/failed"
@@ -4177,6 +4192,9 @@
           "200": {
             "$ref": "#/components/responses/received"
           },
+          "401": {
+            "$ref": "#/components/responses/invalidSignature"
+          },
           "500": {
             "$ref": "#/components/responses/failed"
           }
@@ -4190,7 +4208,7 @@
           "Webhooks"
         ],
         "summary": "Flutterwave webhook",
-        "description": "Verified by the `flutterwave-signature` header, an HMAC-SHA256 of the raw\nbody keyed by the dashboard's secret hash. A body whose signature does not\nmatch is stored unverified and applied to nothing.\n",
+        "description": "Verified by the `flutterwave-signature` header, an HMAC-SHA256 of the raw\nbody keyed by the dashboard's secret hash. A body whose signature does not\nmatch is stored unverified, applied to nothing, and answered 401.\n",
         "security": [],
         "parameters": [
           {
@@ -4228,6 +4246,9 @@
         "responses": {
           "200": {
             "$ref": "#/components/responses/received"
+          },
+          "401": {
+            "$ref": "#/components/responses/invalidSignature"
           },
           "500": {
             "$ref": "#/components/responses/failed"
@@ -4936,6 +4957,7 @@
       },
       "PaymentMethod": {
         "type": "string",
+        "description": "`card` is reserved for the hosted card checkout, deferred (marketplace-spec.md\nR3.2, 2026-10-17): it is never offered and a payment request naming it is a 422.\n",
         "enum": [
           "momo_mtn",
           "momo_airtel",
@@ -5058,7 +5080,7 @@
         ],
         "properties": {
           "method": {
-            "description": "One of the active provider's methods (`GET /api/payment-methods`). Anything else is a 422.",
+            "description": "One of the methods on offer (`GET /api/payment-methods`); it decides which provider is prompted. Anything else is a 422.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/PaymentMethod"
@@ -8140,7 +8162,7 @@
         }
       },
       "received": {
-        "description": "The delivery is on record (applied, ignored, or refused as unsigned).",
+        "description": "The delivery is on record, applied or ignored.",
         "content": {
           "application/json": {
             "schema": {
@@ -8154,6 +8176,19 @@
                   "const": true
                 }
               }
+            }
+          }
+        }
+      },
+      "invalidSignature": {
+        "description": "The signature did not verify. The delivery is stored unverified and changed nothing (T3.3).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "invalid_signature"
             }
           }
         }

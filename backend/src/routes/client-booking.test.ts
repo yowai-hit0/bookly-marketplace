@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createPrismaClient } from '../db/client.js';
 import type { PaymentProvider } from '../payments/provider.js';
+import { type PaymentRouting, routePayments } from '../payments/routing.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
   CLIENT,
@@ -16,6 +17,7 @@ import {
   insertBookingWithToken,
   insertPayment,
   seedWorld,
+  routeTo,
   stubProvider,
 } from '../test/payment-fixtures.js';
 
@@ -33,7 +35,11 @@ import {
  * carrying the booking as it stands. Paying the session fee is 201 with the new
  * `our_ref`, 409 for an attempt already waiting or nothing left to owe, 422
  * naming the field for a method not on offer or an unusable number, and 502
- * when the provider will not start it. Everything is `no-store`, all of it is
+ * when the provider will not start it. The method picks the provider (R3.1):
+ * Airtel to Flutterwave, MTN MoMo where it is routed, card and unrouted or
+ * unconfigured methods a 422; the amount is the booking's, never the body's.
+ * A photographer suspended since the booking does not stop its session fee
+ * (R5.5, T9.2). Everything is `no-store`, all of it is
  * anonymous, the payments route does not exist without a provider, and none of
  * it exists unless the public API is mounted.
  */
@@ -63,12 +69,14 @@ beforeEach(async () => {
 
 // --- Helpers ----------------------------------------------------------------------------
 
-function appWith(provider: PaymentProvider = stubProvider(), providerTimeoutMs?: number): Express {
+/** An app paying through `provider` for every method it collects, or through a routing of the test's own (R3.1). */
+function appWith(provider: PaymentProvider | PaymentRouting = stubProvider(), providerTimeoutMs?: number): Express {
+  const routing = 'providerFor' in provider ? provider : routeTo(provider);
   return createApp({
     publicApi: {
       prisma,
       now: () => NOW,
-      payments: { provider, secret: TEST_SECRET, ...(providerTimeoutMs === undefined ? {} : { providerTimeoutMs }) },
+      payments: { routing, secret: TEST_SECRET, ...(providerTimeoutMs === undefined ? {} : { providerTimeoutMs }) },
     },
   });
 }
@@ -581,7 +589,7 @@ describe('POST /api/booking/:token/payments', () => {
     expect((await paymentRows()).map((row) => row.status)).toEqual(['succeeded', 'failed', 'pending']);
   });
 
-  it('offers a method only when the active provider collects it', async () => {
+  it('offers a method only when it is routed to a configured provider', async () => {
     const { token } = await payableBooking();
     const provider = stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel', 'card'] });
 
@@ -589,6 +597,81 @@ describe('POST /api/booking/:token/payments', () => {
 
     expect(res.status, res.text).toBe(201);
     expect(provider.initiated[0]).toMatchObject({ method: 'momo_airtel' });
+  });
+});
+
+describe('POST /api/booking/:token/payments: the method picks the provider (R3.1)', () => {
+  async function rows(): Promise<{ provider: string; method: string | null; kind: string }[]> {
+    return (await raw.query<{ provider: string; method: string | null; kind: string }>(
+      `SELECT provider, method, kind FROM payment WHERE kind = 'session_fee' ORDER BY initiated_at`,
+    )).rows;
+  }
+
+  it('sends Airtel Money to Flutterwave and MTN MoMo to MTN direct', async () => {
+    const mtn = stubProvider();
+    const flutterwave = stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] });
+    const app = appWith(routePayments({ momo_mtn: mtn, momo_airtel: flutterwave }));
+    const first = await payableBooking();
+    const second = await payableBooking();
+
+    expect((await request(app).post(`${bookingUrl(first.token)}/payments`).send(payBody({ method: 'momo_airtel', phone: '0731234567' }))).status).toBe(201);
+    expect((await request(app).post(`${bookingUrl(second.token)}/payments`).send(payBody())).status).toBe(201);
+
+    expect(flutterwave.initiated).toStrictEqual([expect.objectContaining({ method: 'momo_airtel', kind: 'session_fee', bookingReference: first.booking.reference })]);
+    expect(mtn.initiated).toStrictEqual([expect.objectContaining({ method: 'momo_mtn', kind: 'session_fee', bookingReference: second.booking.reference })]);
+    expect(await rows()).toEqual([
+      { provider: 'flutterwave', method: 'momo_airtel', kind: 'session_fee' },
+      { provider: 'mtn_momo_direct', method: 'momo_mtn', kind: 'session_fee' },
+    ]);
+  });
+
+  it.each([
+    ['card, which nothing collects', { method: 'card', phone: '0788123456' }, () => routeTo(stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel', 'card'] }))],
+    ['Airtel Money when only MTN direct is routed', { method: 'momo_airtel', phone: '0731234567' }, () => routeTo(stubProvider())],
+    ['MTN MoMo routed to an unconfigured provider', { method: 'momo_mtn', phone: '0788123456' }, () => routeTo(stubProvider({ configured: false }))],
+  ])('422 on method for %s, recording nothing', async (_case, body, routing) => {
+    const { token } = await payableBooking();
+
+    const res = await request(appWith(routing())).post(`${bookingUrl(token)}/payments`).send(body);
+
+    expect(res.status, res.text).toBe(422);
+    expect(res.body).toStrictEqual({ error: 'validation_failed', fields: ['method'] });
+    expect(await rows()).toEqual([]);
+  });
+
+  it('charges what the booking owes, whatever amount or provider the body names', async () => {
+    const { token } = await payableBooking();
+    const mtn = stubProvider();
+    const flutterwave = stubProvider({ id: 'flutterwave', methods: ['momo_airtel'] });
+
+    const res = await request(appWith(routePayments({ momo_mtn: mtn, momo_airtel: flutterwave })))
+      .post(`${bookingUrl(token)}/payments`)
+      .send(payBody({ amountRwf: 1, amount: 1, provider: 'flutterwave' }));
+
+    expect(res.status, res.text).toBe(201);
+    expect(flutterwave.initiated).toEqual([]);
+    // 40,000 package + 10,000 add-on, less the 20,000 booking fee.
+    expect(mtn.initiated).toStrictEqual([expect.objectContaining({ amountRwf: 30_000 })]);
+  });
+});
+
+describe('POST /api/booking/:token/payments for a photographer suspended since (R5.5, T9.2)', () => {
+  it.each(['confirmed', 'completed'])('still takes the session fee of a %s booking: existing bookings carry on', async (status) => {
+    const { token } = await payableBooking({ status });
+    await raw.query(`UPDATE photographer SET status = 'suspended', suspended_at = now() WHERE id = $1`, [world.photographerId]);
+    const provider = stubProvider();
+
+    const res = await request(appWith(provider)).post(`${bookingUrl(token)}/payments`).send(payBody());
+
+    expect(res.status, res.text).toBe(201);
+    expect(provider.initiated).toStrictEqual([expect.objectContaining({ kind: 'session_fee', amountRwf: 30_000 })]);
+  });
+
+  it('still shows the booking page of a suspended photographer’s booking', async () => {
+    const { token } = await payableBooking();
+    await raw.query(`UPDATE photographer SET status = 'suspended', suspended_at = now() WHERE id = $1`, [world.photographerId]);
+
+    expect((await request(appWith()).get(bookingUrl(token))).status).toBe(200);
   });
 });
 

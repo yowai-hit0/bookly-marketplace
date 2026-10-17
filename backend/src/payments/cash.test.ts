@@ -166,6 +166,17 @@ describe('an online payment that may be moving (in_progress)', () => {
     expect(await cash(booking.id, 30_000)).toStrictEqual({ status: 'in_progress' });
     expect(await sessionFees(booking.id)).toHaveLength(1);
   });
+
+  // R3.1 (2026-10-17): an ask the client has started paying is timed from that attempt.
+  it('refuses while the client’s attempt on the photographer’s own ask may still be at the provider', async () => {
+    const booking = await owingBooking();
+    await requestSessionFee({ prisma, providerId: 'mtn_momo_direct', now: () => NOW, photographerId: world.photographerId }, booking.id);
+    const [ask] = await sessionFees(booking.id);
+    await raw.query(`UPDATE payment SET initiated_at = now() - interval '1 day', method = 'momo_mtn', updated_at = now() WHERE id = $1`, [ask?.id]);
+
+    expect(await cash(booking.id, 30_000)).toStrictEqual({ status: 'in_progress' });
+    expect((await sessionFees(booking.id)).map((row) => row.status)).toEqual(['initiated']);
+  });
 });
 
 describe('an open online request', () => {

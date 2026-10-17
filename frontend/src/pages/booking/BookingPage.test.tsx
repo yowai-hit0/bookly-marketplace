@@ -631,6 +631,40 @@ describe('the session fee (plan.md Task 18)', () => {
     expect(payButton()).toBeInTheDocument()
   })
 
+  // Phase 3 (marketplace-spec.md R3.1): the session fee offers exactly what the API routes, as the checkout does.
+  it('offers Airtel Money alone for an Airtel-only configuration and pays the fee with it', async () => {
+    const { payBodies } = stubApi({ methods: () => json({ methods: ['momo_airtel'] }) })
+    await renderLoaded()
+
+    expect(screen.getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual(['Airtel Money'])
+    expect(screen.getByRole('radio', { name: 'Airtel Money' })).toBeChecked()
+    expect(document.querySelector('input[value="momo_mtn"], input[value="card"]')).toBeNull()
+    expect(screen.getByText('We will send a payment request to this phone. Approve it with your Mobile Money PIN.')).toBeInTheDocument()
+
+    await user().click(payButton())
+    expect(phoneField()).toHaveAttribute('aria-invalid', 'true')
+    expect(payBodies).toEqual([])
+
+    await user().type(phoneField(), '0731234567')
+    await user().click(payButton())
+
+    await screen.findByRole('heading', { level: 1, name: 'Approve the payment on your phone' })
+    expect(payBodies).toStrictEqual([{ method: 'momo_airtel', phone: '0731234567' }])
+  })
+
+  it('offers both MoMo methods, MTN first, and sends the one chosen', async () => {
+    const { payBodies } = stubApi({ methods: () => json({ methods: ['momo_airtel', 'momo_mtn'] }) })
+    await renderLoaded()
+
+    expect(screen.getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual(['MTN MoMo', 'Airtel Money'])
+    await user().click(screen.getByRole('radio', { name: 'Airtel Money' }))
+    await user().type(phoneField(), '0731234567')
+    await user().click(payButton())
+
+    await screen.findByRole('heading', { level: 1, name: 'Approve the payment on your phone' })
+    expect(payBodies).toStrictEqual([{ method: 'momo_airtel', phone: '0731234567' }])
+  })
+
   it('sends the method and the number, trimmed, and moves to the payment’s progress page', async () => {
     const { payBodies } = stubApi()
     const router = await renderLoaded()

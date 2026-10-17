@@ -581,6 +581,7 @@ describe('lookupStatus', () => {
         method: 'momo_mtn',
         failureReason: null,
         amount: 19_500,
+        currency: 'EUR',
       },
       payload: body,
     });
@@ -747,6 +748,25 @@ describe('parseWebhook: MTN’s status in our vocabulary', () => {
       reportedStatus,
       method: 'momo_mtn',
     });
+  });
+
+  // The webhook path ignores a success in another currency (marketplace-spec.md T3.3).
+  it.each([
+    ['EUR', 'EUR'],
+    ['RWF', 'RWF'],
+    ['rwf', 'RWF'],
+    [' RWF ', 'RWF'],
+  ])('reads the currency %j as %j', (currency, expected) => {
+    expect(parse({ externalId: OUR_REF, status: 'SUCCESSFUL', currency })?.currency).toBe(expected);
+  });
+
+  it('reads no currency as not stated', () => {
+    expect(parse({ externalId: OUR_REF, status: 'SUCCESSFUL' })?.currency).toBeNull();
+    expect(parse({ externalId: OUR_REF, status: 'SUCCESSFUL', currency: null })?.currency).toBeNull();
+  });
+
+  it.each([['EURO'], ['EU'], [''], [978], [{ code: 'RWF' }], ['R W']])('reads an unusable currency %j as INVALID, never as ours', (currency) => {
+    expect(parse({ externalId: OUR_REF, status: 'SUCCESSFUL', currency })?.currency).toBe('INVALID');
   });
 
   it('reads the status case-insensitively, keying the event on the upper-cased status', () => {

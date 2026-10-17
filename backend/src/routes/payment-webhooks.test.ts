@@ -24,6 +24,7 @@ import {
   insertPayment,
   logSink,
   mtnProvider,
+  routeTo,
   mtnStatusBody,
   seedWorld,
   stubProvider,
@@ -42,13 +43,15 @@ import {
  * the booking (hold nulled, `confirmed_at`, token hash and 365-day expiry, both
  * emails, a paid checkout that answers a second payment with 409). A duplicate is
  * one applied and one ignored row and one confirmation, concurrently too; a bad
- * signature is stored unverified, applies nothing, and is answered 200 with the
- * same body as anything else; an unmatched event is 200 and kept; a late success
- * re-confirms or is flagged for refund; a processing failure is a 500 whose retry
- * is processed. The plaintext token, generated for real, is in the outbox payload
- * and in no column of any table and no response. Unusable bodies are stored and
- * answered 200; an oversized one is a 413, never a 500. Only POST and PUT on the
- * exact path exist, and only when webhooks are mounted.
+ * signature is stored unverified, changes nothing, and is answered 401
+ * (marketplace-spec.md T3.3, 2026-10-17); a correct callback for the wrong
+ * amount or currency is 200 and ignored; an unmatched event is 200 and kept; a
+ * late success re-confirms or is flagged for refund; a processing failure is a
+ * 500 whose retry is processed. The plaintext token, generated for real, is in
+ * the outbox payload and in no column of any table and no response. Unusable
+ * bodies are stored -- refused 401 when they cannot be about the payment the URL
+ * signs, 200 when they are -- and an oversized one is a 413, never a 500. Only
+ * POST and PUT on the exact path exist, and only when webhooks are mounted.
  */
 
 let prisma: PrismaClient;
@@ -99,7 +102,7 @@ function fakeMtn(): FakeMtn {
 
 function appWith(provider: PaymentProvider, extra: { newAccessToken?: () => { token: string; hash: string } } = {}): Express {
   return createApp({
-    publicApi: { prisma, now: () => NOW, payments: { provider, secret: TEST_SECRET } },
+    publicApi: { prisma, now: () => NOW, payments: { routing: routeTo(provider), secret: TEST_SECRET } },
     webhooks: { prisma, providers: { mtn_momo_direct: provider }, log: sink.log, ...extra },
   });
 }
@@ -125,6 +128,12 @@ function callback(app: Express, path: string, body: unknown, method: 'post' | 'p
 function expectReceived(res: request.Response): void {
   expect(res.status, res.text).toBe(200);
   expect(res.body).toStrictEqual({ received: true });
+}
+
+/** A delivery whose signature failed: on record, applied to nothing, and a 401 (T3.3). */
+function expectRefused(res: request.Response): void {
+  expect(res.status, res.text).toBe(401);
+  expect(res.body).toStrictEqual({ error: 'invalid_signature' });
 }
 
 async function rows<T extends pg.QueryResultRow>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -390,38 +399,83 @@ describe('the raw body', () => {
 // --- Verification and matching ---------------------------------------------------------------
 
 describe('what the route answers', () => {
-  it('200 for a bad signature, stored unverified and ignored, applying nothing -- with the same body as an applied event', async () => {
+  it('401 for a bad signature, stored unverified and ignored, changing nothing (T3.3)', async () => {
     const mtn = fakeMtn();
     const app = appWith(mtn.provider);
     const booking = await insertBooking(prisma, world);
     const { ourRef, path } = await startPayment(app, mtn, booking.reference);
     const forged = `${path.slice(0, -1)}${path.endsWith('A') ? 'B' : 'A'}`;
+    const bookingBefore = await rows('SELECT row_to_json(b)::text AS json FROM booking b');
+    const paymentBefore = await rows('SELECT row_to_json(p)::text AS json FROM payment p');
 
     const res = await callback(app, forged, mtnStatusBody(ourRef, 'SUCCESSFUL'));
 
-    expectReceived(res);
+    expectRefused(res);
     expect(await events()).toMatchObject([{ event_id: expect.stringMatching(/^unverified:/), signature_valid: false, status: 'ignored', our_ref: ourRef }]);
-    expect((await bookingStatus(booking.reference)).status).toBe('pending_payment');
-    expect(await rows('SELECT status FROM payment')).toEqual([{ status: 'pending' }]);
+    expect(await rows('SELECT row_to_json(b)::text AS json FROM booking b')).toEqual(bookingBefore);
+    expect(await rows('SELECT row_to_json(p)::text AS json FROM payment p')).toEqual(paymentBefore);
     expect(await outbox()).toEqual([]);
 
-    const genuine = await callback(app, path, mtnStatusBody(ourRef, 'SUCCESSFUL'));
-    expect(genuine.text).toBe(res.text);
+    // The forgery took no event id the genuine delivery needs.
+    expectReceived(await callback(app, path, mtnStatusBody(ourRef, 'SUCCESSFUL')));
     expect((await bookingStatus(booking.reference)).status).toBe('confirmed');
   });
 
-  it('200 for a forged callback to a guessed URL for a real payment, applying nothing', async () => {
+  it('401 for a forged callback to a guessed URL for a real payment, applying nothing', async () => {
     const mtn = fakeMtn();
     const app = appWith(mtn.provider);
     const booking = await insertBooking(prisma, world);
     const { ourRef } = await startPayment(app, mtn, booking.reference);
 
     for (const path of [`/api/webhooks/mtn-momo/${ourRef}/${'A'.repeat(43)}`, `/api/webhooks/mtn-momo/${ourRef}/${checkoutToken(TEST_SECRET, ourRef)}`]) {
-      expectReceived(await callback(app, path, mtnStatusBody(ourRef, 'SUCCESSFUL')));
+      expectRefused(await callback(app, path, mtnStatusBody(ourRef, 'SUCCESSFUL')));
     }
 
     expect((await events()).map((row) => row.signature_valid)).toEqual([false, false]);
     expect((await bookingStatus(booking.reference)).status).toBe('pending_payment');
+  });
+
+  it('401 for a genuine URL carrying a body about another payment, applying nothing to either', async () => {
+    const mtn = fakeMtn();
+    const app = appWith(mtn.provider);
+    const first = await insertBooking(prisma, world);
+    const second = await insertBooking(prisma, world);
+    const a = await startPayment(app, mtn, first.reference);
+    const b = await startPayment(app, mtn, second.reference);
+
+    expectRefused(await callback(app, a.path, mtnStatusBody(b.ourRef, 'SUCCESSFUL')));
+
+    expect((await bookingStatus(first.reference)).status).toBe('pending_payment');
+    expect((await bookingStatus(second.reference)).status).toBe('pending_payment');
+  });
+
+  it('200 and ignored for a correct callback reporting another amount than the payment froze (T3.3)', async () => {
+    const mtn = fakeMtn();
+    const app = appWith(mtn.provider);
+    const booking = await insertBooking(prisma, world);
+    const { ourRef, path } = await startPayment(app, mtn, booking.reference);
+
+    expectReceived(await callback(app, path, mtnStatusBody(ourRef, 'SUCCESSFUL', { amount: '19999' })));
+
+    expect(await events()).toMatchObject([{ signature_valid: true, status: 'ignored', processing_error: 'amount_mismatch' }]);
+    expect((await bookingStatus(booking.reference)).status).toBe('pending_payment');
+    expect(await rows('SELECT status FROM payment')).toEqual([{ status: 'pending' }]);
+    expect(await outbox()).toEqual([]);
+  });
+
+  it('200 and ignored for a correct callback reporting another currency than MTN charges (T3.3)', async () => {
+    const mtn = fakeMtn();
+    const app = appWith(mtn.provider);
+    const booking = await insertBooking(prisma, world);
+    const { ourRef, path } = await startPayment(app, mtn, booking.reference);
+
+    // The sandbox provider charges EUR.
+    expectReceived(await callback(app, path, mtnStatusBody(ourRef, 'SUCCESSFUL', { currency: 'RWF' })));
+
+    expect(await events()).toMatchObject([{ signature_valid: true, status: 'ignored', processing_error: 'currency_mismatch' }]);
+    expect((await bookingStatus(booking.reference)).status).toBe('pending_payment');
+    expect(await rows('SELECT status FROM payment')).toEqual([{ status: 'pending' }]);
+    expect(await outbox()).toEqual([]);
   });
 
   it('200 for a duplicate delivery: one applied row, one ignored row, one booking_confirmation', async () => {
@@ -556,22 +610,34 @@ describe('bodies that are not what MTN sends', () => {
     ['JSON null', 'null'],
     ['a 60 KB JSON body', JSON.stringify({ status: 'PENDING', filler: 'x'.repeat(60_000) })],
     ['a 60 KB body of characters JSON escapes', '"\\'.repeat(30_000)],
-  ])('%s: stored and answered 200, never 500', async (_case, body) => {
+  ])('%s: stored unverified and refused 401 -- it names no payment the URL signs -- never 500', async (_case, body) => {
+    const { res, rows: stored } = await send(body);
+
+    expectRefused(res);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ status: 'ignored', signature_valid: false });
+  });
+
+  it.each([
+    ['a JSON \\u0000 escape', '{"externalId":"3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8","status":"SUCCESSFUL","note":"a\\u0000b"}'],
+    ['a lone surrogate escape', '{"externalId":"3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8","status":"PENDING","\\udc00":"\\ud800"}'],
+    ['no status at all', '{"externalId":"3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8"}'],
+  ])('%s in a body about the payment the URL signs: stored and answered 200, never 500', async (_case, body) => {
     const { res, rows: stored } = await send(body);
 
     expectReceived(res);
     expect(stored).toHaveLength(1);
-    expect(stored[0]?.status).toBe('ignored');
+    expect(stored[0]).toMatchObject({ status: 'ignored', signature_valid: true });
   });
 
-  it('an empty body: stored with a null payload and answered 200', async () => {
+  it('an empty body: stored with a null payload and refused 401', async () => {
     const mtn = fakeMtn();
     const app = appWith(mtn.provider);
 
     const res = await rawRequest(app, 'POST', callbackPath(mtn.provider, '3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8'), Buffer.alloc(0));
 
-    expect(res.status).toBe(200);
-    expect(await events()).toMatchObject([{ payload: null, status: 'ignored' }]);
+    expect(res.status).toBe(401);
+    expect(await events()).toMatchObject([{ payload: null, status: 'ignored', signature_valid: false }]);
   });
 
   it('a body over 64 KB: refused 413 unread, never a 500, and nothing stored', async () => {
@@ -584,10 +650,10 @@ describe('bodies that are not what MTN sends', () => {
 
   // Fails today: a deeply nested body overflows the stack in webhooks.ts `scrub`, before anything is
   // stored, so the route answers 500 and the provider is asked to retry a delivery that can never succeed.
-  it('a deeply nested JSON body (5,000 levels, 10 KB): stored and answered 200, never 500', async () => {
+  it('a deeply nested JSON body (5,000 levels, 10 KB): stored and refused 401, never 500', async () => {
     const { res, rows: stored } = await send(`${'['.repeat(5_000)}${']'.repeat(5_000)}`);
 
-    expectReceived(res);
+    expectRefused(res);
     expect(stored).toHaveLength(1);
   });
 });
@@ -626,7 +692,7 @@ describe('routing', () => {
     const path = callbackPath(mtn.provider, '3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8');
     const apps = [
       createApp(),
-      createApp({ publicApi: { prisma, payments: { provider: mtn.provider, secret: TEST_SECRET } } }),
+      createApp({ publicApi: { prisma, payments: { routing: routeTo(mtn.provider), secret: TEST_SECRET } } }),
       createApp({ webhooks: { prisma, providers: {}, log: sink.log } }),
     ];
 
@@ -637,13 +703,13 @@ describe('routing', () => {
     expect(await events()).toEqual([]);
   });
 
-  it('keeps accepting MTN callbacks when another provider is active (spec §6.18)', async () => {
+  it('keeps accepting MTN callbacks when another provider collects every method (spec §6.18)', async () => {
     const mtn = fakeMtn();
     const flutterwave = stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel', 'card'] });
     const booking = await insertBooking(prisma, world);
     const payment = await insertPayment(prisma, booking.id, { status: 'pending' });
     const app = createApp({
-      publicApi: { prisma, payments: { provider: flutterwave, secret: TEST_SECRET } },
+      publicApi: { prisma, payments: { routing: routeTo(flutterwave), secret: TEST_SECRET } },
       webhooks: { prisma, providers: { mtn_momo_direct: mtn.provider, flutterwave }, log: sink.log },
     });
 

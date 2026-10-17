@@ -63,9 +63,10 @@ async function waiting(ageSeconds: number, status = 'pending', provider: 'mtn_mo
   return { booking, payment };
 }
 
-/** A provider whose lookup answers MTN's body with `status` for every reference. */
+/** A provider whose lookup answers MTN's body with `status` for every reference, charging EUR as the sandbox body says. */
 function answering(status: string | ((ourRef: string) => string | null)) {
   return stubProvider({
+    currency: 'EUR',
     lookupStatus: async (ourRef) => {
       const answer = typeof status === 'string' ? status : status(ourRef);
       if (answer === null) return null;
@@ -220,6 +221,7 @@ describe('what the answer does', () => {
   it('does not count a settled answer the rules ignore', async () => {
     const { payment } = await waiting(5 * 60);
     const stub = stubProvider({
+      currency: 'EUR',
       lookupStatus: async (ourRef) => {
         const payload = mtnStatusBody(ourRef, 'SUCCESSFUL', { amount: '1' });
         return { event: readEvent(ourRef, payload, 'requesttopay_status') ?? (null as never), payload };
@@ -229,6 +231,30 @@ describe('what the answer does', () => {
     await expect(reconcilePendingPayments({ prisma, provider: stub, log: sink.log })).resolves.toBe(0);
     expect(await statusOf('payment', payment.id)).toBe('pending');
     expect((await eventRows())[0]).toMatchObject({ status: 'ignored', processing_error: 'amount_mismatch' });
+  });
+});
+
+describe('the currency of a looked-up success (marketplace-spec.md T3.3)', () => {
+  it('ignores a success in another currency than the provider charges, as a webhook would', async () => {
+    const { booking, payment } = await waiting(5 * 60);
+    // The lookup reports EUR; this provider charges RWF.
+    const stub = answering('SUCCESSFUL');
+    const rwf = stubProvider({ id: stub.id, currency: 'RWF', lookupStatus: stub.lookupStatus });
+
+    await expect(reconcilePendingPayments({ prisma, provider: rwf, log: sink.log })).resolves.toBe(0);
+
+    expect(await statusOf('payment', payment.id)).toBe('pending');
+    expect(await statusOf('booking', booking.id)).toBe('pending_payment');
+    expect((await eventRows())[0]).toMatchObject({ status: 'ignored', processing_error: 'currency_mismatch', signature_valid: true });
+    expect(sink.entries).toContainEqual(expect.objectContaining({ event: 'webhook_currency_mismatch', expected: 'RWF', reported: 'EUR' }));
+  });
+
+  it('settles a success in the currency the provider charges', async () => {
+    const { booking } = await waiting(5 * 60);
+
+    await expect(reconcilePendingPayments({ prisma, provider: answering('SUCCESSFUL'), log: sink.log })).resolves.toBe(1);
+
+    expect(await statusOf('booking', booking.id)).toBe('confirmed');
   });
 });
 

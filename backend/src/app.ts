@@ -6,7 +6,7 @@ import type { GoogleIdentityProvider } from './auth/google.js';
 import { AUTH_AREAS } from './auth/roles.js';
 import { areaIpKey, createLimiters, emailKey, type RateLimitOverrides, rateLimit } from './http/rate-limit.js';
 import { securityHeaders } from './http/security-headers.js';
-import type { PaymentProvider } from './payments/provider.js';
+import { type PaymentRouting, requestProvider } from './payments/routing.js';
 import { accountRouter } from './routes/account.js';
 import { healthRouter } from './routes/health.js';
 import { clientBookingRouter } from './routes/client-booking.js';
@@ -43,8 +43,9 @@ export type AppOptions = {
     now?: () => Date;
     /** Mounts the checkout (`/api/payment-methods`, `/api/checkout/*`,
      *  `/api/payments/*`) and puts a checkout token on each created booking
-     *  (plan.md Task 16). `secret` is `SESSION_SECRET`. */
-    payments?: { provider: PaymentProvider; secret: string; providerTimeoutMs?: number };
+     *  (plan.md Task 16). `routing` is which methods are offered and who
+     *  collects each (marketplace-spec.md R3.1); `secret` is `SESSION_SECRET`. */
+    payments?: { routing: PaymentRouting; secret: string; providerTimeoutMs?: number };
     /** "Email me my links" (`/api/booking-links`): its limiter and hooks, for tests. */
     bookingLinks?: Pick<BookingLinksDeps, 'limiter' | 'onWork' | 'log'>;
   };
@@ -127,7 +128,7 @@ export function createApp(options: AppOptions = {}): Express {
           ? {}
           : {
               payments: {
-                provider: clientPayments.provider,
+                routing: clientPayments.routing,
                 ...(clientPayments.providerTimeoutMs === undefined ? {} : { providerTimeoutMs: clientPayments.providerTimeoutMs }),
               },
             }),
@@ -135,9 +136,11 @@ export function createApp(options: AppOptions = {}): Express {
     );
   }
   if (options.auth) {
-    // The provider the client would pay through is the provider a session-fee
-    // request is opened against: one active provider, never two (spec §6.18).
-    const providerId = options.publicApi?.payments?.provider.id;
+    // A session-fee request is recorded against the provider of the first
+    // method on offer, and moves to the client's own method when they pay
+    // (payments/initiate.ts). Nothing on offer: the request route is absent.
+    const routing = options.publicApi?.payments?.routing;
+    const providerId = routing === undefined ? undefined : requestProvider(routing)?.id;
     app.use('/api/studio', studioRouter({ ...options.auth, ...(providerId === undefined ? {} : { paymentProviderId: providerId }) }));
     app.use('/api/platform', platformRouter(options.auth));
     app.use('/api/account', accountRouter({ ...options.auth, ...(options.google === undefined ? {} : { google: options.google }) }));

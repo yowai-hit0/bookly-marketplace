@@ -1,6 +1,7 @@
 import type { Booking, PrismaClient } from '@prisma/client';
 import { generateAccessToken } from '../booking/access-token.js';
 import { MtnMomoProvider } from '../payments/mtn-momo.js';
+import { type PaymentRouting, routePayments } from '../payments/routing.js';
 import type {
   InitiatePaymentRequest,
   InitiatePaymentResult,
@@ -348,6 +349,8 @@ export type StubBehaviour = {
   id?: PaymentProviderId;
   methods?: readonly PaymentMethod[];
   configured?: boolean;
+  /** Defaults to EUR: the stub is MTN direct in its sandbox, the currency `mtnStatusBody` reports. */
+  currency?: string;
   initiate?: (request: InitiatePaymentRequest, signal: AbortSignal) => Promise<InitiatePaymentResult>;
   lookupStatus?: (ourRef: string, signal: AbortSignal) => Promise<{ event: ProviderEvent; payload: unknown } | null>;
   verifyWebhook?: (delivery: WebhookDelivery) => boolean;
@@ -363,6 +366,7 @@ export function stubProvider(behaviour: StubBehaviour = {}): StubProvider {
     id: behaviour.id ?? 'mtn_momo_direct',
     methods: behaviour.methods ?? ['momo_mtn'],
     configured: behaviour.configured ?? true,
+    currency: behaviour.currency ?? 'EUR',
     initiated,
     lookedUp,
     deliveries,
@@ -382,6 +386,19 @@ export function stubProvider(behaviour: StubBehaviour = {}): StubProvider {
       return behaviour.parseWebhook ? behaviour.parseWebhook(delivery) : null;
     },
   };
+}
+
+/**
+ * The routing a suite pays through (R3.1): every method each provider collects
+ * goes to it, the later provider winning a method both collect -- so
+ * `routeTo(mtn, flutterwave)` sends MTN MoMo to Flutterwave and
+ * `routeTo(flutterwave, mtn)` sends it to MTN direct. `routePayments` still
+ * drops an unconfigured provider, as production does.
+ */
+export function routeTo(...providers: PaymentProvider[]): PaymentRouting {
+  const routes: Partial<Record<PaymentMethod, PaymentProvider>> = {};
+  for (const provider of providers) for (const method of provider.methods) routes[method] = provider;
+  return routePayments(routes);
 }
 
 export const MTN_CREDENTIALS = { subscriptionKey: 'sub-key-0123', apiUser: 'b1a7c2d4-0000-4000-8000-000000000001', apiKey: 'api-key-secret-9876' } as const;

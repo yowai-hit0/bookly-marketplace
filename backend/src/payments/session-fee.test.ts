@@ -707,6 +707,30 @@ describe('asking while the client is already paying', () => {
     expect(await findBookingByToken(prisma, old)).toBeNull();
   });
 
+  // R3.1 (2026-10-17): the client's attempt on an ask is timed from the attempt, which stamps its method.
+  it('waits while the client’s attempt on the ask itself could still be at the provider', async () => {
+    const { booking } = await owingBooking();
+    expect((await requestSessionFee(deps(), booking.id)).status).toBe('ok');
+    const [ask] = await sessionFees();
+    await raw.query(`UPDATE payment SET initiated_at = now() - interval '1 day', method = 'momo_airtel', updated_at = now() WHERE id = $1`, [ask?.id]);
+    const linkBefore = await raw.query<{ access_token_hash: string }>('SELECT access_token_hash FROM booking WHERE id = $1', [booking.id]);
+
+    expect(await requestSessionFee(deps(), booking.id)).toStrictEqual({ status: 'in_progress' });
+
+    expect(await sessionFees()).toHaveLength(1);
+    // The link the client is paying through is not rotated out from under them.
+    expect((await raw.query('SELECT access_token_hash FROM booking WHERE id = $1', [booking.id])).rows).toEqual(linkBefore.rows);
+  });
+
+  it('asks again once the client’s attempt on the ask is too old to be a call in flight', async () => {
+    const { booking } = await owingBooking();
+    expect((await requestSessionFee(deps(), booking.id)).status).toBe('ok');
+    const [ask] = await sessionFees();
+    await raw.query(`UPDATE payment SET method = 'momo_mtn', updated_at = now() - interval '2 minutes' WHERE id = $1`, [ask?.id]);
+
+    expect((await requestSessionFee(deps(), booking.id)).status).toBe('ok');
+  });
+
   it('does block once that attempt reaches pending', async () => {
     const { booking, token: old } = await owingBooking();
     await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, ageSeconds: 5 });

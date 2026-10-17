@@ -7,7 +7,8 @@ import { requestEmailChange } from '../booking/email-change.js';
 import { type ClientBookingView, clientBookingView } from '../booking/client-view.js';
 import { normalizePhone } from '../booking/phone.js';
 import { startSessionFeePayment } from '../payments/initiate.js';
-import type { PaymentMethod, PaymentProvider } from '../payments/provider.js';
+import type { PaymentMethod } from '../payments/provider.js';
+import type { PaymentRouting } from '../payments/routing.js';
 import { parseOrReject } from './validation.js';
 
 /**
@@ -33,6 +34,9 @@ import { parseOrReject } from './validation.js';
  *        429 too_many_requests           three requests a day per booking
  *
  *   POST /api/booking/:token/payments   { method, phone }
+ *        The provider is the one the method routes to (R3.1). Payable whatever
+ *        the photographer's status since: the booking already stands, and
+ *        existing bookings carry on (R5.5, T9.2).
  *        201 { payment: { ourRef, status: 'pending' } }
  *        404 not_found
  *        409 nothing_to_pay | payment_in_progress { payment: { ourRef } }
@@ -50,8 +54,8 @@ import { parseOrReject } from './validation.js';
 export type ClientBookingDeps = {
   prisma: PrismaClient;
   now: () => Date;
-  /** Without a provider the page still works; only the payment control is absent. */
-  payments?: { provider: PaymentProvider; providerTimeoutMs?: number };
+  /** Without payments the page still works; only the payment control is absent. */
+  payments?: { routing: PaymentRouting; providerTimeoutMs?: number };
 };
 
 const PHONE_MAX_LENGTH = 40;
@@ -135,7 +139,7 @@ export function clientBookingRouter(deps: ClientBookingDeps): Router {
     const paymentBody = z.object({
       method: z
         .string()
-        .refine((method) => (payments.provider.methods as readonly string[]).includes(method), 'Method not available'),
+        .refine((method) => payments.routing.providerFor(method) !== undefined, 'Method not available'),
       phone: z
         .string()
         .max(PHONE_MAX_LENGTH)
@@ -151,11 +155,13 @@ export function clientBookingRouter(deps: ClientBookingDeps): Router {
       }
       const body = parseOrReject(paymentBody, req.body, res);
       if (body === undefined) return;
+      const provider = payments.routing.providerFor(body.method);
+      if (provider === undefined) throw new Error('A validated method has no provider');
 
       const result = await startSessionFeePayment(
         {
           prisma,
-          provider: payments.provider,
+          provider,
           ...(payments.providerTimeoutMs === undefined ? {} : { timeoutMs: payments.providerTimeoutMs }),
         },
         {

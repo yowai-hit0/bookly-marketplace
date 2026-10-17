@@ -9,8 +9,18 @@ says, and apply the provider's webhook safely.
 
 Both providers implement one interface, `PaymentProvider`
 (`src/payments/provider.ts`): `initiate`, `lookupStatus`, `verifyWebhook`,
-`parseWebhook`. Provider selection is configuration (`PAYMENT_PROVIDER`), not a
-branch in business logic.
+`parseWebhook`. Which provider collects a payment follows the method the client
+chose (`src/payments/routing.ts`), and the routing is configuration, not a
+branch in business logic:
+
+- `momo_mtn` goes where `MOMO_MTN_PROVIDER` says: `mtn_momo_direct` (the
+  default) or `flutterwave`.
+- `momo_airtel` always goes to `flutterwave`.
+- `card` is deferred with the hosted checkout and is never offered.
+- `PAYMENT_METHODS_ENABLED` (optional, e.g. `momo_mtn,momo_airtel`) narrows the
+  list. A method is offered only when its provider is configured, so
+  `GET /api/payment-methods` answers `{ methods }` with exactly what can be
+  collected, possibly nothing.
 
 - **MTN MoMo direct** (`payments/mtn-momo.ts`) — the development phase. MTN
   signs nothing it sends, so the callback's authenticity is carried by the URL:
@@ -21,8 +31,9 @@ branch in business logic.
   the raw body against the dashboard's secret hash.
 
 Both providers stay mounted after a cutover (`payments/providers.ts`), so
-in-flight MTN payments still settle and switching back is a one-variable
-rollback.
+in-flight MTN payments still settle and switching `MOMO_MTN_PROVIDER` back is a
+one-variable rollback. The retired `PAYMENT_PROVIDER` is refused at startup
+unless it says `mtn_momo_direct`, the new default.
 
 ## Starting an attempt
 
@@ -32,7 +43,10 @@ rollback.
    **insert the `payment` row** (`initiated`, with its own `our_ref`) — so an
    attempt that never reaches the provider is still on record. The amount is the
    frozen `booking_fee_rwf` or the outstanding total; never a number the client
-   sent.
+   sent. The row records the provider the method routes to and the method
+   itself. A booking fee for a photographer who can no longer be booked is
+   `409 photographer_unavailable` and records nothing; a session fee on an
+   existing booking stays payable whatever the photographer's status.
 2. Outside any transaction, call the provider. A slow provider must not hold a
    row lock or a pooled connection; the call has a deadline.
 3. Accepted → `pending` (await the webhook). Refused or unreachable → `failed`
@@ -60,20 +74,22 @@ A second attempt while one is still live on the payer's phone is refused
 
 A `succeeded` event that would confirm a booking takes the slot-claim advisory
 lock first, so a confirmation and a claim can never race. The reported **amount
-is checked** against the payment's frozen amount; a mismatch is logged and the
-event ignored. Money over what the booking is worth — a duplicate fee, or a fee
+and currency are checked** against the payment's frozen amount and the
+currency the provider charges; a mismatch is logged and the event ignored. Money over what the booking is worth — a duplicate fee, or a fee
 after the slot was lost — is settled but marked `refund_due`, and the admin is
 alerted.
 
 Every callback is stored as a `webhook_event` row even when it matches nothing
 or fails verification, because a stray or spoofed post is itself evidence worth
-keeping. The route answers `200` whenever the delivery is on record and `500`
-only when processing genuinely failed (asking the provider to retry).
+keeping. The route answers `401` for a delivery whose signature fails (stored,
+applied to nothing), `200` for any other delivery on record, and `500` only
+when processing genuinely failed (asking the provider to retry).
 
 ## The reconciler
 
 Callbacks get lost, and the MTN sandbox sends none. `payments/reconcile.ts`
-polls the provider's status endpoint for payments still pending and feeds the
+runs one job per configured provider, including one no method routes to any
+more, and polls that provider's status endpoint for payments still pending, feeding the
 result through the *same* apply path, so a reconciled settlement and a webhook
 settlement are indistinguishable and equally idempotent.
 

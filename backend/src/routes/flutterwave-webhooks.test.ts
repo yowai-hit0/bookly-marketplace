@@ -19,6 +19,7 @@ import {
   insertPayment,
   logSink,
   mtnProvider,
+  routeTo,
   mtnStatusBody,
   seedWorld,
 } from '../test/payment-fixtures.js';
@@ -34,8 +35,10 @@ import {
  * started through it is `pending` under `flutterwave` with the `chg_` id as
  * `provider_ref`; a signed `charge.completed` at the static webhook URL confirms
  * the booking and queues both emails; a forged one is stored
- * `signature_valid = false` and applies nothing, and is answered 200 all the
- * same; a webhook and a lookup of the same outcome are one event; a failure is
+ * `signature_valid = false`, changes nothing, and is a 401 (marketplace-spec.md
+ * T3.3, 2026-10-17); a signed one for the wrong amount or currency is 200 and
+ * ignored, and a repeat of an applied one is a duplicate that changes nothing;
+ * a webhook and a lookup of the same outcome are one event; a failure is
  * recorded with the processor code; and MTN's callbacks are still accepted
  * beside Flutterwave's.
  */
@@ -100,7 +103,7 @@ function fakeFlutterwave(): FakeFlutterwave {
 function appWith(fw: FakeFlutterwave): Express {
   const mtn = mtnProvider();
   return createApp({
-    publicApi: { prisma, now: () => NOW, payments: { provider: fw.provider, secret: TEST_SECRET } },
+    publicApi: { prisma, now: () => NOW, payments: { routing: routeTo(mtn, fw.provider), secret: TEST_SECRET } },
     webhooks: { prisma, providers: { mtn_momo_direct: mtn, flutterwave: fw.provider }, log: sink.log },
   });
 }
@@ -137,6 +140,11 @@ function expectReceived(res: request.Response): void {
   expect(res.body).toStrictEqual({ received: true });
 }
 
+function expectRefused(res: request.Response): void {
+  expect(res.status, res.text).toBe(401);
+  expect(res.body).toStrictEqual({ error: 'invalid_signature' });
+}
+
 async function rows<T extends pg.QueryResultRow>(sql: string, params: unknown[] = []): Promise<T[]> {
   return (await raw.query<T>(sql, params)).rows;
 }
@@ -147,11 +155,11 @@ async function bookingStatus(reference: string): Promise<string> {
 
 // --- Tests --------------------------------------------------------------------------------
 
-describe('the checkout with Flutterwave active', () => {
+describe('the checkout with Flutterwave collecting both methods', () => {
   it('offers MTN MoMo and Airtel Money', async () => {
     const res = await request(appWith(fakeFlutterwave())).get('/api/payment-methods');
     expect(res.status, res.text).toBe(200);
-    expect(res.body).toStrictEqual({ provider: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] });
+    expect(res.body).toStrictEqual({ methods: ['momo_mtn', 'momo_airtel'] });
   });
 
   it('records the attempt pending under flutterwave, with the charge id as provider_ref and our_ref as reference', async () => {
@@ -199,20 +207,56 @@ describe('a signed charge.completed at /api/webhooks/flutterwave', () => {
     expect(await rows('SELECT status, failure_reason FROM payment')).toEqual([{ status: 'failed', failure_reason: 'charge_failed_06' }]);
   });
 
-  it('refuses a forgery: stored unverified, applying nothing, answered 200 all the same', async () => {
+  it('refuses a forgery with 401: stored unverified, changing nothing (T3.3)', async () => {
     const app = appWith(fakeFlutterwave());
     const booking = await insertBooking(prisma, world);
     const ourRef = await startPayment(app, booking.reference);
 
-    expectReceived(await webhook(app, charge(ourRef, 'succeeded'), 'a-guessed-hash'));
+    expectRefused(await webhook(app, charge(ourRef, 'succeeded'), 'a-guessed-hash'));
     const unsigned = await request(app).post(FLUTTERWAVE_WEBHOOK_PATH).set('Content-Type', 'application/json').send(JSON.stringify({ type: 'charge.completed', data: charge(ourRef, 'succeeded') }));
-    expectReceived(unsigned);
+    expectRefused(unsigned);
 
     expect(await bookingStatus(booking.reference)).toBe('pending_payment');
     expect(await rows('SELECT status FROM payment')).toEqual([{ status: 'pending' }]);
     expect(await rows('SELECT status, signature_valid FROM webhook_event')).toEqual([
       { status: 'ignored', signature_valid: false },
       { status: 'ignored', signature_valid: false },
+    ]);
+  });
+
+  it.each([
+    ['another amount', { amount: 19_999 }, 'amount_mismatch'],
+    ['another currency', { currency: 'USD' }, 'currency_mismatch'],
+    ['a currency that is no code at all', { currency: 'RWFX' }, 'currency_mismatch'],
+  ])('ignores a signed success for %s, answering 200 and changing nothing (T3.3)', async (_case, extra, note) => {
+    const app = appWith(fakeFlutterwave());
+    const booking = await insertBooking(prisma, world);
+    const ourRef = await startPayment(app, booking.reference);
+
+    expectReceived(await webhook(app, charge(ourRef, 'succeeded', extra)));
+
+    expect(await bookingStatus(booking.reference)).toBe('pending_payment');
+    expect(await rows('SELECT status FROM payment')).toEqual([{ status: 'pending' }]);
+    expect(await rows('SELECT status, signature_valid, processing_error FROM webhook_event')).toEqual([
+      { status: 'ignored', signature_valid: true, processing_error: note },
+    ]);
+    expect(await rows('SELECT template FROM outbox')).toEqual([]);
+  });
+
+  it('does nothing for a duplicate of an applied webhook: one confirmation, one applied row (T3.3)', async () => {
+    const app = appWith(fakeFlutterwave());
+    const booking = await insertBooking(prisma, world);
+    const ourRef = await startPayment(app, booking.reference);
+
+    expectReceived(await webhook(app, charge(ourRef, 'succeeded')));
+    const confirmedAt = await rows('SELECT confirmed_at, access_token_hash FROM booking');
+    expectReceived(await webhook(app, charge(ourRef, 'succeeded')));
+
+    expect(await rows('SELECT confirmed_at, access_token_hash FROM booking')).toEqual(confirmedAt);
+    expect(await rows("SELECT template FROM outbox WHERE template = 'booking_confirmation'")).toHaveLength(1);
+    expect(await rows('SELECT status, processing_error FROM webhook_event ORDER BY received_at')).toEqual([
+      { status: 'applied', processing_error: null },
+      { status: 'ignored', processing_error: expect.stringMatching(/^duplicate_of:/) },
     ]);
   });
 
@@ -233,13 +277,56 @@ describe('a signed charge.completed at /api/webhooks/flutterwave', () => {
   });
 });
 
+describe('split routing: MTN MoMo through MTN direct, Airtel Money through Flutterwave (R3.1)', () => {
+  it('prompts each method through its own provider and settles each through its own webhook', async () => {
+    const fw = fakeFlutterwave();
+    const mtn = mtnProvider({
+      fetch: (async (input: string) =>
+        String(input).endsWith('/collection/token/')
+          ? new Response(JSON.stringify({ access_token: 't', expires_in: 3600 }), { status: 200 })
+          : new Response(null, { status: 202 })) as typeof fetch,
+    });
+    const app = createApp({
+      publicApi: { prisma, now: () => NOW, payments: { routing: routeTo(fw.provider, mtn), secret: TEST_SECRET } },
+      webhooks: { prisma, providers: { mtn_momo_direct: mtn, flutterwave: fw.provider }, log: sink.log },
+    });
+    expect((await request(app).get('/api/payment-methods')).body).toStrictEqual({ methods: ['momo_mtn', 'momo_airtel'] });
+    const airtel = await insertBooking(prisma, world);
+    const momo = await insertBooking(prisma, world);
+
+    const airtelRef = await startPayment(app, airtel.reference, 'momo_airtel', '0731234567');
+    const momoRef = await startPayment(app, momo.reference, 'momo_mtn', '0788123456');
+
+    expect(fw.charges).toMatchObject([{ reference: airtelRef }]);
+    expect(await rows('SELECT our_ref::text AS our_ref, provider, method FROM payment ORDER BY initiated_at')).toEqual([
+      { our_ref: airtelRef, provider: 'flutterwave', method: 'momo_airtel' },
+      { our_ref: momoRef, provider: 'mtn_momo_direct', method: 'momo_mtn' },
+    ]);
+
+    // A Flutterwave webhook cannot settle the MTN payment, nor an MTN callback the Flutterwave one.
+    expectReceived(await webhook(app, charge(momoRef, 'succeeded')));
+    expect(await bookingStatus(momo.reference)).toBe('pending_payment');
+
+    expectReceived(await webhook(app, charge(airtelRef, 'succeeded', { payment_method: { type: 'mobile_money', mobile_money: { network: 'AIRTEL' } } })));
+    expectReceived(
+      await request(app)
+        .post(callbackPath(mtn, momoRef))
+        .set('Content-Type', 'application/json')
+        .send(JSON.stringify(mtnStatusBody(momoRef, 'SUCCESSFUL'))),
+    );
+
+    expect(await bookingStatus(airtel.reference)).toBe('confirmed');
+    expect(await bookingStatus(momo.reference)).toBe('confirmed');
+  });
+});
+
 describe('beside MTN', () => {
-  it('keeps accepting MTN callbacks for MTN payments while Flutterwave is active (spec §6.18)', async () => {
+  it('keeps accepting MTN callbacks for MTN payments while Flutterwave collects every method (spec §6.18)', async () => {
     const mtn = mtnProvider();
     const booking = await insertBooking(prisma, world);
     const payment = await insertPayment(prisma, booking.id, { status: 'pending' });
     const app = createApp({
-      publicApi: { prisma, payments: { provider: fakeFlutterwave().provider, secret: TEST_SECRET } },
+      publicApi: { prisma, payments: { routing: routeTo(fakeFlutterwave().provider), secret: TEST_SECRET } },
       webhooks: { prisma, providers: { mtn_momo_direct: mtn, flutterwave: fakeFlutterwave().provider }, log: sink.log },
     });
 

@@ -13,6 +13,7 @@ import {
   mtnDelivery,
   mtnProvider,
   mtnStatusBody,
+  seedSecondPhotographer,
   seedWorld,
   stubProvider,
 } from '../test/payment-fixtures.js';
@@ -47,6 +48,16 @@ import { receiveWebhook } from './webhooks.js';
  * It is owed only by a confirmed or completed booking, and a second session fee
  * after one has succeeded is a new row, which the booking-fee partial unique
  * index does not touch.
+ *
+ * Phase 3 (marketplace-spec.md R3.1, R3.4, 2026-10-17): the row is recorded
+ * against the provider it was handed, with the method the client chose. An
+ * ask nobody has attempted follows the client's method to its provider,
+ * keeping its `our_ref` and frozen amount; an attempted row never moves. A new
+ * booking fee for a suspended or pending photographer is
+ * `photographer_unavailable` (after `already_paid` and `hold_expired`), with
+ * no row and no prompt, and payable again on reactivation; an attempt started
+ * before a suspension still settles. A session fee stays payable whatever the
+ * photographer's status (R5.5, T9.2).
  */
 
 let prisma: PrismaClient;
@@ -144,7 +155,8 @@ describe('the payment row exists before the provider is called', () => {
       amount_rwf: 19_500,
       status: 'initiated',
       provider_ref: null,
-      method: null,
+      // The client's choice, on record with the attempt (R3.1).
+      method: 'momo_mtn',
       failure_reason: null,
     });
     expect(result).toStrictEqual({ status: 'provider_failed', ourRef: seenByProvider[0]?.our_ref, outcome: 'unavailable' });
@@ -1067,18 +1079,118 @@ describe('a request made from the admin screen, then paid by the client', () => 
     expect((await payments()).find((row) => row.id === first?.id)).toMatchObject({ status: 'initiated', amount_rwf: 30_000 });
   });
 
-  it('opens its own row when the request was recorded against another provider (spec §6.18)', async () => {
+  // R3.1 (2026-10-17): the ask is recorded against the first offered method's
+  // provider, but the client's own method decides who collects it.
+  it('moves an ask nobody has attempted to the provider of the client’s method, keeping its our_ref and frozen amount', async () => {
+    const booking = await owingBooking('completed');
+    await ask(booking.id, 'mtn_momo_direct');
+    const requested = (await payments()).find((row) => row.kind === 'session_fee');
+    await addPostShootAddon(booking.id, 15_000);
+    await ageSessionFees();
+    const flutterwave = stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] });
+
+    const result = await startSessionFeePayment(
+      { prisma, provider: flutterwave },
+      { bookingId: booking.id, reference: booking.reference, method: 'momo_airtel', payerPhone: '+250731234567' },
+    );
+
+    expect(result).toStrictEqual({ status: 'started', ourRef: requested?.our_ref });
+    expect(flutterwave.initiated).toStrictEqual([expect.objectContaining({ ourRef: requested?.our_ref, amountRwf: 30_000, method: 'momo_airtel' })]);
+    const sessionFees = (await payments()).filter((row) => row.kind === 'session_fee');
+    expect(sessionFees).toHaveLength(1);
+    expect(sessionFees[0]).toMatchObject({ id: requested?.id, provider: 'flutterwave', method: 'momo_airtel', amount_rwf: 30_000, status: 'pending' });
+  });
+
+  it('moves an ask the other way too: recorded against Flutterwave, paid by MTN direct', async () => {
     const booking = await owingBooking('completed');
     await ask(booking.id, 'flutterwave');
-    const foreign = (await payments()).find((row) => row.kind === 'session_fee');
+    const requested = (await payments()).find((row) => row.kind === 'session_fee');
     await ageSessionFees();
+    const mtn = stubProvider();
 
-    const result = await startSession(stubProvider(), booking);
+    const result = await startSession(mtn, booking);
+
+    expect(result).toStrictEqual({ status: 'started', ourRef: requested?.our_ref });
+    expect((await payments()).filter((row) => row.kind === 'session_fee')).toStrictEqual([
+      expect.objectContaining({ id: requested?.id, provider: 'mtn_momo_direct', method: 'momo_mtn', status: 'pending' }),
+    ]);
+  });
+
+  it('never moves an ask that has been attempted: the provider it went to may still settle it, so a new row opens (spec §6.18)', async () => {
+    const booking = await owingBooking('completed');
+    await ask(booking.id, 'mtn_momo_direct');
+    const requested = (await payments()).find((row) => row.kind === 'session_fee');
+    // An attempt whose call to MTN died mid-way, minutes ago: the method is on the row, the status never moved.
+    await raw.query(`UPDATE payment SET method = 'momo_mtn', updated_at = now() - interval '5 minutes' WHERE id = $1`, [requested?.id]);
+    await ageSessionFees();
+    const flutterwave = stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] });
+
+    const result = await startSessionFeePayment(
+      { prisma, provider: flutterwave },
+      { bookingId: booking.id, reference: booking.reference, method: 'momo_airtel', payerPhone: '+250731234567' },
+    );
 
     expect(result).toMatchObject({ status: 'started' });
     if (result.status !== 'started') throw new Error('unreachable');
-    expect(result.ourRef).not.toBe(foreign?.our_ref);
-    expect((await payments()).filter((row) => row.kind === 'session_fee')).toHaveLength(2);
+    expect(result.ourRef).not.toBe(requested?.our_ref);
+    const rows = (await payments()).filter((row) => row.kind === 'session_fee');
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.id === requested?.id)).toMatchObject({ provider: 'mtn_momo_direct', method: 'momo_mtn', status: 'initiated' });
+    expect(rows.find((row) => row.id !== requested?.id)).toMatchObject({ provider: 'flutterwave', method: 'momo_airtel', status: 'pending', amount_rwf: 30_000 });
+  });
+
+  it('keeps reusing an attempted row of the same provider, recording the method now chosen', async () => {
+    const booking = await owingBooking('completed');
+    await ask(booking.id, 'flutterwave');
+    const requested = (await payments()).find((row) => row.kind === 'session_fee');
+    await raw.query(`UPDATE payment SET method = 'momo_mtn', updated_at = now() - interval '5 minutes' WHERE id = $1`, [requested?.id]);
+    await ageSessionFees();
+    const flutterwave = stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] });
+
+    const result = await startSessionFeePayment(
+      { prisma, provider: flutterwave },
+      { bookingId: booking.id, reference: booking.reference, method: 'momo_airtel', payerPhone: '+250731234567' },
+    );
+
+    expect(result).toStrictEqual({ status: 'started', ourRef: requested?.our_ref });
+    expect((await payments()).find((row) => row.id === requested?.id)).toMatchObject({ provider: 'flutterwave', method: 'momo_airtel' });
+  });
+
+  it('answers a second tap under another method with the ask, while the first attempt on it may still be at its provider', async () => {
+    const booking = await owingBooking('completed');
+    await ask(booking.id, 'mtn_momo_direct');
+    const requested = (await payments()).find((row) => row.kind === 'session_fee');
+    await ageSessionFees();
+    let release: (result: { outcome: 'accepted'; providerRef: null }) => void = () => {};
+    const mtn = stubProvider({ initiate: () => new Promise((resolve) => (release = resolve)) });
+    const flutterwave = stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] });
+
+    const first = startSession(mtn, booking);
+    await delay(150);
+    const second = await startSessionFeePayment(
+      { prisma, provider: flutterwave },
+      { bookingId: booking.id, reference: booking.reference, method: 'momo_airtel', payerPhone: '+250731234567' },
+    );
+    release({ outcome: 'accepted', providerRef: null });
+
+    expect(second).toStrictEqual({ status: 'in_progress', ourRef: requested?.our_ref });
+    expect(flutterwave.initiated).toEqual([]);
+    expect(await first).toStrictEqual({ status: 'started', ourRef: requested?.our_ref });
+    expect((await payments()).filter((row) => row.kind === 'session_fee')).toStrictEqual([
+      expect.objectContaining({ id: requested?.id, provider: 'mtn_momo_direct', method: 'momo_mtn', status: 'pending' }),
+    ]);
+  });
+
+  it('answers a second tap under the same method with the ask too: one prompt, never two', async () => {
+    const booking = await owingBooking('completed');
+    await ask(booking.id);
+    const requested = (await payments()).find((row) => row.kind === 'session_fee');
+    // The client's attempt on the ask has just opened: its method is on the row, stamped now.
+    await raw.query(`UPDATE payment SET method = 'momo_mtn', updated_at = now() WHERE id = $1`, [requested?.id]);
+    const provider = stubProvider();
+
+    expect(await startSession(provider, booking)).toStrictEqual({ status: 'in_progress', ourRef: requested?.our_ref });
+    expect(provider.initiated).toEqual([]);
   });
 
   it('settles the frozen amount, leaving the booking paid in full for what was asked', async () => {
@@ -1094,5 +1206,153 @@ describe('a request made from the admin screen, then paid by the client', () => 
     expect(sessionFee).toMatchObject({ amount_rwf: 30_000, status: 'succeeded' });
     // And a second attempt now has nothing to collect.
     await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({ status: 'nothing_to_pay' });
+  });
+});
+
+// --- The method picks the provider (marketplace-spec.md R3.1) -----------------------------------
+
+describe('the client’s method and the provider it routes to (R3.1)', () => {
+  const flutterwave = () => stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] });
+
+  it('records a booking fee against the provider it was handed, with the method chosen', async () => {
+    const booking = await insertBooking(prisma, world);
+    const provider = flutterwave();
+
+    const result = await startBookingFeePayment({ prisma, provider }, { reference: booking.reference, method: 'momo_airtel', payerPhone: '+250731234567' });
+
+    expect(result).toMatchObject({ status: 'started' });
+    expect(await onlyPayment()).toMatchObject({ provider: 'flutterwave', method: 'momo_airtel', status: 'pending', amount_rwf: 20_000 });
+    expect(provider.initiated).toStrictEqual([expect.objectContaining({ method: 'momo_airtel', payerPhone: '+250731234567' })]);
+  });
+
+  it('records a session fee the same way', async () => {
+    const booking = await owingBooking();
+    const provider = flutterwave();
+
+    await startSessionFeePayment({ prisma, provider }, { bookingId: booking.id, reference: booking.reference, method: 'momo_airtel', payerPhone: '+250731234567' });
+
+    expect((await payments()).find((row) => row.kind === 'session_fee')).toMatchObject({ provider: 'flutterwave', method: 'momo_airtel', status: 'pending' });
+  });
+
+  it('keeps the method of a failed attempt on record', async () => {
+    const booking = await insertBooking(prisma, world);
+    const provider = stubProvider({ initiate: async () => ({ outcome: 'rejected', reason: 'PAYER_NOT_FOUND' }) });
+
+    await start(provider, booking.reference);
+
+    expect(await onlyPayment()).toMatchObject({ status: 'failed', method: 'momo_mtn', failure_reason: 'PAYER_NOT_FOUND' });
+  });
+});
+
+// --- Bookability at initiation (marketplace-spec.md R3.4, T3.4) ---------------------------------
+
+describe('a booking fee for a photographer who can no longer be booked (R3.4, T3.4)', () => {
+  async function setStatus(status: 'pending' | 'approved' | 'suspended', photographerId = world.photographerId): Promise<void> {
+    await raw.query(`UPDATE photographer SET status = $1, suspended_at = CASE WHEN $1 = 'suspended' THEN now() END WHERE id = $2`, [status, photographerId]);
+  }
+
+  it.each(['suspended', 'pending'] as const)('is photographer_unavailable when the photographer is %s: no row, no prompt, the booking untouched', async (status) => {
+    const booking = await insertBooking(prisma, world);
+    const before = await bookingState(booking.reference);
+    await setStatus(status);
+    const provider = stubProvider();
+
+    const result = await start(provider, booking.reference);
+
+    expect(result).toStrictEqual({ status: 'photographer_unavailable' });
+    expect(await payments()).toEqual([]);
+    expect(provider.initiated).toEqual([]);
+    expect(await bookingState(booking.reference)).toStrictEqual(before);
+  });
+
+  it('is payable again once the photographer is reactivated', async () => {
+    const booking = await insertBooking(prisma, world);
+    await setStatus('suspended');
+    expect(await start(stubProvider(), booking.reference)).toStrictEqual({ status: 'photographer_unavailable' });
+
+    await setStatus('approved');
+
+    expect(await start(stubProvider(), booking.reference)).toMatchObject({ status: 'started' });
+  });
+
+  it('is decided by the booking’s own photographer: another one suspended changes nothing', async () => {
+    const second = await seedSecondPhotographer(prisma, world);
+    const booking = await insertBooking(prisma, world);
+    await setStatus('suspended', second.photographerId);
+
+    expect(await start(stubProvider(), booking.reference)).toMatchObject({ status: 'started' });
+  });
+
+  it('still answers already_paid and hold_expired first: those say more than the photographer’s status', async () => {
+    const paid = await insertBooking(prisma, world, { status: 'confirmed', holdMinutes: null });
+    await insertPayment(prisma, paid.id, { status: 'succeeded' });
+    const lapsed = await insertBooking(prisma, world, { holdMinutes: -5 });
+    await setStatus('suspended');
+
+    expect(await start(stubProvider(), paid.reference)).toStrictEqual({ status: 'already_paid' });
+    expect(await start(stubProvider(), lapsed.reference)).toStrictEqual({ status: 'hold_expired' });
+  });
+
+  it('is photographer_unavailable rather than in_progress when an earlier attempt still waits', async () => {
+    const booking = await insertBooking(prisma, world);
+    await insertPayment(prisma, booking.id, { status: 'pending', ageSeconds: 5 });
+    await setStatus('suspended');
+
+    expect(await start(stubProvider(), booking.reference)).toStrictEqual({ status: 'photographer_unavailable' });
+  });
+
+  it('lets an attempt already started before the suspension still settle through its webhook', async () => {
+    const mtn = mtnProvider({
+      fetch: (async (input: string) =>
+        String(input).endsWith('/collection/token/')
+          ? new Response(JSON.stringify({ access_token: 't', expires_in: 3600 }), { status: 200 })
+          : new Response(null, { status: 202 })) as typeof fetch,
+    });
+    const booking = await insertBooking(prisma, world);
+    const started = await start(mtn, booking.reference);
+    if (started.status !== 'started') throw new Error(`Expected started, got ${started.status}`);
+    await setStatus('suspended');
+
+    // Existing bookings carry on (R5.5): the money already asked for still confirms the hold it was asked for.
+    await receiveWebhook({ prisma, log: logSink().log }, mtn, mtnDelivery(mtn, started.ourRef, mtnStatusBody(started.ourRef, 'SUCCESSFUL')));
+
+    expect((await bookingState(booking.reference)).status).toBe('confirmed');
+  });
+});
+
+describe('a session fee for a photographer suspended since the booking (R5.5, T9.2)', () => {
+  async function suspend(): Promise<void> {
+    await raw.query(`UPDATE photographer SET status = 'suspended', suspended_at = now() WHERE id = $1`, [world.photographerId]);
+  }
+
+  it.each(['confirmed', 'completed'])('is still payable on a %s booking: existing bookings carry on', async (status) => {
+    const booking = await owingBooking(status);
+    await suspend();
+    const provider = stubProvider();
+
+    const result = await startSession(provider, booking);
+
+    expect(result).toMatchObject({ status: 'started' });
+    expect(provider.initiated).toStrictEqual([expect.objectContaining({ kind: 'session_fee', amountRwf: 30_000 })]);
+  });
+
+  it('is still payable for a photographer who is pending again', async () => {
+    const booking = await owingBooking();
+    await raw.query(`UPDATE photographer SET status = 'pending' WHERE id = $1`, [world.photographerId]);
+
+    expect(await startSession(stubProvider(), booking)).toMatchObject({ status: 'started' });
+  });
+
+  it('still pays the photographer’s own request after the suspension, at its frozen amount', async () => {
+    const booking = await owingBooking('completed');
+    const asked = await requestSessionFee(
+      { prisma, providerId: 'mtn_momo_direct', now: () => new Date('2026-10-01T06:00:00Z'), photographerId: world.photographerId },
+      booking.id,
+    );
+    expect(asked.status).toBe('ok');
+    const requested = (await payments()).find((row) => row.kind === 'session_fee');
+    await suspend();
+
+    expect(await startSession(stubProvider(), booking)).toStrictEqual({ status: 'started', ourRef: requested?.our_ref });
   });
 });

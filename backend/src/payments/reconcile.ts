@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { type ScheduledTask, schedule } from 'node-cron';
-import type { PaymentProvider } from './provider.js';
+import type { PaymentProvider, PaymentProviderId } from './provider.js';
 import { type WebhookDeps, recordEvent } from './webhooks.js';
 
 /**
@@ -41,7 +41,12 @@ export async function reconcilePendingPayments(deps: ReconcileDeps): Promise<num
     try {
       const found = await provider.lookupStatus(ourRef, AbortSignal.timeout(LOOKUP_TIMEOUT_MS));
       if (found === null || found.event.reportedStatus === null || found.event.reportedStatus === 'pending') continue;
-      const outcome = await recordEvent(deps, provider.id, { signatureValid: true, event: found.event, payload: found.payload });
+      const outcome = await recordEvent(deps, provider.id, {
+        signatureValid: true,
+        event: found.event,
+        payload: found.payload,
+        expectedCurrency: provider.currency,
+      });
       if (outcome.status === 'applied') settled += 1;
     } catch (error) {
       // One payment's lookup failing must not stop the others'.
@@ -61,6 +66,27 @@ function dueForLookup(prisma: PrismaClient, providerId: string, minAgeSeconds: n
        AND initiated_at > now() - make_interval(mins => ${RECONCILE_MAX_AGE_MINUTES}::integer)
      ORDER BY initiated_at
      LIMIT ${RECONCILE_BATCH_SIZE}`;
+}
+
+/** One reconciler to run: whose payments it looks up, how often and from what age. */
+export type ReconcilerPlan = { provider: PaymentProvider; schedule: string; minAgeSeconds: number };
+
+/**
+ * The reconcilers a deployment runs (marketplace-spec.md R3.5): one per
+ * configured provider in `all`, whether or not it collects a method today --
+ * a provider routed away from still has payments waiting on it, and its lookup
+ * is how a lost callback still settles them. An unconfigured provider has
+ * nothing to ask with and gets none. MTN's sandbox never calls back, so there
+ * the lookup is the only signal and runs every few seconds.
+ */
+export function reconcilerPlans(all: Partial<Record<PaymentProviderId, PaymentProvider>>, options: { mtnSandbox: boolean }): ReconcilerPlan[] {
+  return Object.values(all)
+    .filter((provider) => provider.configured)
+    .map((provider) =>
+      provider.id === 'mtn_momo_direct' && options.mtnSandbox
+        ? { provider, schedule: SANDBOX_RECONCILE_SCHEDULE, minAgeSeconds: SANDBOX_RECONCILE_MIN_AGE_SECONDS }
+        : { provider, schedule: RECONCILE_SCHEDULE, minAgeSeconds: RECONCILE_MIN_AGE_SECONDS },
+    );
 }
 
 /** Starts the lookup on its schedule. A run still going when the next is due is not doubled up. */

@@ -82,6 +82,9 @@ schemas:
 
   PaymentMethod:
     type: string
+    description: |
+      `card` is reserved for the hosted card checkout, deferred (marketplace-spec.md
+      R3.2, 2026-10-17): it is never offered and a payment request naming it is a 422.
     enum: [momo_mtn, momo_airtel, card]
 
   PaymentStarted:
@@ -140,7 +143,7 @@ schemas:
     required: [method, phone]
     properties:
       method:
-        description: One of the active provider's methods (`GET /api/payment-methods`). Anything else is a 422.
+        description: One of the methods on offer (`GET /api/payment-methods`); it decides which provider is prompted. Anything else is a 422.
         allOf:
           - $ref: '#/schemas/PaymentMethod'
       phone:

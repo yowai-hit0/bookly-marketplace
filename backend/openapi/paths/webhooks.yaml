@@ -4,10 +4,13 @@
 #
 # Every delivery is stored before it is interpreted and keyed on the provider's
 # own event id, so a repeat is a no-op and an event for an already-settled
-# payment is recorded and ignored. The answer is 200 whenever the delivery is on
-# record — applied, ignored, or refused as unsigned — so the provider stops
-# retrying; a 500 asks for the retry that processes it again. The body never
-# says which, so these carry no response schema.
+# payment is recorded and ignored. A delivery whose signature fails is stored
+# unverified, changes nothing, and is a 401 (marketplace-spec.md T3.3). Any
+# other delivery on record is 200 — applied, or ignored (a duplicate, an
+# unmatched payment, a wrong amount or currency) — so the provider stops
+# retrying; a 500 asks for the retry that processes it again. The 200 body
+# never says which. Every provider with payments in flight keeps its route,
+# whether a method routes to it today or not (R3.1).
 
 mtnMomo:
   post:
@@ -18,7 +21,8 @@ mtnMomo:
       MTN signs nothing it sends, so the proof is in the URL: the path carries
       our reference and `HMAC(our_ref)` keyed from `SESSION_SECRET`, and the
       body's `externalId` must name the same payment. Only MTN is ever given
-      this URL. A body failing either check is stored and applied to nothing.
+      this URL. A body failing either check is stored, applied to nothing,
+      and answered 401.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/OurRef
@@ -42,6 +46,8 @@ mtnMomo:
     responses:
       '200':
         $ref: '#/_responses/received'
+      '401':
+        $ref: '#/_responses/invalidSignature'
       '500':
         $ref: '#/_responses/failed'
   put:
@@ -70,6 +76,8 @@ mtnMomo:
     responses:
       '200':
         $ref: '#/_responses/received'
+      '401':
+        $ref: '#/_responses/invalidSignature'
       '500':
         $ref: '#/_responses/failed'
 
@@ -81,7 +89,7 @@ flutterwave:
     description: |
       Verified by the `flutterwave-signature` header, an HMAC-SHA256 of the raw
       body keyed by the dashboard's secret hash. A body whose signature does not
-      match is stored unverified and applied to nothing.
+      match is stored unverified, applied to nothing, and answered 401.
     security: []
     parameters:
       - name: flutterwave-signature
@@ -102,12 +110,14 @@ flutterwave:
     responses:
       '200':
         $ref: '#/_responses/received'
+      '401':
+        $ref: '#/_responses/invalidSignature'
       '500':
         $ref: '#/_responses/failed'
 
 _responses:
   received:
-    description: The delivery is on record (applied, ignored, or refused as unsigned).
+    description: The delivery is on record, applied or ignored.
     content:
       application/json:
         schema:
@@ -116,6 +126,12 @@ _responses:
           additionalProperties: false
           properties:
             received: { const: true }
+  invalidSignature:
+    description: The signature did not verify. The delivery is stored unverified and changed nothing (T3.3).
+    content:
+      application/json:
+        schema: { $ref: ../components/common.yaml#/schemas/Error }
+        example: { error: invalid_signature }
   failed:
     description: Processing failed; the provider should retry.
     content:

@@ -13,8 +13,10 @@ import { eyebrow } from '@/pages/client/classes'
  * spec §6.19). One definition, so the booking fee at checkout and the session
  * fee on a client's own booking page offer exactly the same thing.
  *
- * `methods` is the API's answer and nothing else: a method the active provider
- * does not collect is absent from the page, not disabled.
+ * `methods` is the API's answer and nothing else: a method not routed to a
+ * configured provider (marketplace-spec.md R3.1) is absent from the page, not
+ * disabled. MTN MoMo and Airtel Money are both paid from a phone, so either
+ * one asks for the same number, with the same hint and the same check.
  *
  * Restyled per design-system/bookly/client-front.md §8.4: each method is a
  * `SelectableCard` with its native radio visually hidden (`data-focus-ring`

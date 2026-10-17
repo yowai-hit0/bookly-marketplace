@@ -11,7 +11,7 @@ The data model changes are in [`docs/marketplace-data-model.md`](marketplace-dat
 ## Product decisions
 | Topic | Decision |
 |---|---|
-| Money in | Clients pay into the **platform's** MoMo or Flutterwave account. They choose MoMo (MTN or Airtel) or **card** (Flutterwave hosted checkout) at checkout. |
+| Money in | Clients pay into the **platform's** MoMo or Flutterwave account. They choose MoMo (MTN or Airtel) or **card** (Flutterwave hosted checkout) at checkout. **Card is deferred (user decision, 2026-10-17; Phase 3):** MoMo only until then. |
 | Money out | Each photographer saves one payout destination: MoMo (network, number, account name) or bank (bank, account number, account name). The platform transfers their share **by hand**. **No commission.** A banner says transfer fees are deducted from what they receive, so they should price accordingly. |
 | Payout timing | The booking fee is payable as soon as its payment succeeds. The session fee is payable once the session has ended and the booking was not cancelled. A refund after a payout becomes a negative line on the next payout. |
 | Fees and cancellation | **Each photographer decides, with no platform limits:** booking-fee %, lead time, buffer, delivery expiry, and the client cancellation policy (cut-off and whether the booking fee is refunded). One platform rule is assumed: *a photographer who cancels always refunds the booking fee in full* (today's §6.11 behaviour). |
@@ -151,33 +151,53 @@ Everything in **`marketplace-data-model.md`** applies; that is the specification
 ---
 
 ## Phase 3: Checkout and payments (MoMo and card)
+> **Card payments are deferred (user decision, 2026-10-17).** Phase 3 is choosing a payment method, routing it to a provider, and payment safety. R3.2, R3.3, T3.1, T3.2 and T3.6 are deferred with cards, and so are `flutterwave_checkout` and `payment.checkout_url` (`marketplace-data-model.md` §2.11-§2.12). They stay below, marked, so the card work can pick them up as written.
+
 **Requirements**
-- **R3.1** The single `PAYMENT_PROVIDER` becomes `PAYMENT_METHODS_ENABLED` (`momo_mtn`, `momo_airtel`, `card`).
-  - `/payment-methods` lists the enabled methods, and the client picks one at checkout.
-  - Each method maps to a provider: MoMo to MTN direct or Flutterwave mobile money, card to `flutterwave_checkout`.
-- **R3.2** **Card flow (hosted checkout):**
+- **R3.1** The single `PAYMENT_PROVIDER` becomes method routing (decided 2026-10-17; `payments/routing.ts`).
+  - `/payment-methods` lists the methods on offer, and the client picks one at checkout. The answer is `{ methods }`: no provider is named any more, because there is no single one.
+  - Each method maps to a provider, and the provider of a payment always comes from the method the client chose, never from a deployment-wide default:
+
+    | Method | Provider |
+    |---|---|
+    | `momo_mtn` | `MOMO_MTN_PROVIDER`: `mtn_momo_direct` (the default) or `flutterwave` |
+    | `momo_airtel` | always `flutterwave` (MTN direct collects MTN MoMo only) |
+    | `card` | `flutterwave_checkout`: **deferred** with R3.2. Refused in configuration and never offered. |
+
+  - **`MOMO_MTN_PROVIDER`** = `mtn_momo_direct | flutterwave`, default `mtn_momo_direct`.
+  - **`PAYMENT_METHODS_ENABLED`** (optional): a comma list from `momo_mtn,momo_airtel` that narrows what is offered; unset, every method is a candidate. `card`, an unknown name or an empty list is a startup error. Spaces and repeats are forgiven; the pay page order is always `momo_mtn`, `momo_airtel`.
+  - **A method is offered only if its routed provider is configured** (MTN direct: `MTN_MOMO_SUBSCRIPTION_KEY`, `MTN_MOMO_API_USER`, `MTN_MOMO_API_KEY`; Flutterwave: `FLUTTERWAVE_CLIENT_ID`, `FLUTTERWAVE_CLIENT_SECRET`). An unconfigured provider is never offered, so with no credentials the list is empty and the pay page says online payment is unavailable. A method that is not offered is a `422` at both pay routes.
+  - Startup checks (`env.ts`), production only: half a provider's credentials is an error; every method listed in `PAYMENT_METHODS_ENABLED` must be collectable; unset, at least one method must be on offer; and while Flutterwave collects any method, `FLUTTERWAVE_WEBHOOK_HASH` is required.
+  - `PAYMENT_PROVIDER` is retired. `PAYMENT_PROVIDER=mtn_momo_direct`, which means exactly the new default, is tolerated and ignored so an old `.env` keeps working; any other value is a startup error, so a deployment still saying `flutterwave` cannot silently start sending MTN MoMo to MTN direct.
+  - **Every provider with payments in flight still settles.** MTN direct stays constructed whatever the routing (its webhook route stays mounted), and Flutterwave whenever it collects a method or is configured. Switching `MOMO_MTN_PROVIDER` back is a one-variable rollback.
+  - **The photographer's session-fee request** (`POST /api/studio/bookings/:id/session-fee`) is recorded against the provider of the first method on offer, because the photographer cannot know how the client will pay; with nothing on offer the route is absent. When the client pays, an ask nobody has attempted yet (no `method` on it) moves to the provider the client's method routes to, keeping its `our_ref` and frozen amount. A row that has been attempted never moves: only the provider it went to may settle it, so a new row opens instead. The chosen method is written on the row with the attempt, which also stamps `updated_at`: for 30 seconds from the client's attempt on an ask (the provider call's deadline), a second tap under any method, a new request and a cash record all answer `in_progress`, so two providers are never prompted for the same fee.
+- **R3.2** **Card flow (hosted checkout):** **Deferred with cards (user decision, 2026-10-17).**
   1. Initiation creates the `payment` row first.
   2. It calls Flutterwave with `tx_ref = our_ref`, an amount computed **on the server**, currency `RWF`, and `redirect_url = WEB_ORIGIN + '/checkout/:reference/:token/payments/:ourRef'`, built on the server so it can't be used as an open redirect.
   3. It stores `checkout_url`. If a card payment is already in progress, it returns the same `checkout_url` instead of starting a second charge.
-- **R3.3** **The return page trusts nothing in its query string** (`status=successful` and similar). It polls `GET /api/.../payments/:ourRef`. A payment counts as succeeded only through:
+- **R3.3** **The return page trusts nothing in its query string** (`status=successful` and similar). **Deferred with cards (2026-10-17).** It polls `GET /api/.../payments/:ourRef`. A payment counts as succeeded only through:
   - a verified webhook (constant-time check of the hash or HMAC over the raw body), or
   - the server calling Flutterwave to verify the transaction, matching `tx_ref`, **amount** and **currency** exactly.
 
-  The existing protections stay as they are: store first, dedupe, forward-only status changes, `amount_mismatch` ignored.
+  The existing protections stay as they are: store first, dedupe, forward-only status changes, `amount_mismatch` ignored. (The MoMo webhook rules of T3.3, the currency check included, are built now.)
 - **R3.4** At **initiation and at the claim**, the photographer must be approved with a live subscription. Amounts always come from the booking snapshots (`bookingTotals()`), never from the client.
-- **R3.5** Reconcile loops over every enabled provider (`payments/reconcile.ts`).
+  - As built (2026-10-17): the booking-fee checkout re-checks bookability (`photographers/bookable.ts`) inside its transaction, after `already_paid` and `hold_expired`. An unbookable photographer is `409 photographer_unavailable`: no payment row, no prompt, the booking untouched, payable again on reactivation. The code names no status, so suspended, pending and (from Phase 5) out of subscription look the same from outside. An attempt started before a suspension still settles through its webhook.
+  - **Session fees stay payable.** R5.5 and T9.2 say existing bookings carry on, so the client's session fee for a confirmed or completed booking is **not** refused when the photographer has since been suspended (or is pending again), and neither is the photographer's own request. Only new booking-fee payments are refused.
+  - Any amount, provider, status or reference in a pay request body is ignored: the booking fee is the booking's frozen `booking_fee_rwf`, the session fee what `bookingTotals()` leaves outstanding (or the frozen ask).
+- **R3.5** Reconcile loops over every configured provider (`payments/reconcile.ts` `reconcilerPlans`, started by `server.ts`): one status-lookup job per configured provider in the deployment, including one no method routes to any more, so its waiting payments still settle. An unconfigured provider has nothing to ask with and gets none; the MTN sandbox's runs every 5 seconds.
 - **R3.6** The checkout and booking links keep their current design:
   - The checkout token is an HMAC of the reference with its own derived key (`payments/checkout-link.ts`), and the booking id never appears in a URL.
   - The access token is 256-bit, stored only as SHA-256, and rotated when resent.
   - `Referrer-Policy: no-referrer` keeps tokens in URL paths from leaking to the Flutterwave page or image hosts.
 
 **Test criteria**
-- **T3.1** With a fake provider: card initiation creates a payment and returns a checkout URL that points at Flutterwave. Initiating again while pending returns the **same** URL.
-- **T3.2** Opening the return page with forged `?status=successful` leaves the payment `pending` and the booking `pending_payment`.
+- **T3.1** With a fake provider: card initiation creates a payment and returns a checkout URL that points at Flutterwave. Initiating again while pending returns the **same** URL. **Deferred with cards (2026-10-17).**
+- **T3.2** Opening the return page with forged `?status=successful` leaves the payment `pending` and the booking `pending_payment`. **Deferred with cards (2026-10-17).**
 - **T3.3** A webhook with a bad signature gets `401` and changes nothing. A correct webhook with a mismatched amount or currency is ignored. A duplicate webhook does nothing.
-- **T3.4** Initiation for a suspended or expired-subscription photographer is refused (`409`).
-- **T3.5** Reconcile settles a card payment whose webhook never arrived.
-- **T3.6** Manual Playwright run against the Flutterwave sandbox: card success, card decline and abandoned checkout (the hold expires).
+  - As built: the unverified delivery is still stored (`signature_valid = false`, under an id of its own) and the body is `{ error: 'invalid_signature' }`; for MTN, whose callback URL is its signature, a body that is not about the payment the URL signs is refused the same way. A correct delivery that is applied or ignored is `200 { received: true }`. A success whose `currency` differs from the one the provider charges (`RWF`; `EUR` in MTN's sandbox) is ignored as `currency_mismatch`, as a wrong amount is `amount_mismatch`; a body naming no currency is accepted, as one naming no amount is. The status lookup applies the same rule.
+- **T3.4** Initiation for a suspended or expired-subscription photographer is refused (`409`). (The subscription half arrives with Phase 5, through `bookable.ts`.)
+- **T3.5** Reconcile settles a payment whose webhook never arrived, for every configured provider. (The card case is deferred with cards.)
+- **T3.6** Manual Playwright run against the Flutterwave sandbox: card success, card decline and abandoned checkout (the hold expires). **Deferred with cards (2026-10-17).**
 
 ---
 

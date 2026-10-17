@@ -33,8 +33,8 @@ Companion to `docs/marketplace-spec.md`. Supersedes `docs/data-model_v2.md` for 
 | `Client` (`client`) | **CHANGE** | Add an optional `user_id` link to an account. It stays a platform-global dedupe record. |
 | `Booking` (`booking`) | **CHANGE** | Add `photographer_id`. Exclusion becomes `photographer_id WITH =, range WITH &&`. Composite FKs to service/package. Status `cancelled_by_admin` is renamed and `cancelled_by_platform` is added. |
 | `BookingAddon` (`booking_addon`) | **KEEP** | Scoped through its booking. Tenant consistency of the add-on is checked in the app (§2.10). |
-| `Payment` (`payment`) | **CHANGE** | `booking_id` becomes nullable. Adds `subscription_id`, `plan_interval`, `checkout_url`, kind `subscription` and provider `flutterwave_checkout`. |
-| `WebhookEvent` (`webhook_event`) | **CHANGE** (CHECK only) | The provider vocabulary gains `flutterwave_checkout`. |
+| `Payment` (`payment`) | **CHANGE** | `booking_id` becomes nullable. Adds `subscription_id`, `plan_interval`, `checkout_url`, kind `subscription` and provider `flutterwave_checkout`. **`checkout_url` and `flutterwave_checkout` are deferred with card payments (user decision, 2026-10-17; §2.11).** |
+| `WebhookEvent` (`webhook_event`) | **CHANGE** (CHECK only) | The provider vocabulary gains `flutterwave_checkout`. **Deferred with card payments (2026-10-17; §2.12).** |
 | `BookingNote` (`booking_note`) | **KEEP** | Scoped through its booking. |
 | `Outbox` (`outbox`) | **CHANGE** | Add `photographer_id`. Template vocabulary changes: photographer, platform, account, subscription and payout emails. |
 
@@ -182,6 +182,8 @@ Both are written by `booking/create.ts` inside the slot claim, from the photogra
 Unchanged. Cross-tenant add-ons are prevented in the write paths listed in §2.7.
 
 ### 2.11 `Payment` (`payment`)
+> **Deferred with cards (user decision, 2026-10-17).** Card payments are deferred (marketplace-spec.md R3.2, R3.3), so `checkout_url`, the `flutterwave_checkout` provider id and the `payment_checkout_url_https` CHECK below are **not** built in Phase 3 and no migration adds them. Phase 3 keeps `payment` as it is: providers `mtn_momo_direct`, `flutterwave` and `cash`; the `method` vocabulary keeps `card` reserved. Phase 3 now writes `payment.method` with the attempt (the client's choice), not only from the provider's event. The rest of this section (nullable `booking_id`, `subscription_id`, `plan_interval`, kind `subscription`) is unchanged and still arrives with Phase 5.
+
 **Current:** `schema.prisma:334-371`; init `:186-205`; uniques and indexes `:280`, `:283`, `:342-344`, `:350-352`; FK `:319`; CHECKs init `:465-472` and `20260928100000_cash_payments/migration.sql:7-14`.
 
 **Decision: one `payment` table**, with `booking_id` nullable plus a new `subscription_id` and a CHECK that exactly one is set. A separate subscription-payment table is rejected because:
@@ -241,7 +243,7 @@ CREATE INDEX "payment_pending_lookup_idx" ON "payment" (provider, initiated_at) 
 **Why `flutterwave_checkout` is a separate provider id:** the provider seam (`payments/provider.ts:145-163`) has one initiate, verify and lookup per id. Hosted checkout returns a redirect, which the current adapter refuses (`flutterwave.ts:129-130`, `redirect_required`).
 
 ### 2.12 `WebhookEvent`: CHECK only
-The provider CHECK gains `flutterwave_checkout`.
+The provider CHECK gains `flutterwave_checkout`. **Deferred with cards (2026-10-17):** until card payments are built, the CHECK stays `provider IN ('mtn_momo_direct', 'flutterwave')`.
 
 ### 2.13 `BookingNote`: KEEP
 Authorisation is scoped through `booking.photographer_id` in `booking/notes.ts`.
@@ -757,7 +759,7 @@ Confirm that Neon allows `btree_gist`. It is a trusted extension since PG 13.
 
 Later phases add the rest as incremental migrations:
 - `subscription`, `subscription_period`, `payout_method`, `payout` and `payout_item`, with their indexes, exclusions and CHECKs from §3.11.
-- The `payment` changes of §2.11: nullable `booking_id`, `subscription_id`, `plan_interval`, `checkout_url`, kind `subscription`, provider `flutterwave_checkout` and the CHECKs that mention them. Until then `payment` keeps its current shape, and so does `webhook_event`'s provider CHECK (§2.12).
+- The `payment` changes of §2.11: nullable `booking_id`, `subscription_id`, `plan_interval`, `checkout_url`, kind `subscription`, provider `flutterwave_checkout` and the CHECKs that mention them. Until then `payment` keeps its current shape, and so does `webhook_event`'s provider CHECK (§2.12). `checkout_url` and `flutterwave_checkout` wait for card payments, deferred 2026-10-17; the subscription columns still come with Phase 5.
 - `platform_setting` has only `hold_minutes` and `trial_days` (default 30). `subscription_monthly_price_rwf`, `subscription_yearly_price_rwf`, `subscription_grace_days` and `subscription_reminder_days`, with their CHECKs, come with Phase 5.
 
 The outbox template CHECK already lists the full §2.14 vocabulary, including the subscription and payout names, so those phases need no template migration. `payment_cash_is_session_fee` and `payment_pending_lookup_idx` from §2.11 hold for the current shape and are in the baseline.
@@ -809,13 +811,13 @@ Paths are relative to `backend/src/`.
 
 **Payment**
 - `payments/webhooks.ts`: `matchPayment` (`:316,324`), a new subscription branch, payout-item hooks.
-- `payments/initiate.ts`: the provider comes from the chosen method, and `checkout_url` is stored.
-- `payments/reconcile.ts`: loops over providers.
-- `payments/providers.ts` and `env.ts:40`: the enabled set.
+- `payments/initiate.ts`: the provider comes from the chosen method (built in Phase 3, `payments/routing.ts`), and `checkout_url` is stored (deferred with cards, 2026-10-17).
+- `payments/reconcile.ts`: loops over providers (built in Phase 3: one reconciler per configured provider, `reconcilerPlans`).
+- `payments/providers.ts` and `env.ts`: the enabled set (built in Phase 3: `MOMO_MTN_PROVIDER` and `PAYMENT_METHODS_ENABLED` replace `PAYMENT_PROVIDER`).
 - Also `payments/refund.ts`, `booking/cancel.ts:131`, `payments/cash.ts` (no payout item), `routes/public-checkout.ts`.
 
 **WebhookEvent**
-- A new route and verifier for `flutterwave_checkout` in `routes/payment-webhooks.ts`.
+- A new route and verifier for `flutterwave_checkout` in `routes/payment-webhooks.ts` (deferred with cards, 2026-10-17).
 
 **BookingNote**
 - `booking/notes.ts:29,56`: authorise through the booking's photographer.

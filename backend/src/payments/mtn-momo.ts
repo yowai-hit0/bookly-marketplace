@@ -7,6 +7,7 @@ import {
   type ProviderEvent,
   type ReportedStatus,
   type WebhookDelivery,
+  reportedCurrency,
 } from './provider.js';
 
 /**
@@ -69,6 +70,7 @@ export class MtnMomoProvider implements PaymentProvider {
   /** MTN direct collects MTN MoMo and nothing else (spec §6.19). */
   readonly methods = ['momo_mtn'] as const;
   readonly configured: boolean;
+  readonly currency: string;
 
   readonly #config: MtnMomoConfig;
   readonly #callbackKey: Buffer;
@@ -79,6 +81,7 @@ export class MtnMomoProvider implements PaymentProvider {
     this.#config = config;
     this.#callbackKey = deriveKey(config.secret, 'mtn-momo-callback');
     this.configured = Boolean(config.subscriptionKey && config.apiUser && config.apiKey);
+    this.currency = config.currency.toUpperCase();
   }
 
   /** The URL MTN calls back on for one payment: our reference, signed. */
@@ -236,6 +239,7 @@ export function readEvent(ourRef: string, body: unknown, source: 'requesttopay' 
     method: 'momo_mtn',
     failureReason: reportedStatus === 'failed' ? (reasonOf(record.reason) ?? status) : null,
     amount: amountOf(record.amount),
+    currency: reportedCurrency(record.currency),
   };
 }
 

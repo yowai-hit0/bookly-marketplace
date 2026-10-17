@@ -727,6 +727,81 @@ describe('failures and pending events', () => {
     expect(sink.entries).toContainEqual(expect.objectContaining({ event: 'webhook_amount_mismatch', expected: 20_000, reported: 19_999 }));
   });
 
+  // marketplace-spec.md T3.3: a correct webhook with a mismatched currency is ignored, as one with a mismatched amount is.
+  it('a success in another currency than the provider charges is stored ignored, changes nothing, and is logged', async () => {
+    const { booking, payment } = await waitingBooking();
+    const bookingBefore = await rowJson('booking', booking.id);
+    const paymentBefore = await rowJson('payment', payment.id);
+
+    // The provider charges EUR (the MTN sandbox); 20,000 RWF is not the 20,000 EUR asked for.
+    const outcome = await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL', { currency: 'RWF' }));
+
+    expect(outcome).toMatchObject({ status: 'ignored', note: 'currency_mismatch' });
+    expect(await eventById(outcome.eventRowId)).toMatchObject({ status: 'ignored', processing_error: 'currency_mismatch', signature_valid: true });
+    expect(await rowJson('booking', booking.id)).toBe(bookingBefore);
+    expect(await rowJson('payment', payment.id)).toBe(paymentBefore);
+    expect(await outbox()).toEqual([]);
+    expect(sink.entries).toContainEqual(expect.objectContaining({ level: 'error', event: 'webhook_currency_mismatch', expected: 'EUR', reported: 'RWF' }));
+  });
+
+  it.each([['EURO'], [''], [978], [{ code: 'EUR' }]])('a success whose currency %j is no currency code at all is ignored as a mismatch', async (currency) => {
+    const { booking, payment } = await waitingBooking();
+
+    const outcome = await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL', { currency }));
+
+    expect(outcome).toMatchObject({ status: 'ignored', note: 'currency_mismatch' });
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('pending_payment');
+    expect((await paymentRow(payment.id)).status).toBe('pending');
+  });
+
+  it('a success naming the currency in lower case still matches', async () => {
+    const { booking, payment } = await waitingBooking();
+
+    const outcome = await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL', { currency: 'eur' }));
+
+    expect(outcome).toMatchObject({ status: 'applied', note: 'booking_confirmed' });
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('confirmed');
+  });
+
+  it('a success that names no currency is applied, as one naming no amount is: the provider was asked in its own', async () => {
+    const { booking, payment } = await waitingBooking();
+    const { currency: _omitted, ...body } = mtnStatusBody(payment.ourRef, 'SUCCESSFUL');
+
+    const outcome = await deliver(mtnDelivery(provider, payment.ourRef, body));
+
+    expect(outcome).toMatchObject({ status: 'applied', note: 'booking_confirmed' });
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('confirmed');
+  });
+
+  it('a session fee reported in another currency is ignored too, and nothing is receipted', async () => {
+    const booking = await insertBooking(prisma, world, { status: 'completed' });
+    await insertPayment(prisma, booking.id, { status: 'succeeded' });
+    const sessionFee = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000 });
+
+    const outcome = await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '30000', currency: 'USD' }));
+
+    expect(outcome).toMatchObject({ status: 'ignored', note: 'currency_mismatch' });
+    expect((await paymentRow(sessionFee.id)).status).toBe('pending');
+    expect(await outbox()).toEqual([]);
+  });
+
+  it('a failure is applied whatever currency it names: no money moved, so there is nothing to mismatch', async () => {
+    const { payment } = await waitingBooking();
+
+    const outcome = await deliver(statusDelivery(payment.ourRef, 'FAILED', { currency: 'RWF', reason: 'APPROVAL_REJECTED' }));
+
+    expect(outcome).toMatchObject({ status: 'applied', note: 'payment_failed' });
+    expect((await paymentRow(payment.id)).status).toBe('failed');
+  });
+
+  it('a mismatched amount is caught before the currency is looked at', async () => {
+    const { payment } = await waitingBooking();
+
+    const outcome = await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL', { amount: '1', currency: 'RWF' }));
+
+    expect(outcome).toMatchObject({ status: 'ignored', note: 'amount_mismatch' });
+  });
+
   it('a succeeded session fee is recorded, receipted, and the booking left alone', async () => {
     const booking = await insertBooking(prisma, world, { status: 'completed' });
     await insertPayment(prisma, booking.id, { status: 'succeeded' });

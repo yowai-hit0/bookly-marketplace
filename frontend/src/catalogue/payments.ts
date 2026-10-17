@@ -9,6 +9,13 @@ import type { CancellationTerms } from '@/lib/cancellation'
  * page renders what `GET /api/payment-methods` lists and nothing else. This
  * file only knows how to label a method; one it has no label for is dropped
  * rather than rendered blank.
+ *
+ * Since Phase 3 (marketplace-spec.md R3.1) each method is routed to its own
+ * provider on the server -- MTN MoMo to MTN direct or Flutterwave, Airtel Money
+ * to Flutterwave -- and the answer names no provider: the page needs only the
+ * method, and which provider collects it is the server's business. `card` keeps
+ * its label for when the hosted checkout arrives (R3.2, deferred 2026-10-17);
+ * the API never lists it today.
  */
 
 export const KNOWN_METHODS = ['momo_mtn', 'momo_airtel', 'card'] as const
@@ -109,6 +116,8 @@ export type StartPaymentResult =
   | { status: 'already_paid' }
   /** The hold ran out, or there is nothing left to pay. */
   | { status: 'closed' }
+  /** The photographer can no longer be booked, so the booking fee is not taken (R3.4). Never a session fee. */
+  | { status: 'photographer_unavailable' }
   | { status: 'not_found' }
   | { status: 'invalid'; fields: string[] }
   /** The provider refused the request, or could not be reached. */
@@ -149,6 +158,7 @@ export async function startPayment(
       if (body?.error === 'payment_in_progress' && ourRef !== null) return { status: 'in_progress', ourRef }
       if (body?.error === 'already_paid') return { status: 'already_paid' }
       if (body?.error === 'hold_expired' || body?.error === 'nothing_to_pay') return { status: 'closed' }
+      if (body?.error === 'photographer_unavailable') return { status: 'photographer_unavailable' }
     }
     if (res.status === 422 && Array.isArray(body?.fields)) return { status: 'invalid', fields: body.fields.map(String) }
     if (res.status === 502 && (body?.reason === 'rejected' || body?.reason === 'unavailable')) {

@@ -1,18 +1,26 @@
 import type { Env } from '../env.js';
 import { FlutterwaveProvider } from './flutterwave.js';
 import { MtnMomoProvider } from './mtn-momo.js';
-import type { PaymentProvider, PaymentProviderId } from './provider.js';
+import type { PaymentMethod, PaymentProvider, PaymentProviderId } from './provider.js';
+import { OFFERABLE_METHODS, type PaymentRouting, routePayments, routedProviderId } from './routing.js';
 
 /**
- * The providers for this deployment (spec §4.3, §6.18): every one whose
- * callbacks must still be accepted, and the one `PAYMENT_PROVIDER` names for
- * new payments. MTN stays constructed after a cutover so its in-flight payments
- * still settle, and `PAYMENT_PROVIDER=mtn_momo_direct` is a one-variable
- * rollback. Flutterwave is constructed whenever it is active or configured, so
- * its payments still settle after such a rollback too.
+ * The providers for this deployment (marketplace-spec.md R3.1; spec §4.3,
+ * §6.18), from the parsed environment:
+ *
+ *  - `routing`: which methods are offered and who collects each. MTN MoMo goes
+ *    where `MOMO_MTN_PROVIDER` says, Airtel Money always to Flutterwave,
+ *    `PAYMENT_METHODS_ENABLED` may narrow the list, and a method whose provider
+ *    is unconfigured is not offered (payments/routing.ts).
+ *  - `all`: every provider whose callbacks must still be accepted and whose
+ *    waiting payments the reconciler must still look up. MTN direct stays
+ *    constructed after a cutover to Flutterwave, so its in-flight payments still
+ *    settle and `MOMO_MTN_PROVIDER=mtn_momo_direct` is a one-variable rollback.
+ *    Flutterwave is constructed whenever it collects a method or is configured,
+ *    so its payments still settle after such a rollback too.
  */
 export type PaymentProviders = {
-  active: PaymentProvider;
+  routing: PaymentRouting;
   all: Partial<Record<PaymentProviderId, PaymentProvider>>;
 };
 
@@ -23,7 +31,8 @@ export function createPaymentProviders(
     | 'PORT'
     | 'API_ORIGIN'
     | 'SESSION_SECRET'
-    | 'PAYMENT_PROVIDER'
+    | 'MOMO_MTN_PROVIDER'
+    | 'PAYMENT_METHODS_ENABLED'
     | 'MTN_MOMO_BASE_URL'
     | 'MTN_MOMO_TARGET_ENVIRONMENT'
     | 'MTN_MOMO_SUBSCRIPTION_KEY'
@@ -58,8 +67,14 @@ export function createPaymentProviders(
     currency: env.FLUTTERWAVE_CURRENCY,
   });
 
-  if (env.PAYMENT_PROVIDER === 'flutterwave') {
-    return { active: flutterwave, all: { mtn_momo_direct: mtn, flutterwave } };
-  }
-  return { active: mtn, all: flutterwave.configured ? { mtn_momo_direct: mtn, flutterwave } : { mtn_momo_direct: mtn } };
+  const byId: Record<PaymentProviderId, PaymentProvider> = { mtn_momo_direct: mtn, flutterwave };
+  const enabled = env.PAYMENT_METHODS_ENABLED ?? OFFERABLE_METHODS;
+  const routes: Partial<Record<PaymentMethod, PaymentProvider>> = {};
+  for (const method of enabled) routes[method] = byId[routedProviderId(method, env.MOMO_MTN_PROVIDER)];
+
+  const flutterwaveRouted = Object.values(routes).includes(flutterwave);
+  return {
+    routing: routePayments(routes),
+    all: flutterwaveRouted || flutterwave.configured ? { mtn_momo_direct: mtn, flutterwave } : { mtn_momo_direct: mtn },
+  };
 }

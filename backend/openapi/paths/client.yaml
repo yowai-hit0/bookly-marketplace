@@ -106,9 +106,11 @@ payments:
     tags: [Client booking]
     summary: Pay my session fee
     description: |
-      Starts a session-fee payment for what the booking owes. Only mounted when
-      a payment provider is configured. The amount is computed server-side from
-      the booking, never sent by the client.
+      Starts a session-fee payment for what the booking owes, through the
+      provider the chosen method routes to (R3.1). Only mounted when payments
+      are. The amount is computed server-side from the booking, never sent by
+      the client. Still payable when the photographer has been suspended since
+      the booking: existing bookings carry on (R5.5, T9.2).
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/AccessToken

@@ -3,7 +3,7 @@ import { accessTokenExpiry, generateAccessToken } from '../booking/access-token.
 import { type AdminBooking, findAdminBooking } from '../booking/admin-view.js';
 import { bookingTotals } from '../booking/totals.js';
 import { enqueue } from '../outbox/enqueue.js';
-import { CALL_IN_FLIGHT_SECONDS, PAYMENT_ATTEMPT_WINDOW_SECONDS } from './initiate.js';
+import { ATTEMPT_IN_FLIGHT, CALL_IN_FLIGHT_SECONDS, PAYMENT_ATTEMPT_WINDOW_SECONDS } from './initiate.js';
 import type { PaymentProviderId } from './provider.js';
 
 /**
@@ -80,6 +80,8 @@ export type AttemptRow = {
   provider: string;
   recent: boolean;
   in_flight: boolean;
+  /** For an ask: the client's attempt on it may still be at the provider (payments/initiate.ts). */
+  attempt_in_flight: boolean;
   /** An ask of ours, already emailed -- not an attempt somebody started. */
   requested: boolean;
 };
@@ -192,6 +194,7 @@ export async function latestSessionFee(tx: Prisma.TransactionClient, bookingId: 
     SELECT p.id::text AS id, p.status, p.amount_rwf, p.provider,
            p.initiated_at > now() - make_interval(secs => ${PAYMENT_ATTEMPT_WINDOW_SECONDS}::double precision) AS recent,
            p.initiated_at > now() - make_interval(secs => ${CALL_IN_FLIGHT_SECONDS}::double precision) AS in_flight,
+           ${ATTEMPT_IN_FLIGHT} AS attempt_in_flight,
            EXISTS (
              SELECT 1
                FROM outbox o
@@ -214,11 +217,13 @@ export async function latestSessionFee(tx: Prisma.TransactionClient, bookingId: 
  * rotate the token out from under the page they are paying on, and recording
  * cash now could take the same balance twice (item 7), so both wait for that
  * attempt to end. An ask of our own blocks nothing: asking twice is a
- * reminder, and the client has not started anything.
+ * reminder, and the client has not started anything -- until they do, and
+ * then their attempt on it blocks like any other while its call may run.
  */
 export function moneyMoving(latest: AttemptRow | undefined): boolean {
   return (
     latest !== undefined &&
-    ((latest.recent && latest.status === 'pending') || (latest.in_flight && latest.status === 'initiated' && !latest.requested))
+    ((latest.recent && latest.status === 'pending') ||
+      (latest.status === 'initiated' && (latest.requested ? latest.attempt_in_flight : latest.in_flight)))
   );
 }

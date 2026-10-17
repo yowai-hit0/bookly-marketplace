@@ -4,6 +4,7 @@ import type pg from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { type PaymentRouting, routePayments } from '../payments/routing.js';
 import { issueToken } from '../auth/token.js';
 import { findBookingByToken } from '../booking/access.js';
 import { clientBookingView } from '../booking/client-view.js';
@@ -17,6 +18,7 @@ import {
   insertBookingWithToken,
   insertPayment,
   seedWorld,
+  routeTo,
   stubProvider,
 } from '../test/payment-fixtures.js';
 
@@ -97,7 +99,7 @@ beforeEach(async () => {
   paidApp = createApp({
     corsOrigin: WEB_ORIGIN,
     auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
-    publicApi: { prisma, now: () => clock, payments: { provider: stubProvider(), secret: SECRET } },
+    publicApi: { prisma, now: () => clock, payments: { routing: routeTo(stubProvider()), secret: SECRET } },
   });
 });
 
@@ -1175,6 +1177,65 @@ describe('POST /bookings/:id/session-fee', () => {
     expect([res.status, res.body]).toEqual([404, { error: 'not_found' }]);
     expect(await prisma.payment.count({ where: { bookingId: booking.id, kind: 'session_fee' } })).toBe(0);
     expect(await prisma.outbox.count({ where: { template: 'session_fee_request' } })).toBe(0);
+  });
+});
+
+describe('POST /bookings/:id/session-fee and the method routing (R3.1)', () => {
+  async function completedBooking() {
+    const { booking } = await confirmedBooking();
+    await prisma.booking.update({ where: { id: booking.id }, data: { status: 'completed', completedAt: START } });
+    return booking;
+  }
+
+  function appRouting(routing: PaymentRouting) {
+    return createApp({
+      corsOrigin: WEB_ORIGIN,
+      auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+      publicApi: { prisma, now: () => clock, payments: { routing, secret: SECRET } },
+    });
+  }
+
+  async function ask(routing: PaymentRouting, bookingId: string) {
+    return request(appRouting(routing)).post(`${BOOKINGS}/${bookingId}/session-fee`).send({}).set('Authorization', `Bearer ${token}`);
+  }
+
+  it('does not exist where payments are mounted but nothing is on offer: no client could pay it', async () => {
+    const booking = await completedBooking();
+
+    const res = await ask(routeTo(stubProvider({ configured: false })), booking.id);
+
+    expect([res.status, res.body]).toEqual([404, { error: 'not_found' }]);
+    expect(await prisma.payment.count({ where: { bookingId: booking.id, kind: 'session_fee' } })).toBe(0);
+  });
+
+  it('records the ask against the provider of the first method on offer: MTN direct when MTN MoMo is routed there', async () => {
+    const booking = await completedBooking();
+    const routing = routePayments({ momo_mtn: stubProvider(), momo_airtel: stubProvider({ id: 'flutterwave', methods: ['momo_mtn', 'momo_airtel'] }) });
+
+    expect((await ask(routing, booking.id)).status).toBe(200);
+
+    expect(await prisma.payment.findMany({ where: { bookingId: booking.id, kind: 'session_fee' }, select: { provider: true, method: true, status: true } })).toEqual([
+      { provider: 'mtn_momo_direct', method: null, status: 'initiated' },
+    ]);
+  });
+
+  it('records it against Flutterwave for an Airtel-only deployment', async () => {
+    const booking = await completedBooking();
+
+    expect((await ask(routePayments({ momo_airtel: stubProvider({ id: 'flutterwave', methods: ['momo_airtel'] }) }), booking.id)).status).toBe(200);
+
+    expect(await prisma.payment.findMany({ where: { bookingId: booking.id, kind: 'session_fee' }, select: { provider: true, method: true } })).toEqual([
+      { provider: 'flutterwave', method: null },
+    ]);
+  });
+
+  it('asks no provider anything: the ask names no method until the client chooses one', async () => {
+    const booking = await completedBooking();
+    const mtn = stubProvider();
+
+    expect((await ask(routeTo(mtn), booking.id)).status).toBe(200);
+
+    expect(mtn.initiated).toEqual([]);
   });
 });
 

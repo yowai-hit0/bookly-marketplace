@@ -20,7 +20,7 @@ import {
  * unusable body and an unreachable API is a `PaymentApiError` carrying the
  * status (null for the network), while an abort the caller asked for comes back
  * as it was; and `startPayment` maps each answer of the contract -- 201, 404,
- * 409 in its four kinds, 422, 502 in its two -- and reads anything else, a body
+ * 409 in its five kinds, 422, 502 in its two -- and reads anything else, a body
  * it cannot act on, or no answer at all as `failed`. Paths are built with each
  * segment encoded.
  */
@@ -116,6 +116,27 @@ describe('fetchPaymentMethods', () => {
   it('answers MTN MoMo alone when the API lists MTN MoMo alone', async () => {
     stubFetch(() => json({ methods: ['momo_mtn'] }))
     expect(await fetchPaymentMethods()).toEqual(['momo_mtn'])
+  })
+
+  // Phase 3 (marketplace-spec.md R3.1): each method is routed to its own provider, and the answer names none.
+  it('answers Airtel Money alone when the API lists Airtel Money alone', async () => {
+    stubFetch(() => json({ methods: ['momo_airtel'] }))
+    expect(await fetchPaymentMethods()).toEqual(['momo_airtel'])
+  })
+
+  it('answers both MoMo methods, MTN first, when the API lists them, whatever their order', async () => {
+    stubFetch(() => json({ methods: ['momo_airtel', 'momo_mtn'] }))
+    expect(await fetchPaymentMethods()).toEqual(['momo_mtn', 'momo_airtel'])
+  })
+
+  it('needs no provider in the answer, and is not swayed by one', async () => {
+    stubFetch(() => json({ provider: 'flutterwave', methods: ['momo_mtn'] }))
+    expect(await fetchPaymentMethods()).toEqual(['momo_mtn'])
+  })
+
+  it('adds nothing the API did not list: a repeated method is still one method', async () => {
+    stubFetch(() => json({ methods: ['momo_airtel', 'momo_airtel'] }))
+    expect(await fetchPaymentMethods()).toEqual(['momo_airtel'])
   })
 
   it('answers all three, in a fixed order, when the API lists them in any order', async () => {
@@ -294,6 +315,8 @@ describe('startPayment', () => {
     ['409 already_paid', 409, { error: 'already_paid' }, { status: 'already_paid' }],
     ['409 hold_expired', 409, { error: 'hold_expired' }, { status: 'closed' }],
     ['409 nothing_to_pay', 409, { error: 'nothing_to_pay' }, { status: 'closed' }],
+    ['409 photographer_unavailable (R3.4)', 409, { error: 'photographer_unavailable' }, { status: 'photographer_unavailable' }],
+    ['photographer_unavailable under any other status', 422, { error: 'photographer_unavailable' }, { status: 'failed' }],
     ['409 of an unknown kind', 409, { error: 'slot_taken' }, { status: 'failed' }],
     ['422 naming the phone', 422, { error: 'validation_failed', fields: ['phone'] }, { status: 'invalid', fields: ['phone'] }],
     ['422 naming both', 422, { error: 'validation_failed', fields: ['method', 'phone'] }, { status: 'invalid', fields: ['method', 'phone'] }],

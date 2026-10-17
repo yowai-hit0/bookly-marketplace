@@ -76,8 +76,9 @@ import { kigaliDate, parseOrReject } from './validation.js';
 export type AdminBookingsDeps = {
   prisma: PrismaClient;
   now: () => Date;
-  /** The provider a session-fee request is opened against (spec §6.18); without
-   *  one there is nothing for the client to pay through, so that route is not
+  /** The provider a session-fee request is recorded against until the client
+   *  picks a method (payments/routing.ts `requestProvider`, R3.1); without one
+   *  nothing is on offer for the client to pay through, so that route is not
    *  mounted at all. */
   paymentProviderId?: PaymentProviderId;
 };

@@ -1,5 +1,6 @@
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { type Photographer, Prisma, type PrismaClient } from '@prisma/client';
 import { bookingTotals } from '../booking/totals.js';
+import { isBookable } from '../photographers/bookable.js';
 import { type PaymentMethod, type PaymentProvider, PaymentProviderError } from './provider.js';
 
 /**
@@ -16,6 +17,17 @@ import { type PaymentMethod, type PaymentProvider, PaymentProviderError } from '
  * waits for the webhook (Task 17). Refused, unreachable or too slow, it is
  * `failed` with the reason, and the booking is untouched: still
  * `pending_payment`, its hold still running, free to try again.
+ *
+ * The provider is the one the client's method routes to (marketplace-spec.md
+ * R3.1, payments/routing.ts): the route picks it, never a deployment-wide
+ * default. The method itself is written on the row with the attempt, so the
+ * record says how the client chose to pay before any provider answers.
+ *
+ * A new booking fee needs a photographer who can still be booked (R3.4, T3.4):
+ * one suspended (or, from Phase 5, out of subscription) since the hold was
+ * taken is `photographer_unavailable`, and no money is asked for. A session
+ * fee is not refused: it is owed on a booking that already stands, and
+ * existing bookings carry on whatever the photographer's status (R5.5, T9.2).
  */
 
 /**
@@ -54,6 +66,13 @@ const REQUESTED = Prisma.sql`
        AND o.template = 'session_fee_request'
        AND o.payload->>'paymentId' = p.id::text
   )`;
+/**
+ * Whether an ask the client has started paying may still have its provider
+ * call running: the attempt wrote the method and stamped `updated_at`, on the
+ * database clock, as it opened (R3.1). An ask nobody attempted has no method.
+ */
+export const ATTEMPT_IN_FLIGHT = Prisma.sql`
+  (p.method IS NOT NULL AND p.updated_at > now() - make_interval(secs => ${CALL_IN_FLIGHT_SECONDS}::double precision))`;
 const FAILURE_REASON_MAX_LENGTH = 500;
 
 export type StartPaymentDeps = {
@@ -91,6 +110,8 @@ export type StartPaymentResult =
   | { status: 'nothing_to_pay' }
   /** An earlier attempt is still waiting on the payer. */
   | { status: 'in_progress'; ourRef: string }
+  /** The booking fee of a photographer who can no longer be booked (R3.4); never a session fee. */
+  | { status: 'photographer_unavailable' }
   | { status: 'provider_failed'; ourRef: string; outcome: 'rejected' | 'unavailable' };
 
 type OpenedAttempt =
@@ -102,12 +123,20 @@ export async function startBookingFeePayment(deps: StartPaymentDeps, request: St
 
   const opened = await prisma.$transaction(async (tx): Promise<OpenedAttempt> => {
     // Locked, so two taps on "Pay" serialise here and the second sees the first.
-    const bookings = await tx.$queryRaw<{ id: string; status: string; booking_fee_rwf: number; hold_live: boolean }[]>`
-      SELECT id::text AS id, status, booking_fee_rwf,
-             (hold_expires_at IS NOT NULL AND hold_expires_at > now()) AS hold_live
-        FROM booking
-       WHERE reference = ${request.reference}
-         FOR UPDATE`;
+    // The photographer row is read, not locked: the provider is called after
+    // this transaction anyway, so no lock could keep a suspension from landing
+    // between the check and the prompt -- the check is that nobody is asked to
+    // pay for a photographer already unavailable (R3.4).
+    const bookings = await tx.$queryRaw<
+      { id: string; status: string; booking_fee_rwf: number; hold_live: boolean; photographer_status: Photographer['status'] }[]
+    >`
+      SELECT b.id::text AS id, b.status, b.booking_fee_rwf,
+             (b.hold_expires_at IS NOT NULL AND b.hold_expires_at > now()) AS hold_live,
+             ph.status AS photographer_status
+        FROM booking b
+        JOIN photographer ph ON ph.id = b.photographer_id
+       WHERE b.reference = ${request.reference}
+         FOR UPDATE OF b`;
     const booking = bookings[0];
     if (booking === undefined) return { status: 'not_found' };
 
@@ -115,6 +144,8 @@ export async function startBookingFeePayment(deps: StartPaymentDeps, request: St
     if (paid > 0) return { status: 'already_paid' };
     // Measured on the database clock, like the hold itself (booking/claim.ts).
     if (booking.status !== 'pending_payment' || !booking.hold_live) return { status: 'hold_expired' };
+    // The one rule (photographers/bookable.ts), over the row in hand (R3.4, T3.4).
+    if (!isBookable({ status: booking.photographer_status })) return { status: 'photographer_unavailable' };
     if (booking.booking_fee_rwf <= 0) return { status: 'nothing_to_pay' };
 
     const waiting = await tx.$queryRaw<{ our_ref: string }[]>`
@@ -130,8 +161,8 @@ export async function startBookingFeePayment(deps: StartPaymentDeps, request: St
 
     // Every value the database can supply, it does: `our_ref`, `status`, `initiated_at`.
     const inserted = await tx.$queryRaw<{ id: string; our_ref: string; amount_rwf: number }[]>`
-      INSERT INTO payment (booking_id, kind, provider, amount_rwf)
-      VALUES (${booking.id}::uuid, 'booking_fee', ${provider.id}, ${booking.booking_fee_rwf})
+      INSERT INTO payment (booking_id, kind, provider, method, amount_rwf)
+      VALUES (${booking.id}::uuid, 'booking_fee', ${provider.id}, ${request.method}, ${booking.booking_fee_rwf})
       RETURNING id::text AS id, our_ref::text AS our_ref, amount_rwf`;
     const payment = inserted[0];
     if (payment === undefined) throw new Error('The payment insert returned no row');
@@ -190,14 +221,17 @@ export async function startSessionFeePayment(
         status: string;
         amount_rwf: number;
         provider: string;
+        method: string | null;
         recent: boolean;
         in_flight: boolean;
+        attempt_in_flight: boolean;
         requested: boolean;
       }[]
     >`
-      SELECT p.id::text AS id, p.our_ref::text AS our_ref, p.status, p.amount_rwf, p.provider,
+      SELECT p.id::text AS id, p.our_ref::text AS our_ref, p.status, p.amount_rwf, p.provider, p.method,
              p.initiated_at > now() - make_interval(secs => ${PAYMENT_ATTEMPT_WINDOW_SECONDS}::double precision) AS recent,
              p.initiated_at > now() - make_interval(secs => ${CALL_IN_FLIGHT_SECONDS}::double precision) AS in_flight,
+             ${ATTEMPT_IN_FLIGHT} AS attempt_in_flight,
              ${REQUESTED} AS requested
         FROM payment p
        WHERE p.booking_id = ${booking.id}::uuid
@@ -215,8 +249,11 @@ export async function startSessionFeePayment(
     // An `initiated` row young enough that its provider call may still be
     // running is that call, not a second one: prompting again here is how a
     // fee gets paid twice. An ask is never that call, however new: it is the
-    // row this payment is meant to settle.
-    if (latest !== undefined && latest.in_flight && latest.status === 'initiated' && !latest.requested) {
+    // row this payment is meant to settle -- until the client attempts it.
+    // Then the call on it is timed from the attempt (R3.1: a second tap under
+    // another method must not prompt a second provider while the first may
+    // still be asking the payer).
+    if (latest !== undefined && latest.status === 'initiated' && (latest.requested ? latest.attempt_in_flight : latest.in_flight)) {
       return { status: 'in_progress', ourRef: latest.our_ref };
     }
     // The photographer's request, made and never attempted: its amount is the
@@ -226,14 +263,27 @@ export async function startSessionFeePayment(
     // than the booking is now worth is stale, and billing it would overpay the
     // client by construction. That opens a fresh attempt for what is really
     // owed, which is also the figure their own page is showing them.
-    // Never a row recorded against another provider (spec §6.18).
-    if (latest?.status === 'initiated' && latest.provider === provider.id && latest.amount_rwf <= outstandingRwf) {
-      return { status: 'opened', paymentId: latest.id, ourRef: latest.our_ref, amountRwf: latest.amount_rwf };
+    //
+    // The request was recorded against the provider of the first method on
+    // offer (payments/routing.ts `requestProvider`): the photographer cannot
+    // know how the client will pay. The client's method decides (R3.1), so an
+    // ask nobody has ever attempted -- no method on it yet -- moves to the
+    // provider that method routes to, keeping its frozen amount. A row that
+    // has been attempted is never moved: some provider may have it, and only
+    // that provider's answer may settle it (spec §6.18).
+    if (latest?.status === 'initiated' && latest.amount_rwf <= outstandingRwf) {
+      const reroutable = latest.requested && latest.method === null;
+      if (latest.provider === provider.id || reroutable) {
+        // `updated_at` on the database clock: it times the attempt now starting (ATTEMPT_IN_FLIGHT).
+        await tx.$executeRaw`
+          UPDATE payment SET provider = ${provider.id}, method = ${request.method}, updated_at = now() WHERE id = ${latest.id}::uuid`;
+        return { status: 'opened', paymentId: latest.id, ourRef: latest.our_ref, amountRwf: latest.amount_rwf };
+      }
     }
 
     const inserted = await tx.$queryRaw<{ id: string; our_ref: string; amount_rwf: number }[]>`
-      INSERT INTO payment (booking_id, kind, provider, amount_rwf)
-      VALUES (${booking.id}::uuid, 'session_fee', ${provider.id}, ${outstandingRwf})
+      INSERT INTO payment (booking_id, kind, provider, method, amount_rwf)
+      VALUES (${booking.id}::uuid, 'session_fee', ${provider.id}, ${request.method}, ${outstandingRwf})
       RETURNING id::text AS id, our_ref::text AS our_ref, amount_rwf`;
     const payment = inserted[0];
     if (payment === undefined) throw new Error('The payment insert returned no row');

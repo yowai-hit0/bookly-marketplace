@@ -12,10 +12,14 @@ import { type WebhookDeps, receiveWebhook } from '../payments/webhooks.js';
  *   POST     /api/webhooks/flutterwave         signed in `flutterwave-signature`
  *
  * Every provider whose payments may still be settling keeps its route mounted,
- * the active one or not (spec §6.18). The answer is 200 whenever the delivery is
- * on record -- applied, ignored, or refused as unsigned -- so the provider stops
- * retrying; only a failure to process it is a 500, which asks for the retry
- * that processes it again. The body never says which.
+ * whether a method routes to it today or not (spec §6.18, R3.1). A delivery
+ * whose signature fails is stored unverified, applies nothing, and is a 401
+ * (marketplace-spec.md T3.3, 2026-10-17): it is no delivery of the provider's,
+ * so nothing is asked of it, and a genuine one refused under a misconfigured
+ * key is retried by the provider into a fixed one. Anything else on record --
+ * applied or ignored -- is 200, so the provider stops retrying; only a failure
+ * to process it is a 500, which asks for the retry that processes it again. The
+ * 200 body never says which.
  */
 
 export type PaymentWebhooksDeps = WebhookDeps & {
@@ -58,6 +62,10 @@ function deliver(deps: WebhookDeps, provider: PaymentProvider) {
     });
     if (outcome.status === 'failed') {
       res.status(500).json({ error: 'internal_error' });
+      return;
+    }
+    if (outcome.note === 'signature_invalid') {
+      res.status(401).json({ error: 'invalid_signature' });
       return;
     }
     res.status(200).json({ received: true });
