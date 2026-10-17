@@ -1,14 +1,18 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import type { AuthDeps } from '../auth/account-auth.js';
+import { signUpPhotographer } from '../auth/signup.js';
+import { handleField } from '../photographers/handle.js';
 import { photographerLocals, requirePhotographer } from '../auth/middleware.js';
 import type { PaymentProviderId } from '../payments/provider.js';
 import { toPublicUser } from '../auth/public-user.js';
-import { areaAuthRouter } from './area-auth.js';
+import { MAX_PASSWORD_LENGTH, MIN_NEW_PASSWORD_LENGTH, areaAuthRouter, signupEmail } from './area-auth.js';
 import { blocksRouter, workingHoursRouter } from './studio-availability.js';
 import { studioBookingsRouter } from './studio-bookings.js';
 import { calendarRouter } from './studio-calendar.js';
 import { catalogueRouter } from './studio-catalogue.js';
 import { settingsRouter } from './studio-settings.js';
+import { parseOrReject } from './validation.js';
 
 /**
  * `/api/studio/*` (plan.md Task 7, revision 2.3; Phase 2 decision 1): the
@@ -27,12 +31,39 @@ export type StudioRouterDeps = AuthDeps & {
   paymentProviderId?: PaymentProviderId;
 };
 
+/**
+ * A photographer's signup (Phase 2 decision 4). The handle is lowercased, then
+ * held to the CHECK's format. The 400-versus-422 rule of every write applies
+ * (`parseOrReject`): a malformed email or handle is 400 `invalid_request`, a
+ * password or name of the wrong length 422 `validation_failed` naming it.
+ */
+const signupBody = z.strictObject({
+  email: signupEmail,
+  password: z.string().min(MIN_NEW_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
+  // `photographer_display_name_length`.
+  displayName: z.string().trim().min(1).max(80),
+  handle: handleField,
+});
+
 export function studioRouter(deps: StudioRouterDeps): Router {
   const router = Router();
 
   // --- Unauthenticated -------------------------------------------------------
 
   router.use('/auth', areaAuthRouter(deps, 'studio'));
+
+  // Photographer signup (Phase 2 decision 4; marketplace-spec.md R2.2): 202
+  // whether or not the address is taken (auth/signup.ts says what each case
+  // sends), and 409 `handle_taken` for a handle someone has or nobody may have.
+  router.post('/auth/signup', async (req, res) => {
+    const body = parseOrReject(signupBody, req.body, res);
+    if (body === undefined) return;
+    if ((await signUpPhotographer(deps, body)) === 'handle_taken') {
+      res.status(409).json({ error: 'handle_taken' });
+      return;
+    }
+    res.status(202).json({ ok: true });
+  });
 
   // --- Everything below requires a photographer's valid bearer token ---------
 

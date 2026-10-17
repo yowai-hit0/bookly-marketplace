@@ -20,6 +20,8 @@ export const FIXTURE_REFERENCE = 'BKY-2610-7K3MQ';
 /** A second booking of the same client, for the email that lists several. */
 export const FIXTURE_SECOND_REFERENCE = 'BKY-2610-9P2RT';
 export const FIXTURE_SECOND_ACCESS_TOKEN = 'Qw8E1rT5yU2iO9pA3sD7fG4hJ6kL0zXc';
+/** An email-verification token: 256 bits of base64url, as `issueVerification` mints it (Phase 2 decision 3). */
+export const FIXTURE_VERIFY_TOKEN = 'Vf3rT0k3n_aB9cD8eF7gH6iJ5kL4mN3oP2qR1sT0uVw';
 /** A contact-email confirmation token: not an access token, and never in a booking link. */
 export const FIXTURE_CONFIRM_TOKEN = 'Cf7mN2bV9cX4zL1kJ8hG5fD3sA6pO0iU';
 
@@ -230,6 +232,26 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
+    name: 'account_security_alert account_exists',
+    template: 'account_security_alert',
+    payload: { variant: 'account_exists', area: 'studio' },
+  },
+  {
+    name: 'account_verify_email',
+    template: 'account_verify_email',
+    payload: {
+      area: 'account',
+      token: FIXTURE_VERIFY_TOKEN,
+      /** format.json `formatDateTime`: 1 Jan 2027, 00:00. */
+      expiresAt: '2026-12-31T22:00:00.000Z',
+    },
+  },
+  {
+    name: 'photographer_application_received',
+    template: 'photographer_application_received',
+    payload: { displayName: 'Kigali Lens', handle: 'kigali-lens', email: 'studio@kigali-lens.example' },
+  },
+  {
     name: 'photographer_approved',
     template: 'photographer_approved',
     payload: { displayName: 'Kigali Lens', handle: 'kigali-lens' },
@@ -276,7 +298,7 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
 export const TEMPLATE_VARIANTS = {
   photographer_alert: ['payment_received', 'retries_exhausted', 'refund_due', 'booking_cancelled'],
   platform_alert: ['retries_exhausted'],
-  account_security_alert: ['login_lockout'],
+  account_security_alert: ['login_lockout', 'account_exists'],
 } as const satisfies Partial<Record<SendableEmailTemplate, readonly string[]>>;
 
 export function emailFixture(name: string): EmailFixture {

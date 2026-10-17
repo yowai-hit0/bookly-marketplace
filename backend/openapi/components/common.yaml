@@ -200,7 +200,7 @@ responses:
   Unauthorized:
     description: |
       No valid token for this area. The `WWW-Authenticate` header says which:
-      `Bearer realm="bookly-studio"` (or `bookly-platform`) for no token,
+      `Bearer realm="bookly-studio"` (or `bookly-platform`, `bookly-account`) for no token,
       `…, error="invalid_token"` for a refused one: expired, tampered, issued
       for another area, issued before a password change or a revocation, or
       for a login since disabled.

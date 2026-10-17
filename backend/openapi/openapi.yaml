@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   summary: Booking, payment, studio and platform API for a marketplace of photographers in Kigali.
   description: |
-    The API behind the Bookly marketplace. It serves four kinds of caller:
+    The API behind the Bookly marketplace. It serves five kinds of caller:
 
     - **The public**: anonymous visitors browsing photographers and their
       services, checking availability, booking a slot and paying its booking fee.
@@ -16,6 +16,9 @@ info:
       another photographer's row is a 404, exactly like an id that names nothing.
     - **A platform admin**, in the console under `/api/platform/*`: a bearer
       JWT from `POST /api/platform/auth/login`.
+    - **A client with an account**, under `/api/account/*`: a bearer JWT from
+      `POST /api/account/auth/login`, email verification or Google sign-in.
+      Booking still needs no account.
 
     Each signed-in area has its own login and its own token audience: a token
     from one area is a `401` in every other, whatever its role claim says.
@@ -32,7 +35,8 @@ servers:
   - url: http://localhost:4000
     description: Local development
 # Studio operations inherit this. Public, client and auth operations set
-# `security: []` to opt out; platform operations name `platformBearer`.
+# `security: []` to opt out; platform operations name `platformBearer`, account
+# operations `accountBearer`.
 security:
   - studioBearer: []
 tags:
@@ -50,7 +54,7 @@ tags:
   - name: Email confirmations
     description: Confirming a booking's change of contact email from the new address.
   - name: Studio auth
-    description: Login and password reset for a photographer's studio account.
+    description: Signup, login, email verification and password reset for a photographer's studio account.
   - name: Studio availability
     description: Working hours and blocked time.
   - name: Studio settings
@@ -62,9 +66,13 @@ tags:
   - name: Studio catalogue
     description: Services, packages and add-ons.
   - name: Platform auth
-    description: Login and password reset for a platform admin.
+    description: Login, email verification and password reset for a platform admin.
   - name: Platform photographers
     description: Listing photographers, and approving, suspending and reactivating them.
+  - name: Account auth
+    description: Signup, login, email verification, password reset and Google sign-in for a client.
+  - name: Account
+    description: A client's own account.
   - name: Webhooks
     description: Inbound payment-provider callbacks. Called by providers, never by browsers.
 paths:
@@ -114,6 +122,12 @@ paths:
     $ref: paths/studio-auth.yaml#/resetRequest
   /api/studio/auth/password-reset/confirm:
     $ref: paths/studio-auth.yaml#/resetConfirm
+  /api/studio/auth/signup:
+    $ref: paths/studio-auth.yaml#/signup
+  /api/studio/auth/verify:
+    $ref: paths/studio-auth.yaml#/verify
+  /api/studio/auth/verify/resend:
+    $ref: paths/studio-auth.yaml#/verifyResend
   /api/studio/me:
     $ref: paths/studio-auth.yaml#/me
   # --- Studio availability, settings, calendar -------------------------------
@@ -184,6 +198,10 @@ paths:
     $ref: paths/platform.yaml#/resetRequest
   /api/platform/auth/password-reset/confirm:
     $ref: paths/platform.yaml#/resetConfirm
+  /api/platform/auth/verify:
+    $ref: paths/platform.yaml#/verify
+  /api/platform/auth/verify/resend:
+    $ref: paths/platform.yaml#/verifyResend
   /api/platform/me:
     $ref: paths/platform.yaml#/me
   /api/platform/photographers:
@@ -194,6 +212,27 @@ paths:
     $ref: paths/platform.yaml#/suspend
   /api/platform/photographers/{id}/reactivate:
     $ref: paths/platform.yaml#/reactivate
+  # --- Account --------------------------------------------------------------
+  /api/account/auth/login:
+    $ref: paths/account.yaml#/login
+  /api/account/auth/password-reset/request:
+    $ref: paths/account.yaml#/resetRequest
+  /api/account/auth/password-reset/confirm:
+    $ref: paths/account.yaml#/resetConfirm
+  /api/account/auth/signup:
+    $ref: paths/account.yaml#/signup
+  /api/account/auth/verify:
+    $ref: paths/account.yaml#/verify
+  /api/account/auth/verify/resend:
+    $ref: paths/account.yaml#/verifyResend
+  /api/account/auth/providers:
+    $ref: paths/account.yaml#/providers
+  /api/account/auth/google/start:
+    $ref: paths/account.yaml#/googleStart
+  /api/account/auth/google/callback:
+    $ref: paths/account.yaml#/googleCallback
+  /api/account/me:
+    $ref: paths/account.yaml#/me
   # --- Webhooks -------------------------------------------------------------
   /api/webhooks/mtn-momo/{ourRef}/{signature}:
     $ref: paths/webhooks.yaml#/mtnMomo
@@ -218,3 +257,12 @@ components:
         HS256 JWT from `POST /api/platform/auth/login`, audience
         `bookly-platform`, valid 8 hours. Revoked like the studio's; refused
         outside the platform console.
+    accountBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 JWT from `POST /api/account/auth/login`, `/verify` or
+        `/google/callback`, audience `bookly-account`, valid 7 days. Revoked
+        like the studio's (a Google-only client by a token revocation or by
+        adding a password); refused outside the account area.

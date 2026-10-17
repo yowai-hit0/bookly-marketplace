@@ -4,7 +4,7 @@
     "title": "Bookly API",
     "version": "1.0.0",
     "summary": "Booking, payment, studio and platform API for a marketplace of photographers in Kigali.",
-    "description": "The API behind the Bookly marketplace. It serves four kinds of caller:\n\n- **The public**: anonymous visitors browsing photographers and their\n  services, checking availability, booking a slot and paying its booking fee.\n- **A booking's client**: no account needed; every client request carries a\n  **capability token** in its path, emailed when the booking is confirmed.\n- **A photographer**, in the studio under `/api/studio/*`: an\n  `Authorization: Bearer` JWT from `POST /api/studio/auth/login`. Every\n  studio route is scoped to the photographer the token names; an id of\n  another photographer's row is a 404, exactly like an id that names nothing.\n- **A platform admin**, in the console under `/api/platform/*`: a bearer\n  JWT from `POST /api/platform/auth/login`.\n\nEach signed-in area has its own login and its own token audience: a token\nfrom one area is a `401` in every other, whatever its role claim says.\n\nRead [the API conventions](/api/conventions) first: error shapes, the\n400-versus-422 rule, time zones and money are the same on every operation.\n\nThis file is written by hand. A backend test (`src/openapi.test.ts`) fails\nwhen a route exists without an operation here, or the other way round, and\nvalidates real responses against these schemas.\n"
+    "description": "The API behind the Bookly marketplace. It serves five kinds of caller:\n\n- **The public**: anonymous visitors browsing photographers and their\n  services, checking availability, booking a slot and paying its booking fee.\n- **A booking's client**: no account needed; every client request carries a\n  **capability token** in its path, emailed when the booking is confirmed.\n- **A photographer**, in the studio under `/api/studio/*`: an\n  `Authorization: Bearer` JWT from `POST /api/studio/auth/login`. Every\n  studio route is scoped to the photographer the token names; an id of\n  another photographer's row is a 404, exactly like an id that names nothing.\n- **A platform admin**, in the console under `/api/platform/*`: a bearer\n  JWT from `POST /api/platform/auth/login`.\n- **A client with an account**, under `/api/account/*`: a bearer JWT from\n  `POST /api/account/auth/login`, email verification or Google sign-in.\n  Booking still needs no account.\n\nEach signed-in area has its own login and its own token audience: a token\nfrom one area is a `401` in every other, whatever its role claim says.\n\nRead [the API conventions](/api/conventions) first: error shapes, the\n400-versus-422 rule, time zones and money are the same on every operation.\n\nThis file is written by hand. A backend test (`src/openapi.test.ts`) fails\nwhen a route exists without an operation here, or the other way round, and\nvalidates real responses against these schemas.\n"
   },
   "servers": [
     {
@@ -51,7 +51,7 @@
     },
     {
       "name": "Studio auth",
-      "description": "Login and password reset for a photographer's studio account."
+      "description": "Signup, login, email verification and password reset for a photographer's studio account."
     },
     {
       "name": "Studio availability",
@@ -77,11 +77,19 @@
     },
     {
       "name": "Platform auth",
-      "description": "Login and password reset for a platform admin."
+      "description": "Login, email verification and password reset for a platform admin."
     },
     {
       "name": "Platform photographers",
       "description": "Listing photographers, and approving, suspending and reactivating them."
+    },
+    {
+      "name": "Account auth",
+      "description": "Signup, login, email verification, password reset and Google sign-in for a client."
+    },
+    {
+      "name": "Account",
+      "description": "A client's own account."
     },
     {
       "name": "Webhooks",
@@ -1181,6 +1189,139 @@
           },
           "400": {
             "$ref": "#/components/responses/ResetConfirmRefused"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/studio/auth/signup": {
+      "post": {
+        "operationId": "studioSignup",
+        "tags": [
+          "Studio auth"
+        ],
+        "summary": "Sign up as a photographer",
+        "description": "Creates a photographer's login, their studio (`pending` until a platform\nadmin approves it) and its settings in one transaction, emails a\nverification link to `/studio/verify/<token>` (valid 24 hours), and tells\nevery platform admin there is an application to review. A pending\nphotographer can sign in once verified, and is not listed or bookable.\n\nThe answer is `202` whether or not the address already has an account,\nso the endpoint does not reveal which do. A taken address gets, by\nemail only: a fresh verification link if it is an unverified photographer\nlogin (its password is NOT changed), or an \"you already have an account\"\nnotice if its account is verified. A taken or reserved **handle** is\n`409 handle_taken`, decided before the address is looked at: handles are\npublic.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotographerSignupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "The handle is taken, or reserved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "handle_taken"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/studio/auth/verify": {
+      "post": {
+        "operationId": "verifyStudioEmail",
+        "tags": [
+          "Studio auth"
+        ],
+        "summary": "Confirm an email address",
+        "description": "Posted by the page the verification link opens (`/studio/verify/<token>`;\nopening the link changes nothing). Requires the token AND the password\nthe account was created with: the token proves the inbox, the password\nproves the person at it is the one who signed up, so a stranger who\nsigned up with someone else's address cannot have it verified for them.\nEither being wrong is one answer, `400 invalid_verification`, and a wrong\npassword counts toward the account's lockout.\n\nOn success the address is verified, the link is spent, and the\ncaller is signed in: the response is a login's. Someone who never chose\nthe password the page asks for should use \"Forgot password\" instead: a\ncompleted reset verifies the address and replaces the password.\n`Cache-Control: no-store`.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified and signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/VerifyRefused"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/studio/auth/verify/resend": {
+      "post": {
+        "operationId": "resendStudioVerification",
+        "tags": [
+          "Studio auth"
+        ],
+        "summary": "Send the verification link again",
+        "description": "If the address is a photographer's login whose address is still unverified, a new link\n(valid 24 hours) replaces the old one and is emailed. Always `202`,\nwhether or not it is, so the endpoint does not reveal which addresses\nhave accounts or which are verified.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (sent only for an unverified login of this area).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -3219,6 +3360,84 @@
         }
       }
     },
+    "/api/platform/auth/verify": {
+      "post": {
+        "operationId": "verifyPlatformEmail",
+        "tags": [
+          "Platform auth"
+        ],
+        "summary": "Confirm an email address",
+        "description": "Posted by the page the verification link opens (`/platform/verify/<token>`;\nopening the link changes nothing). Requires the token AND the password\nthe account was created with: the token proves the inbox, the password\nproves the person at it is the one who signed up, so a stranger who\nsigned up with someone else's address cannot have it verified for them.\nEither being wrong is one answer, `400 invalid_verification`, and a wrong\npassword counts toward the account's lockout.\n\nOn success the address is verified, the link is spent, and the\ncaller is signed in: the response is a login's. Someone who never chose\nthe password the page asks for should use \"Forgot password\" instead: a\ncompleted reset verifies the address and replaces the password.\n`Cache-Control: no-store`.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified and signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/VerifyRefused"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/platform/auth/verify/resend": {
+      "post": {
+        "operationId": "resendPlatformVerification",
+        "tags": [
+          "Platform auth"
+        ],
+        "summary": "Send the verification link again",
+        "description": "If the address is a platform admin's login whose address is still unverified, a new link\n(valid 24 hours) replaces the old one and is emailed. Always `202`,\nwhether or not it is, so the endpoint does not reveal which addresses\nhave accounts or which are verified.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (sent only for an unverified login of this area).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
     "/api/platform/me": {
       "get": {
         "operationId": "getPlatformMe",
@@ -3449,6 +3668,404 @@
         }
       }
     },
+    "/api/account/auth/login": {
+      "post": {
+        "operationId": "accountLogin",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Log in",
+        "description": "Email and password for a client. Returns a bearer JWT for the\n`bookly-account` audience, valid 7 days, which no other area accepts.\nUnknown email, wrong password, a locked account, an unverified address,\na Google-only account and an account of another kind are one answer:\n`401 invalid_credentials`. `Cache-Control: no-store`.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidCredentials"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/auth/password-reset/request": {
+      "post": {
+        "operationId": "requestAccountPasswordReset",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Request a password reset",
+        "description": "If the address is a client's login, a single-use reset link to\n`/account/reset-password`, valid 30 minutes, is emailed. Always `202`.\nA Google-only client may use it to add a password.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (sent only if the address is a client's login).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "confirmAccountPasswordReset",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Set a new password from a reset link",
+        "description": "Consumes the emailed token and sets the new password, which revokes\nevery token already issued. The token works once, and only here. A\ncompleted reset also verifies the address (the link proved the inbox)\nand links the bookings made under it.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetConfirm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The password is changed."
+          },
+          "400": {
+            "$ref": "#/components/responses/ResetConfirmRefused"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/auth/signup": {
+      "post": {
+        "operationId": "accountSignup",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Sign up as a client",
+        "description": "Creates a client account and emails a verification link to\n`/account/verify/<token>` (valid 24 hours). Bookings made under the\naddress are linked to the account only once it is verified, never at\nsignup: otherwise anyone could sign up with someone else's address and\nsee their bookings.\n\nThe answer is `202` whether or not the address already has an account.\nA taken address gets, by email only, a fresh verification link if it is\nan unverified client login (its password is NOT changed), or a \"you\nalready have an account\" notice if its account is verified.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientSignupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/auth/verify": {
+      "post": {
+        "operationId": "verifyAccountEmail",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Confirm an email address",
+        "description": "Posted by the page the verification link opens (`/account/verify/<token>`;\nopening the link changes nothing). Requires the token AND the password\nthe account was created with: the token proves the inbox, the password\nproves the person at it is the one who signed up, so a stranger who\nsigned up with someone else's address cannot have it verified for them.\nEither being wrong is one answer, `400 invalid_verification`, and a wrong\npassword counts toward the account's lockout.\n\nOn success the address is verified, the link is spent, the bookings made\nunder the address are linked to the account, and the caller is signed\nin: the response is a login's. Someone who never chose the password the\npage asks for should use \"Forgot password\" instead: a completed reset\nverifies the address and replaces the password. `Cache-Control: no-store`.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified and signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/VerifyRefused"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/auth/verify/resend": {
+      "post": {
+        "operationId": "resendAccountVerification",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Send the verification link again",
+        "description": "If the address is a client's login whose address is still unverified, a\nnew link (valid 24 hours) replaces the old one and is emailed. Always\n`202`, whether or not it is, so the endpoint does not reveal which\naddresses have accounts or which are verified.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (sent only for an unverified login of this area).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/auth/providers": {
+      "get": {
+        "operationId": "getAccountAuthProviders",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Sign-in methods on offer",
+        "description": "Whether the login page shows \"Continue with Google\" (configured with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProviders"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/auth/google/start": {
+      "post": {
+        "operationId": "startGoogleSignIn",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Start signing in with Google",
+        "description": "Begins the OpenID Connect authorization code flow with PKCE (S256),\n`state` and `nonce`. Returns Google's authorization URL, whose\n`redirect_uri` is `<WEB_ORIGIN>/account/google/callback`, and the\nstate, which the page keeps in `sessionStorage` to compare on return.\nThe flow works once, for 10 minutes. No body. `404 not_found` when Google\nsign-in is not configured. `Cache-Control: no-store`.\n",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Send the browser to `authorizationUrl`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleStart"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/auth/google/callback": {
+      "post": {
+        "operationId": "completeGoogleSignIn",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Finish signing in with Google",
+        "description": "Posted by `/account/google/callback` with the `code` and `state` Google\nreturned, once the page has checked the state against the one it kept.\nThe server consumes the flow, exchanges the code with its PKCE verifier,\nverifies the id_token against Google's keys (signature, `iss`, `aud`,\n`exp`, `nonce`) and requires a Google-verified address. Then it signs in\nthe client linked to this Google account; or links the client account\nwith this address (verifying it, and, if it was never verified,\ndiscarding its password, which nobody proved was the owner's); or\ncreates a new client account with no password. The bookings made under\nthe address are linked. The response is a login's.\n\n- `400 invalid_state`: unknown, expired or already used state. Start again.\n- `400 google_sign_in_failed`: Google refused the code, the identity did\n  not verify, or the account cannot sign in.\n- `400 google_email_unverified`: Google has not verified the address.\n- `409 account_conflict`: the address belongs to another kind of\n  account, or to a client linked to another Google account. Word it\n  generically.\n- `404 not_found`: Google sign-in is not configured.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleCallbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed body, a bad state, or a refused identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_request": {
+                    "value": {
+                      "error": "invalid_request"
+                    }
+                  },
+                  "invalid_state": {
+                    "value": {
+                      "error": "invalid_state"
+                    }
+                  },
+                  "google_sign_in_failed": {
+                    "value": {
+                      "error": "google_sign_in_failed"
+                    }
+                  },
+                  "google_email_unverified": {
+                    "value": {
+                      "error": "google_email_unverified"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The address belongs to an account that cannot sign in with Google.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "account_conflict"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/me": {
+      "get": {
+        "operationId": "getAccountMe",
+        "tags": [
+          "Account"
+        ],
+        "summary": "The signed-in client",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The client's account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMe"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/webhooks/mtn-momo/{ourRef}/{signature}": {
       "post": {
         "operationId": "mtnMomoWebhookPost",
@@ -3632,6 +4249,12 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "description": "HS256 JWT from `POST /api/platform/auth/login`, audience\n`bookly-platform`, valid 8 hours. Revoked like the studio's; refused\noutside the platform console.\n"
+      },
+      "accountBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "HS256 JWT from `POST /api/account/auth/login`, `/verify` or\n`/google/callback`, audience `bookly-account`, valid 7 days. Revoked\nlike the studio's (a Google-only client by a token revocation or by\nadding a password); refused outside the account area.\n"
       }
     },
     "schemas": {
@@ -5149,6 +5772,84 @@
             "type": "string",
             "minLength": 12,
             "maxLength": 1024
+          }
+        }
+      },
+      "PhotographerSignupRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "displayName",
+          "handle"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "handle": {
+            "type": "string",
+            "description": "The public profile is `/p/<handle>`. Trimmed and lowercased first,\nthen 3-30 characters of `a-z`, `0-9` and `-`, not starting or ending\nwith `-` (the database's `photographer_handle_format`). Reserved\nnames (`admin`, `api`, `p`, `studio`, `platform`, `account`,\n`photographers`, `services`, `checkout`, `booking`, `my-booking`,\n`email-confirm`, `login`, `signup`, `help`, `docs`, `static`,\n`assets`) are refused like a taken handle.\n",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$"
+          }
+        }
+      },
+      "SignupAccepted": {
+        "type": "object",
+        "description": "Always this, whether or not the address already had an account.",
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        }
+      },
+      "VerifyRequest": {
+        "type": "object",
+        "description": "The token from the emailed link (`/{area}/verify/<token>`) and the\npassword the account was created with. Both are required: the token\nproves the inbox, the password proves the person at it signed up.\n",
+        "required": [
+          "token",
+          "password"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "ResendRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 320
           }
         }
       },
@@ -7011,6 +7712,129 @@
             "$ref": "#/components/schemas/PlatformPhotographer"
           }
         }
+      },
+      "ClientSignupRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "fullName"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          },
+          "password": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024
+          },
+          "fullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      },
+      "AuthProviders": {
+        "type": "object",
+        "description": "Which sign-in methods the account login page offers besides a password.",
+        "required": [
+          "google"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "google": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GoogleStart": {
+        "type": "object",
+        "required": [
+          "authorizationUrl",
+          "state"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "authorizationUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Google's authorization page. Send the browser there."
+          },
+          "state": {
+            "type": "string",
+            "description": "Keep it in `sessionStorage` and compare it with the `state` Google\nreturns to `/account/google/callback` before posting the callback.\nWorks once, for 10 minutes.\n"
+          }
+        }
+      },
+      "GoogleCallbackRequest": {
+        "type": "object",
+        "required": [
+          "code",
+          "state"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "state": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "AccountUser": {
+        "type": "object",
+        "description": "A client's own view of their account. Still an allowlist.",
+        "required": [
+          "id",
+          "email",
+          "lastLoginAt",
+          "fullName"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "lastLoginAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AccountMe": {
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/AccountUser"
+          }
+        }
       }
     },
     "parameters": {
@@ -7155,8 +7979,40 @@
           }
         }
       },
+      "ValidationFailed": {
+        "description": "Well-formed, but a value breaks a rule. Names the fields.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          }
+        }
+      },
+      "VerifyRefused": {
+        "description": "A malformed body (`invalid_request`), or one answer\n(`invalid_verification`) for an unknown, expired or used token, a wrong\npassword, a locked account and a login since disabled: none is\ndisclosed. A wrong password counts toward the account's lockout.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "invalid_request": {
+                "value": {
+                  "error": "invalid_request"
+                }
+              },
+              "invalid_verification": {
+                "value": {
+                  "error": "invalid_verification"
+                }
+              }
+            }
+          }
+        }
+      },
       "Unauthorized": {
-        "description": "No valid token for this area. The `WWW-Authenticate` header says which:\n`Bearer realm=\"bookly-studio\"` (or `bookly-platform`) for no token,\n`…, error=\"invalid_token\"` for a refused one: expired, tampered, issued\nfor another area, issued before a password change or a revocation, or\nfor a login since disabled.\n",
+        "description": "No valid token for this area. The `WWW-Authenticate` header says which:\n`Bearer realm=\"bookly-studio\"` (or `bookly-platform`, `bookly-account`) for no token,\n`…, error=\"invalid_token\"` for a refused one: expired, tampered, issued\nfor another area, issued before a password change or a revocation, or\nfor a login since disabled.\n",
         "headers": {
           "WWW-Authenticate": {
             "schema": {
@@ -7279,16 +8135,6 @@
                   "$ref": "#/components/schemas/AdminAddon"
                 }
               }
-            }
-          }
-        }
-      },
-      "ValidationFailed": {
-        "description": "Well-formed, but a value breaks a rule. Names the fields.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ValidationError"
             }
           }
         }

@@ -64,6 +64,8 @@ export const APPLICATION_TABLES = [
   'photographer',
   'platform_setting',
   'app_user',
+  // Google sign-ins in flight (Phase 2 decision 6); references nothing.
+  'oauth_flow',
 ] as const;
 
 /**

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { AppUser, Prisma, PrismaClient } from '@prisma/client';
+import { linkClientRows } from '../booking/client.js';
 import { enqueue } from '../outbox/enqueue.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { AREA_ROLE, AREA_WEB_PATHS, type AuthArea, admitsArea, hasVerifiedEmail } from './roles.js';
@@ -66,7 +67,7 @@ export async function attemptLogin(deps: AuthDeps, area: AuthArea, email: string
     // Spend the same Argon2 cost as a real check, so response time does not
     // reveal whether the email exists, belongs to another kind of account, or
     // is locked. A refused attempt is not counted: it proves nothing new.
-    await verifyPassword(await dummyHash(), password);
+    await spendDummyPasswordCheck(password);
     return { status: 'invalid_credentials' };
   }
 
@@ -106,8 +107,8 @@ export function lockoutMinutesFor(failedLoginCount: number): number | null {
  *
  * The link goes to the area's own reset page (`AREA_WEB_PATHS`). A Google-only
  * client may use it to add a password, and an address that was never verified
- * may use it too: the link reaches only the mailbox's owner. Consuming it does
- * not verify the address -- that remains the verification flow's job.
+ * may use it too: the link reaches only the mailbox's owner -- which is why
+ * consuming it also verifies the address (`confirmPasswordReset`).
  */
 export async function requestPasswordReset(deps: AuthDeps, area: AuthArea, email: string): Promise<void> {
   const login = await findAreaLogin(deps.prisma, area, email);
@@ -158,6 +159,15 @@ export type PasswordResetResult = 'ok' | 'invalid_or_expired_token';
  * Changing `password_hash` invalidates every token already issued to that user,
  * because each carries a fingerprint of the old hash. It also clears any lockout: the
  * person holding the emailed token has proved control of the account's mailbox.
+ *
+ * **A completed reset verifies the address** (marketplace-spec.md R2.1c (b)).
+ * The link proved the mailbox, and the password that was on the account is
+ * gone, so whatever it was -- including one chosen by someone who signed up
+ * with this address before its owner did -- no longer opens it. That is the
+ * owner's way in to an account a stranger pre-registered: "Forgot password"
+ * sets their own password, verifies the address, and voids any pending
+ * verification link. For a client, the bookings made under the address are
+ * linked in the same transaction (marketplace-data-model.md §2.8).
  */
 export async function confirmPasswordReset(
   deps: AuthDeps,
@@ -175,18 +185,28 @@ export async function confirmPasswordReset(
 
   const passwordHash = await hashPassword(newPassword);
 
-  const { count } = await deps.prisma.appUser.updateMany({
-    where: { id: holder.id, ...liveToken, disabledAt: null, anonymizedAt: null },
-    data: {
-      passwordHash,
-      passwordResetTokenHash: null,
-      passwordResetExpiresAt: null,
-      failedLoginCount: 0,
-      lockedUntil: null,
-    },
-  });
+  return deps.prisma.$transaction(async (tx) => {
+    const { count } = await tx.appUser.updateMany({
+      where: { id: holder.id, ...liveToken, disabledAt: null, anonymizedAt: null },
+      data: {
+        passwordHash,
+        passwordResetTokenHash: null,
+        passwordResetExpiresAt: null,
+        failedLoginCount: 0,
+        lockedUntil: null,
+      },
+    });
+    if (count !== 1) return 'invalid_or_expired_token';
 
-  return count === 1 ? 'ok' : 'invalid_or_expired_token';
+    // The reset proved the mailbox: an unverified address is verified now, and
+    // its pending verification link is void (it could only verify again).
+    const verified = await tx.appUser.updateMany({
+      where: { id: holder.id, emailVerifiedAt: null },
+      data: { emailVerifiedAt: now, emailVerifyTokenHash: null, emailVerifyExpiresAt: null },
+    });
+    if (verified.count === 1 && holder.role === 'client') await linkClientRows(tx, holder.id, holder.email);
+    return 'ok' as const;
+  });
 }
 
 /**
@@ -213,7 +233,7 @@ export async function revokeTokens(db: PrismaClient | Prisma.TransactionClient, 
  * The lock is set pessimistically, before the password is checked. If that Nth
  * attempt turns out to be right, the success path clears it.
  */
-async function claimLoginAttempt(deps: AuthDeps, userId: string, now: Date): Promise<number | null> {
+export async function claimLoginAttempt(deps: Pick<AuthDeps, 'prisma'>, userId: string, now: Date): Promise<number | null> {
   // The minutes table is passed in, not repeated, so LOCKOUT_MINUTES stays the
   // single source of truth for SQL and for `lockoutMinutesFor` alike.
   const [first, second, third] = LOCKOUT_MINUTES;
@@ -287,14 +307,27 @@ type AreaLogin = { id: string; email: string; passwordHash: string | null; email
  * 22025 as a 500. The account's address stopped being a factor at all: anyone
  * could guess passwords, lock the account, or trigger reset emails against it.
  */
-async function findAreaLogin(prisma: PrismaClient, area: AuthArea, email: string): Promise<AreaLogin | null> {
-  const rows = await prisma.$queryRaw<{ id: string }[]>`
+export async function findAreaLogin(prisma: PrismaClient, area: AuthArea, email: string): Promise<AreaLogin | null> {
+  const user = await findUserByEmail(prisma, email);
+  if (user === null || !admitsArea(area, user)) return null;
+  return { id: user.id, email: user.email, passwordHash: user.passwordHash, emailVerifiedAt: user.emailVerifiedAt };
+}
+
+/** A user with its photographer row's id, if it has one: what `admitsArea` reads. */
+export type UserWithPhotographer = AppUser & { photographer: { id: string } | null };
+
+/**
+ * The `app_user` with this email, of any role, or null. The same exact,
+ * case-insensitive match as `findAreaLogin` (see there: never ILIKE), for the
+ * callers that must act on an account whatever its area: a signup with a taken
+ * address, Google sign-in refusing another role's address.
+ */
+export async function findUserByEmail(db: PrismaClient | Prisma.TransactionClient, email: string): Promise<UserWithPhotographer | null> {
+  const rows = await db.$queryRaw<{ id: string }[]>`
     SELECT id FROM app_user WHERE lower(email) = lower(${email}) LIMIT 1`;
   const id = rows[0]?.id;
   if (id === undefined) return null;
-  const user = await prisma.appUser.findUnique({ where: { id }, include: { photographer: { select: { id: true } } } });
-  if (user === null || !admitsArea(area, user)) return null;
-  return { id: user.id, email: user.email, passwordHash: user.passwordHash, emailVerifiedAt: user.emailVerifiedAt };
+  return db.appUser.findUnique({ where: { id }, include: { photographer: { select: { id: true } } } });
 }
 
 let dummyHashPromise: Promise<string> | undefined;
@@ -303,4 +336,13 @@ let dummyHashPromise: Promise<string> | undefined;
 function dummyHash(): Promise<string> {
   dummyHashPromise ??= hashPassword(randomBytes(32).toString('base64url'));
   return dummyHashPromise;
+}
+
+/**
+ * Spends one Argon2 check of `password` against a hash nobody knows: what a
+ * refusal costs when there is no real hash to check, so the response time does
+ * not tell an unknown or refused account from a known one.
+ */
+export async function spendDummyPasswordCheck(password: string): Promise<void> {
+  await verifyPassword(await dummyHash(), password);
 }

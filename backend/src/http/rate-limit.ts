@@ -45,9 +45,11 @@ export type RateLimitRule = { limit: number; windowMs: number };
 
 /**
  * The limited endpoints. Each gets its own limiter, so one cannot spend another's
- * allowance. The three auth limits apply in every signed-in area (studio,
- * platform, account; Phase 2 decision 8), each area counted under its own key
- * (`areaIpKey`), so a burst at one area's login does not lock out another's.
+ * allowance. The login, reset and verification limits apply in every signed-in
+ * area (studio, platform, account; Phase 2 decision 8), the signup limit in the
+ * studio and the account, and the Google limits in the account; each area is
+ * counted under its own key (`areaIpKey`), so a burst at one area's login does
+ * not lock out another's.
  */
 export type RateLimitName =
   | 'bookingsPerIp'
@@ -56,6 +58,11 @@ export type RateLimitName =
   | 'loginPerIp'
   | 'passwordResetPerIp'
   | 'passwordResetConfirmPerIp'
+  | 'signupPerIp'
+  | 'verifyPerIp'
+  | 'verifyResendPerIp'
+  | 'googleStartPerIp'
+  | 'googleCallbackPerIp'
   | 'emailChangePerIp';
 
 const MINUTE = 60_000;
@@ -75,6 +82,18 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitName, RateLimitRule> = {
   // costs, not the token: room for a few typos of a too-short password.
   passwordResetConfirmPerIp: { limit: 10, windowMs: 60 * MINUTE },
   emailChangePerIp: { limit: 10, windowMs: 60 * MINUTE },
+  // Each signup costs an Argon2 hash and sends an email: a household signing
+  // up together fits, a script filling inboxes does not (Phase 2 decision 8).
+  signupPerIp: { limit: 5, windowMs: 60 * MINUTE },
+  // A verification checks a password, so like a reset confirmation it is
+  // bounded for the Argon2 it costs; the account lockout guards the password.
+  verifyPerIp: { limit: 10, windowMs: 60 * MINUTE },
+  // Sends an email, like a reset request.
+  verifyResendPerIp: { limit: 5, windowMs: 60 * MINUTE },
+  // Each start writes an oauth_flow row; each callback calls Google. Room for
+  // a person who changes their mind a few times at the account chooser.
+  googleStartPerIp: { limit: 20, windowMs: 15 * MINUTE },
+  googleCallbackPerIp: { limit: 20, windowMs: 15 * MINUTE },
 };
 
 export type RateLimitOverrides = Partial<Record<RateLimitName, RateLimitRule>>;

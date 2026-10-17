@@ -5,6 +5,7 @@ import type pg from 'pg';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
+import { revokeTokens } from '../auth/account-auth.js';
 import { type AuthArea } from '../auth/roles.js';
 import { TOKEN_AUDIENCES, TOKEN_ISSUER, credentialFingerprint, issueToken } from '../auth/token.js';
 import { createPrismaClient } from '../db/client.js';
@@ -17,10 +18,10 @@ import { PHOTOGRAPHER_HANDLE, type PaymentWorld, seedWorld } from '../test/payme
  * against one route of every area. Only the area's own role gets a 2xx; every
  * other caller of a signed-in area gets a 401. A public route serves everyone.
  *
- * The account area (`/api/account/*`, clients) is built by a later unit of
- * Phase 2. Its column is in the table as a pending slot: when its route
- * exists, fill in `ROUTES.account` and the matrix covers it with no other
- * change.
+ * Then revocation, through each area's real middleware (T2.5): a password
+ * change, `revokeTokens` and disabling the login each turn a working token
+ * into a 401 on the very next request, for every role -- a Google-only client
+ * included, who has no password to change.
  */
 
 let prisma: PrismaClient;
@@ -60,13 +61,12 @@ beforeEach(async () => {
   });
 });
 
-/** One route per family, all GETs that change nothing. `null`: the area has no route yet. */
-const ROUTES: Record<'public' | AuthArea, string | null> = {
+/** One route per family, all GETs that change nothing. */
+const ROUTES: Record<'public' | AuthArea, string> = {
   public: `/api/photographers/${PHOTOGRAPHER_HANDLE}`,
   studio: '/api/studio/me',
   platform: '/api/platform/me',
-  // Pending: `/api/account/me` arrives with the account area (Phase 2, a later unit).
-  account: null,
+  account: '/api/account/me',
 };
 
 /** A correctly signed token with the user's real credential fingerprint, for any audience and role. */
@@ -99,17 +99,19 @@ const CALLERS: Caller[] = [
   { label: 'a platform admin signed for the studio audience', bearer: () => signed(users.platform_admin, TOKEN_AUDIENCES.studio, 'platform_admin'), admittedTo: null },
   { label: 'a client signed for the studio audience', bearer: () => signed(users.client, TOKEN_AUDIENCES.studio, 'client'), admittedTo: null },
   { label: 'a client signed for the platform audience', bearer: () => signed(users.client, TOKEN_AUDIENCES.platform, 'client'), admittedTo: null },
+  { label: 'a photographer signed for the account audience', bearer: () => signed(users.photographer, TOKEN_AUDIENCES.account, 'photographer'), admittedTo: null },
+  { label: 'a platform admin signed for the account audience', bearer: () => signed(users.platform_admin, TOKEN_AUDIENCES.account, 'platform_admin'), admittedTo: null },
   { label: 'a photographer signed for the retired bookly-admin audience', bearer: () => signed(users.photographer, 'bookly-admin', 'photographer'), admittedTo: null },
 ];
 
 const FAMILIES = Object.keys(ROUTES) as (keyof typeof ROUTES)[];
 
-/** Every caller against every family with a route; the pending account slot is the `it.todo` below. */
-const MATRIX = CALLERS.flatMap((caller) => FAMILIES.filter((family) => ROUTES[family] !== null).map((family) => [caller.label, family, caller] as const));
+/** Every caller against every family. */
+const MATRIX = CALLERS.flatMap((caller) => FAMILIES.map((family) => [caller.label, family, caller] as const));
 
 describe('the role matrix (T2.1)', () => {
   it.each(MATRIX)('%s against the %s route', async (_label, family, caller) => {
-    const path = ROUTES[family] ?? '';
+    const path = ROUTES[family];
 
     const bearer = await caller.bearer();
     const req = request(app).get(path);
@@ -124,11 +126,69 @@ describe('the role matrix (T2.1)', () => {
     }
   });
 
-  it.todo('covers the account route once `/api/account/*` exists (fill in ROUTES.account)');
-
   it('gives every signed-in area exactly one admitted caller', () => {
     for (const area of ['studio', 'platform', 'account'] as const) {
       expect(CALLERS.filter((caller) => caller.admittedTo === area)).toHaveLength(1);
     }
+  });
+});
+
+// --- Revocation, for every role (T2.5) -------------------------------------------
+
+/** Each area, the user it admits, and its `/me`. */
+const AREA_USERS = [
+  ['studio', 'photographer'],
+  ['platform', 'platform_admin'],
+  ['account', 'client'],
+] as const satisfies readonly (readonly [AuthArea, keyof typeof users])[];
+
+async function meStatus(area: AuthArea, token: string): Promise<number> {
+  return (await request(app).get(ROUTES[area]).set('Authorization', `Bearer ${token}`)).status;
+}
+
+describe.each(AREA_USERS)('revoking a %s token (T2.5)', (area, role) => {
+  it(`refuses a ${role}'s token once the password changes`, async () => {
+    const { token } = await issueToken(SECRET, area, users[role], NOW);
+    expect(await meStatus(area, token)).toBe(200);
+
+    await prisma.appUser.update({ where: { id: users[role].id }, data: { passwordHash: 'another-not-real-hash' } });
+
+    expect(await meStatus(area, token)).toBe(401);
+  });
+
+  it(`refuses a ${role}'s token after revokeTokens`, async () => {
+    const { token } = await issueToken(SECRET, area, users[role], NOW);
+
+    await revokeTokens(prisma, users[role].id);
+
+    expect(await meStatus(area, token)).toBe(401);
+    const fresh = await issueToken(SECRET, area, await prisma.appUser.findUniqueOrThrow({ where: { id: users[role].id } }), NOW);
+    expect(await meStatus(area, fresh.token)).toBe(200);
+  });
+
+  it(`refuses a disabled ${role}'s token`, async () => {
+    const { token } = await issueToken(SECRET, area, users[role], NOW);
+
+    await prisma.appUser.update({ where: { id: users[role].id }, data: { disabledAt: NOW } });
+
+    expect(await meStatus(area, token)).toBe(401);
+  });
+});
+
+describe('revoking a Google-only client (T2.5)', () => {
+  it('refuses its token after revokeTokens, and once it links a password', async () => {
+    const google = await prisma.appUser.create({
+      data: { email: 'google.only@bookly.example', role: 'client', googleSub: 'google-sub-matrix', emailVerifiedAt: NOW },
+    });
+    const first = await issueToken(SECRET, 'account', google, NOW);
+    expect(await meStatus('account', first.token)).toBe(200);
+
+    await revokeTokens(prisma, google.id);
+    expect(await meStatus('account', first.token)).toBe(401);
+
+    const second = await issueToken(SECRET, 'account', await prisma.appUser.findUniqueOrThrow({ where: { id: google.id } }), NOW);
+    expect(await meStatus('account', second.token)).toBe(200);
+    await prisma.appUser.update({ where: { id: google.id }, data: { passwordHash: 'added-through-a-reset' } });
+    expect(await meStatus('account', second.token)).toBe(401);
   });
 });

@@ -24,3 +24,15 @@ export function toPublicUser(user: AppUser): PublicUser {
     lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
   };
 }
+
+/**
+ * A client's own view of their account (`GET /api/account/me`): the public user
+ * and the name they gave, for the greeting. Still an allowlist; whether the
+ * account has a password or a Google identity stays private (Phase 8 decides
+ * what the profile page needs).
+ */
+export type AccountUser = PublicUser & { fullName: string | null };
+
+export function toAccountUser(user: AppUser): AccountUser {
+  return { ...toPublicUser(user), fullName: user.fullName };
+}

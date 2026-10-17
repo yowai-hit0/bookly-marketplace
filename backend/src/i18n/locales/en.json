@@ -294,7 +294,35 @@
         "intro": "The wrong password was entered for your account {{count}} times, so sign-in is locked until {{until}} (Kigali time).",
         "ifNotYou": "If this was not you, someone may be trying to guess your password. Once the lock ends, consider resetting your password.",
         "signIn": "Go to the sign-in page"
+      },
+      "accountExists": {
+        "subject": "You already have an account",
+        "preheader": "Someone tried to sign up again with this address. Nothing was changed.",
+        "heading": "You already have an account",
+        "intro": "Someone, probably you, tried to create a new account with this email address. There is already an account for it, so nothing was created and nothing was changed.",
+        "forgot": "Sign in with your existing password. If you have forgotten it, use “Forgot password” on the sign-in page to choose a new one.",
+        "ifNotYou": "If this was not you, you can ignore this email: your account and your password stay as they are.",
+        "signIn": "Go to the sign-in page"
       }
+    },
+    "accountVerifyEmail": {
+      "subject": "Confirm your email address",
+      "preheader": "The link works once, until {{until}} (Kigali time).",
+      "heading": "Confirm your email address",
+      "intro": "Confirm this address to finish setting up your account. The link below works once, until {{until}} (Kigali time), and asks for the password you chose when you signed up.",
+      "button": "Confirm my email address",
+      "notYourPassword": "If the page asks for a password you never chose, someone else signed up with your address. Use “Forgot password” on the sign-in page instead: choosing a new password confirms your address and makes the account yours.",
+      "ignore": "If you did not sign up, you can ignore this email."
+    },
+    "photographerApplicationReceived": {
+      "subject": "New photographer application",
+      "preheader": "A new studio is waiting for review.",
+      "heading": "A photographer has applied",
+      "intro": "{{displayName}} has signed up as a photographer. Their studio is pending until a platform admin approves it.",
+      "displayNameLabel": "Studio name",
+      "handleLabel": "Handle",
+      "emailLabel": "Email",
+      "button": "Review applications"
     },
     "photographerApproved": {
       "subject": "Your studio is approved",

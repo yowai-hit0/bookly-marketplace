@@ -83,8 +83,8 @@ function specPathToExpress(path: string): string {
 }
 
 /**
- * Where each router function is mounted, mirroring `app.ts`, `routes/studio.ts`
- * and `routes/platform.ts`. The key is the exported function name; the value is
+ * Where each router function is mounted, mirroring `app.ts`, `routes/studio.ts`,
+ * `routes/platform.ts` and `routes/account.ts`. The key is the exported function name; the value is
  * the full prefix its `router.<method>('<subpath>')` calls hang off -- or
  * several, for a router mounted once per area.
  *
@@ -103,8 +103,9 @@ const MOUNTS: Record<string, string | readonly string[]> = {
   paymentWebhooksRouter: '/api/webhooks',
   studioRouter: '/api/studio',
   platformRouter: '/api/platform',
-  // Login and password reset, mounted inside each area's router (Phase 2 decision 1).
-  areaAuthRouter: ['/api/studio/auth', '/api/platform/auth'],
+  accountRouter: '/api/account',
+  // Login, password reset and verification, mounted inside each area's router (Phase 2 decision 1).
+  areaAuthRouter: ['/api/studio/auth', '/api/platform/auth', '/api/account/auth'],
   // Mounted inside studioRouter (routes/studio.ts).
   workingHoursRouter: '/api/studio/working-hours',
   blocksRouter: '/api/studio/blocks',

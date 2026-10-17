@@ -80,6 +80,15 @@ const schema = z.object({
   MAIL_REPLY_TO: z.email().optional(),
   /** Development only: rendered emails land here when no mail key is set. */
   MAIL_OUTPUT_DIR: z.string().min(1).default('.mail'),
+  /** "Continue with Google" for clients (Phase 2 decision 6): an OAuth client
+   *  of type "Web application" whose authorised redirect URI is
+   *  `<WEB_ORIGIN>/account/google/callback`. Both or neither: without them the
+   *  feature is off and `/api/account/auth/providers` says so. */
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+}).refine((env) => (env.GOOGLE_CLIENT_ID === undefined) === (env.GOOGLE_CLIENT_SECRET === undefined), {
+  message: 'set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET together, or neither: one alone cannot complete a sign-in',
+  path: ['GOOGLE_CLIENT_SECRET'],
 }).refine((env) => env.NODE_ENV !== 'production' || env.RESEND_API_KEY !== undefined || env.BREVO_API_KEY !== undefined, {
   message: 'RESEND_API_KEY or BREVO_API_KEY is required in production: without one no email would ever be sent',
   path: ['RESEND_API_KEY'],

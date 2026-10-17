@@ -2,10 +2,12 @@ import type { PrismaClient } from '@prisma/client';
 import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import type { AuthDeps } from './auth/account-auth.js';
+import type { GoogleIdentityProvider } from './auth/google.js';
 import { AUTH_AREAS } from './auth/roles.js';
 import { areaIpKey, createLimiters, emailKey, type RateLimitOverrides, rateLimit } from './http/rate-limit.js';
 import { securityHeaders } from './http/security-headers.js';
 import type { PaymentProvider } from './payments/provider.js';
+import { accountRouter } from './routes/account.js';
 import { healthRouter } from './routes/health.js';
 import { clientBookingRouter } from './routes/client-booking.js';
 import { emailConfirmationsRouter } from './routes/email-confirmations.js';
@@ -24,11 +26,15 @@ const DEV_WEB_ORIGIN = 'http://localhost:5173';
 
 export type AppOptions = {
   corsOrigin?: string;
-  /** Mounts the signed-in areas: `/api/studio/*` (photographers) and
-   *  `/api/platform/*` (platform admins), each with its own `/auth/*` (Phase 2
-   *  decision 1). Omitted, those paths 404 -- closed, not open -- which keeps
-   *  the health checks free of a database. */
+  /** Mounts the signed-in areas: `/api/studio/*` (photographers),
+   *  `/api/platform/*` (platform admins) and `/api/account/*` (clients), each
+   *  with its own `/auth/*` (Phase 2 decision 1). Omitted, those paths 404 --
+   *  closed, not open -- which keeps the health checks free of a database. */
   auth?: AuthDeps;
+  /** Client sign-in with Google (Phase 2 decision 6), inside the account area.
+   *  Omitted, the feature is off: `/api/account/auth/providers` says so and
+   *  the Google endpoints answer 404. Tests pass a fake identity provider. */
+  google?: GoogleIdentityProvider;
   /** Mounts the anonymous public routes (`/api/services`, `/api/quote`,
    *  `/api/availability`, `/api/bookings`). Omitted, they 404 too, for the same
    *  reason. `now` is the injected clock lead time and consent are measured by. */
@@ -89,7 +95,13 @@ export function createApp(options: AppOptions = {}): Express {
     app.post(`/api/${area}/auth/login`, rateLimit(limiters.loginPerIp, now, byIp));
     app.post(`/api/${area}/auth/password-reset/request`, rateLimit(limiters.passwordResetPerIp, now, byIp));
     app.post(`/api/${area}/auth/password-reset/confirm`, rateLimit(limiters.passwordResetConfirmPerIp, now, byIp));
+    app.post(`/api/${area}/auth/verify`, rateLimit(limiters.verifyPerIp, now, byIp));
+    app.post(`/api/${area}/auth/verify/resend`, rateLimit(limiters.verifyResendPerIp, now, byIp));
   }
+  // Signup exists in the two areas anyone may join; the platform's admins are seeded.
+  for (const area of ['studio', 'account'] as const) app.post(`/api/${area}/auth/signup`, rateLimit(limiters.signupPerIp, now, areaIpKey(area)));
+  app.post('/api/account/auth/google/start', rateLimit(limiters.googleStartPerIp, now, areaIpKey('account')));
+  app.post('/api/account/auth/google/callback', rateLimit(limiters.googleCallbackPerIp, now, areaIpKey('account')));
 
   app.use('/api', healthRouter);
   if (options.publicApi) {
@@ -128,6 +140,7 @@ export function createApp(options: AppOptions = {}): Express {
     const providerId = options.publicApi?.payments?.provider.id;
     app.use('/api/studio', studioRouter({ ...options.auth, ...(providerId === undefined ? {} : { paymentProviderId: providerId }) }));
     app.use('/api/platform', platformRouter(options.auth));
+    app.use('/api/account', accountRouter({ ...options.auth, ...(options.google === undefined ? {} : { google: options.google }) }));
   }
 
   app.use((_req, res) => {

@@ -33,8 +33,6 @@ export type OutboxKind = (typeof OUTBOX_KINDS)[number];
  * out, and the template catalogue test holds the two lists to the CHECK.
  */
 export const RESERVED_EMAIL_TEMPLATES = [
-  'account_verify_email',
-  'photographer_application_received',
   'subscription_reminder',
   'subscription_receipt',
   'subscription_expired',
@@ -68,6 +66,10 @@ export const EMAIL_TEMPLATES = [
   'account_password_reset',
   /** Sign-in lockout today; a changed payout method in Phase 4 (R4.1). */
   'account_security_alert',
+  /** The email-verification link, in every area (Phase 2 decision 3). */
+  'account_verify_email',
+  /** To every platform admin: a photographer signed up and awaits review (Phase 2 decision 4). */
+  'photographer_application_received',
   /** To a photographer: a platform admin approved or suspended their studio (Phase 2 decision 7). */
   'photographer_approved',
   'photographer_suspended',

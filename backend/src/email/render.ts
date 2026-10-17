@@ -4,6 +4,7 @@ import { type ComposedEmail, type RenderedEmail, renderLayout } from './layout.j
 import { accessLinkResend } from './templates/access-link-resend.js';
 import { accountPasswordReset } from './templates/account-password-reset.js';
 import { accountSecurityAlert } from './templates/account-security-alert.js';
+import { accountVerifyEmail } from './templates/account-verify-email.js';
 import { bookingConfirmation } from './templates/booking-confirmation.js';
 import { bookingLinks } from './templates/booking-links.js';
 import { emailChangeConfirm } from './templates/email-change-confirm.js';
@@ -13,6 +14,7 @@ import { clientNote } from './templates/client-note.js';
 import { paymentReceipt } from './templates/payment-receipt.js';
 import { photoDelivery } from './templates/photo-delivery.js';
 import { photographerAlert } from './templates/photographer-alert.js';
+import { photographerApplicationReceived } from './templates/photographer-application-received.js';
 import { photographerApproved } from './templates/photographer-approved.js';
 import { photographerNewBooking } from './templates/photographer-new-booking.js';
 import { photographerSuspended } from './templates/photographer-suspended.js';
@@ -50,6 +52,8 @@ export const TEMPLATES: Record<SendableEmailTemplate, AnyEmailTemplate> = {
   client_note: clientNote,
   account_password_reset: accountPasswordReset,
   account_security_alert: accountSecurityAlert,
+  account_verify_email: accountVerifyEmail,
+  photographer_application_received: photographerApplicationReceived,
   photographer_approved: photographerApproved,
   photographer_suspended: photographerSuspended,
 };

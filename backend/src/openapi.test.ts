@@ -219,6 +219,28 @@ describe('responses match the spec', () => {
     await expectMatchesSpec(await request(server).get('/api/studio/me').set('Authorization', `Bearer ${token}`), 'getStudioMe', 200);
   });
 
+  it('signup, verification and the account area (Phase 2)', async () => {
+    const server = app();
+    const studio = { email: 'applicant@bookly.example', password: 'a-good-enough-password', displayName: 'Applicant', handle: 'applicant' };
+    await expectMatchesSpec(await request(server).post('/api/studio/auth/signup').send(studio), 'studioSignup', 202);
+    await expectMatchesSpec(await request(server).post('/api/studio/auth/signup').send({ ...studio, handle: 'kigali-lens' }), 'studioSignup', 409);
+    await expectMatchesSpec(await request(server).post('/api/studio/auth/signup').send({ ...studio, password: 'short' }), 'studioSignup', 422);
+    await expectMatchesSpec(await request(server).post('/api/studio/auth/verify/resend').send({ email: studio.email }), 'resendStudioVerification', 202);
+    await expectMatchesSpec(await request(server).post('/api/platform/auth/verify').send({ token: 'x', password: 'y' }), 'verifyPlatformEmail', 400);
+
+    const client = { email: 'new.client@bookly.example', password: 'a-good-enough-password', fullName: 'Aline' };
+    await expectMatchesSpec(await request(server).post('/api/account/auth/signup').send(client), 'accountSignup', 202);
+    const row = await prisma.outbox.findFirstOrThrow({ where: { template: 'account_verify_email', recipient: client.email } });
+    const token = String((row.payload as Record<string, unknown>).token);
+    const verified = await request(server).post('/api/account/auth/verify').send({ token, password: client.password });
+    await expectMatchesSpec(verified, 'verifyAccountEmail', 200);
+    const auth = { Authorization: `Bearer ${(verified.body as { token: string }).token}` };
+    await expectMatchesSpec(await request(server).get('/api/account/me').set(auth), 'getAccountMe', 200);
+    await expectMatchesSpec(await request(server).post('/api/account/auth/login').send(client), 'accountLogin', 200);
+    await expectMatchesSpec(await request(server).get('/api/account/auth/providers'), 'getAccountAuthProviders', 200);
+    await expectMatchesSpec(await request(server).post('/api/account/auth/google/start'), 'startGoogleSignIn', 404);
+  });
+
   it('platform auth and photographers', async () => {
     const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
     await prisma.appUser.update({ where: { id: admin.id }, data: { passwordHash: await hashPassword('a-good-enough-password') } });

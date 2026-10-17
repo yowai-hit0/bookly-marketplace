@@ -1,4 +1,5 @@
 import { createApp } from './app.js';
+import { createGoogleProvider } from './auth/google.js';
 import { startHoldSweeper } from './booking/hold-sweeper.js';
 import { prisma } from './db/client.js';
 import { createEmailHandler } from './email/handler.js';
@@ -44,6 +45,10 @@ function boot(): void {
     },
     // Every provider's callbacks, not only the active one's (spec §6.18).
     webhooks: { prisma, providers: payments.all },
+    // Client sign-in with Google, when configured (Phase 2 decision 6).
+    ...(env.GOOGLE_CLIENT_ID !== undefined && env.GOOGLE_CLIENT_SECRET !== undefined
+      ? { google: createGoogleProvider({ clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }) }
+      : {}),
   });
 
   const server = app.listen(env.PORT, () => {

@@ -77,6 +77,113 @@ resetConfirm:
       '429':
         $ref: ../components/common.yaml#/responses/RateLimited
 
+signup:
+  post:
+    operationId: studioSignup
+    tags: [Studio auth]
+    summary: Sign up as a photographer
+    description: |
+      Creates a photographer's login, their studio (`pending` until a platform
+      admin approves it) and its settings in one transaction, emails a
+      verification link to `/studio/verify/<token>` (valid 24 hours), and tells
+      every platform admin there is an application to review. A pending
+      photographer can sign in once verified, and is not listed or bookable.
+
+      The answer is `202` whether or not the address already has an account,
+      so the endpoint does not reveal which do. A taken address gets, by
+      email only: a fresh verification link if it is an unverified photographer
+      login (its password is NOT changed), or an "you already have an account"
+      notice if its account is verified. A taken or reserved **handle** is
+      `409 handle_taken`, decided before the address is looked at: handles are
+      public.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/PhotographerSignupRequest }
+    responses:
+      '202':
+        description: Accepted.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/SignupAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '409':
+        description: The handle is taken, or reserved.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: handle_taken }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+verify:
+  post:
+    operationId: verifyStudioEmail
+    tags: [Studio auth]
+    summary: Confirm an email address
+    description: |
+      Posted by the page the verification link opens (`/studio/verify/<token>`;
+      opening the link changes nothing). Requires the token AND the password
+      the account was created with: the token proves the inbox, the password
+      proves the person at it is the one who signed up, so a stranger who
+      signed up with someone else's address cannot have it verified for them.
+      Either being wrong is one answer, `400 invalid_verification`, and a wrong
+      password counts toward the account's lockout.
+
+      On success the address is verified, the link is spent, and the
+      caller is signed in: the response is a login's. Someone who never chose
+      the password the page asks for should use "Forgot password" instead: a
+      completed reset verifies the address and replaces the password.
+      `Cache-Control: no-store`.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/VerifyRequest }
+    responses:
+      '200':
+        description: Verified and signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/auth.yaml#/responses/VerifyRefused
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+verifyResend:
+  post:
+    operationId: resendStudioVerification
+    tags: [Studio auth]
+    summary: Send the verification link again
+    description: |
+      If the address is a photographer's login whose address is still unverified, a new link
+      (valid 24 hours) replaces the old one and is emailed. Always `202`,
+      whether or not it is, so the endpoint does not reveal which addresses
+      have accounts or which are verified.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResendRequest }
+    responses:
+      '202':
+        description: Accepted (sent only for an unverified login of this area).
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/ResetAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
 me:
   get:
     operationId: getStudioMe

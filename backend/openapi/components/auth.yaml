@@ -60,6 +60,112 @@ schemas:
       token: { type: string, minLength: 1, maxLength: 512 }
       newPassword: { type: string, minLength: 12, maxLength: 1024 }
 
+  # --- Phase 2: signup, email verification, Google sign-in ------------------
+
+  VerifyRequest:
+    type: object
+    description: |
+      The token from the emailed link (`/{area}/verify/<token>`) and the
+      password the account was created with. Both are required: the token
+      proves the inbox, the password proves the person at it signed up.
+    required: [token, password]
+    properties:
+      token: { type: string, minLength: 1, maxLength: 512 }
+      password: { type: string, minLength: 1, maxLength: 1024 }
+
+  ResendRequest:
+    type: object
+    required: [email]
+    properties:
+      email: { type: string, minLength: 1, maxLength: 320 }
+
+  SignupAccepted:
+    type: object
+    description: Always this, whether or not the address already had an account.
+    required: [ok]
+    additionalProperties: false
+    properties:
+      ok: { const: true }
+
+  PhotographerSignupRequest:
+    type: object
+    required: [email, password, displayName, handle]
+    additionalProperties: false
+    properties:
+      email: { type: string, format: email, maxLength: 320 }
+      password: { type: string, minLength: 12, maxLength: 1024 }
+      displayName: { type: string, minLength: 1, maxLength: 80 }
+      handle:
+        type: string
+        description: |
+          The public profile is `/p/<handle>`. Trimmed and lowercased first,
+          then 3-30 characters of `a-z`, `0-9` and `-`, not starting or ending
+          with `-` (the database's `photographer_handle_format`). Reserved
+          names (`admin`, `api`, `p`, `studio`, `platform`, `account`,
+          `photographers`, `services`, `checkout`, `booking`, `my-booking`,
+          `email-confirm`, `login`, `signup`, `help`, `docs`, `static`,
+          `assets`) are refused like a taken handle.
+        pattern: '^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$'
+
+  ClientSignupRequest:
+    type: object
+    required: [email, password, fullName]
+    additionalProperties: false
+    properties:
+      email: { type: string, format: email, maxLength: 320 }
+      password: { type: string, minLength: 12, maxLength: 1024 }
+      fullName: { type: string, minLength: 1, maxLength: 200 }
+
+  AccountUser:
+    type: object
+    description: A client's own view of their account. Still an allowlist.
+    required: [id, email, lastLoginAt, fullName]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      email: { type: string, format: email }
+      lastLoginAt: { type: [string, 'null'], format: date-time }
+      fullName: { type: [string, 'null'] }
+
+  AccountMe:
+    type: object
+    required: [user]
+    additionalProperties: false
+    properties:
+      user: { $ref: '#/schemas/AccountUser' }
+
+  AuthProviders:
+    type: object
+    description: Which sign-in methods the account login page offers besides a password.
+    required: [google]
+    additionalProperties: false
+    properties:
+      google: { type: boolean }
+
+  GoogleStart:
+    type: object
+    required: [authorizationUrl, state]
+    additionalProperties: false
+    properties:
+      authorizationUrl:
+        type: string
+        format: uri
+        description: Google's authorization page. Send the browser there.
+      state:
+        type: string
+        description: |
+          Keep it in `sessionStorage` and compare it with the `state` Google
+          returns to `/account/google/callback` before posting the callback.
+          Works once, for 10 minutes.
+
+  GoogleCallbackRequest:
+    type: object
+    required: [code, state]
+    additionalProperties: false
+    properties:
+      code: { type: string, minLength: 1, maxLength: 2048 }
+      state: { type: string, minLength: 1, maxLength: 512 }
+
 responses:
   InvalidCredentials:
     description: |
@@ -79,3 +185,16 @@ responses:
         examples:
           invalid_request: { value: { error: invalid_request } }
           invalid_token: { value: { error: invalid_or_expired_token } }
+
+  VerifyRefused:
+    description: |
+      A malformed body (`invalid_request`), or one answer
+      (`invalid_verification`) for an unknown, expired or used token, a wrong
+      password, a locked account and a login since disabled: none is
+      disclosed. A wrong password counts toward the account's lockout.
+    content:
+      application/json:
+        schema: { $ref: 'common.yaml#/schemas/Error' }
+        examples:
+          invalid_request: { value: { error: invalid_request } }
+          invalid_verification: { value: { error: invalid_verification } }

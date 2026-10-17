@@ -1,0 +1,293 @@
+# A client's own account (Phase 2 decisions 1, 5 and 6). Every operation but
+# the auth ones requires a client's bearer token (`accountBearer`); a
+# photographer's or a platform admin's token is a 401, whatever it says.
+
+login:
+  post:
+    operationId: accountLogin
+    tags: [Account auth]
+    summary: Log in
+    description: |
+      Email and password for a client. Returns a bearer JWT for the
+      `bookly-account` audience, valid 7 days, which no other area accepts.
+      Unknown email, wrong password, a locked account, an unverified address,
+      a Google-only account and an account of another kind are one answer:
+      `401 invalid_credentials`. `Cache-Control: no-store`.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/LoginRequest }
+    responses:
+      '200':
+        description: Signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/auth.yaml#/responses/InvalidCredentials
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+resetRequest:
+  post:
+    operationId: requestAccountPasswordReset
+    tags: [Account auth]
+    summary: Request a password reset
+    description: |
+      If the address is a client's login, a single-use reset link to
+      `/account/reset-password`, valid 30 minutes, is emailed. Always `202`.
+      A Google-only client may use it to add a password.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResetRequest }
+    responses:
+      '202':
+        description: Accepted (sent only if the address is a client's login).
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/ResetAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+resetConfirm:
+  post:
+    operationId: confirmAccountPasswordReset
+    tags: [Account auth]
+    summary: Set a new password from a reset link
+    description: |
+      Consumes the emailed token and sets the new password, which revokes
+      every token already issued. The token works once, and only here. A
+      completed reset also verifies the address (the link proved the inbox)
+      and links the bookings made under it.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResetConfirm }
+    responses:
+      '204':
+        description: The password is changed.
+      '400':
+        $ref: ../components/auth.yaml#/responses/ResetConfirmRefused
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+signup:
+  post:
+    operationId: accountSignup
+    tags: [Account auth]
+    summary: Sign up as a client
+    description: |
+      Creates a client account and emails a verification link to
+      `/account/verify/<token>` (valid 24 hours). Bookings made under the
+      address are linked to the account only once it is verified, never at
+      signup: otherwise anyone could sign up with someone else's address and
+      see their bookings.
+
+      The answer is `202` whether or not the address already has an account.
+      A taken address gets, by email only, a fresh verification link if it is
+      an unverified client login (its password is NOT changed), or a "you
+      already have an account" notice if its account is verified.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ClientSignupRequest }
+    responses:
+      '202':
+        description: Accepted.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/SignupAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+verify:
+  post:
+    operationId: verifyAccountEmail
+    tags: [Account auth]
+    summary: Confirm an email address
+    description: |
+      Posted by the page the verification link opens (`/account/verify/<token>`;
+      opening the link changes nothing). Requires the token AND the password
+      the account was created with: the token proves the inbox, the password
+      proves the person at it is the one who signed up, so a stranger who
+      signed up with someone else's address cannot have it verified for them.
+      Either being wrong is one answer, `400 invalid_verification`, and a wrong
+      password counts toward the account's lockout.
+
+      On success the address is verified, the link is spent, the bookings made
+      under the address are linked to the account, and the caller is signed
+      in: the response is a login's. Someone who never chose the password the
+      page asks for should use "Forgot password" instead: a completed reset
+      verifies the address and replaces the password. `Cache-Control: no-store`.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/VerifyRequest }
+    responses:
+      '200':
+        description: Verified and signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/auth.yaml#/responses/VerifyRefused
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+verifyResend:
+  post:
+    operationId: resendAccountVerification
+    tags: [Account auth]
+    summary: Send the verification link again
+    description: |
+      If the address is a client's login whose address is still unverified, a
+      new link (valid 24 hours) replaces the old one and is emailed. Always
+      `202`, whether or not it is, so the endpoint does not reveal which
+      addresses have accounts or which are verified.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResendRequest }
+    responses:
+      '202':
+        description: Accepted (sent only for an unverified login of this area).
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/ResetAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+providers:
+  get:
+    operationId: getAccountAuthProviders
+    tags: [Account auth]
+    summary: Sign-in methods on offer
+    description: Whether the login page shows "Continue with Google" (configured with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`).
+    security: []
+    responses:
+      '200':
+        description: The methods.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/AuthProviders }
+
+googleStart:
+  post:
+    operationId: startGoogleSignIn
+    tags: [Account auth]
+    summary: Start signing in with Google
+    description: |
+      Begins the OpenID Connect authorization code flow with PKCE (S256),
+      `state` and `nonce`. Returns Google's authorization URL, whose
+      `redirect_uri` is `<WEB_ORIGIN>/account/google/callback`, and the
+      state, which the page keeps in `sessionStorage` to compare on return.
+      The flow works once, for 10 minutes. No body. `404 not_found` when Google
+      sign-in is not configured. `Cache-Control: no-store`.
+    security: []
+    responses:
+      '200':
+        description: Send the browser to `authorizationUrl`.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/GoogleStart }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+googleCallback:
+  post:
+    operationId: completeGoogleSignIn
+    tags: [Account auth]
+    summary: Finish signing in with Google
+    description: |
+      Posted by `/account/google/callback` with the `code` and `state` Google
+      returned, once the page has checked the state against the one it kept.
+      The server consumes the flow, exchanges the code with its PKCE verifier,
+      verifies the id_token against Google's keys (signature, `iss`, `aud`,
+      `exp`, `nonce`) and requires a Google-verified address. Then it signs in
+      the client linked to this Google account; or links the client account
+      with this address (verifying it, and, if it was never verified,
+      discarding its password, which nobody proved was the owner's); or
+      creates a new client account with no password. The bookings made under
+      the address are linked. The response is a login's.
+
+      - `400 invalid_state`: unknown, expired or already used state. Start again.
+      - `400 google_sign_in_failed`: Google refused the code, the identity did
+        not verify, or the account cannot sign in.
+      - `400 google_email_unverified`: Google has not verified the address.
+      - `409 account_conflict`: the address belongs to another kind of
+        account, or to a client linked to another Google account. Word it
+        generically.
+      - `404 not_found`: Google sign-in is not configured.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/GoogleCallbackRequest }
+    responses:
+      '200':
+        description: Signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        description: A malformed body, a bad state, or a refused identity.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            examples:
+              invalid_request: { value: { error: invalid_request } }
+              invalid_state: { value: { error: invalid_state } }
+              google_sign_in_failed: { value: { error: google_sign_in_failed } }
+              google_email_unverified: { value: { error: google_email_unverified } }
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: The address belongs to an account that cannot sign in with Google.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: account_conflict }
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+me:
+  get:
+    operationId: getAccountMe
+    tags: [Account]
+    summary: The signed-in client
+    security:
+      - accountBearer: []
+    responses:
+      '200':
+        description: The client's account.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/AccountMe }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized

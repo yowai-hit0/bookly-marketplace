@@ -28,10 +28,11 @@ beforeEach(async () => {
 
 /**
  * The 14 single-photographer tables, less `admin_user` and `setting`, plus the
- * nine Phase 1 adds (marketplace-spec.md brief decision 1). Subscriptions and
- * payouts take it to 26 in later phases.
+ * nine Phase 1 adds (marketplace-spec.md brief decision 1), plus Phase 2's
+ * `oauth_flow` (decision 6). Subscriptions and payouts take it to 27 in later
+ * phases.
  */
-const APPLICATION_TABLE_COUNT = 21;
+const APPLICATION_TABLE_COUNT = 22;
 
 /** Tables a later phase adds; Phase 1's baseline must not. */
 const LATER_PHASE_TABLES = ['subscription', 'subscription_period', 'payout_method', 'payout', 'payout_item'];
@@ -141,7 +142,7 @@ const SLOT = { startsAt: NINE, endsAt: TEN, bufferEndsAt: TEN_THIRTY };
 // --- Shape ------------------------------------------------------------------
 
 describe('the schema', () => {
-  it('has 21 application tables (Phase 1 of the marketplace) plus Prisma migration history, and no view', async () => {
+  it('has 22 application tables (Phase 1 of the marketplace, and Phase 2 oauth_flow) plus Prisma migration history, and no view', async () => {
     const tables = await db.query<{ tablename: string }>(
       `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`,
     );
@@ -765,6 +766,39 @@ describe('app_user CHECKs', () => {
     const expires = new Date();
     expect(await insertUser({ role: 'client', password_hash: 'x', password_reset_token_hash: 'same', password_reset_expires_at: expires })).toBeUndefined();
     expect(await insertUser({ role: 'client', password_hash: 'x', password_reset_token_hash: 'same', password_reset_expires_at: expires })).toBe('23505');
+  });
+});
+
+// --- oauth_flow (Phase 2 decision 6) -----------------------------------------------
+
+describe('oauth_flow', () => {
+  const HASH = 'a'.repeat(64);
+  const VERIFIER = 'v'.repeat(43);
+  const NONCE = 'n'.repeat(43);
+
+  function insertFlow(row: { state_hash?: string; code_verifier?: string; nonce?: string }) {
+    return sqlstateOf(db, () =>
+      db.query(`INSERT INTO oauth_flow (state_hash, code_verifier, nonce, expires_at) VALUES ($1, $2, $3, now() + interval '10 minutes')`, [
+        row.state_hash ?? `${Math.random().toString(16).slice(2).padEnd(16, '0')}${'b'.repeat(48)}`.slice(0, 64),
+        row.code_verifier ?? VERIFIER,
+        row.nonce ?? NONCE,
+      ]),
+    );
+  }
+
+  it('stores a state only as a SHA-256 hex digest, once', async () => {
+    expect(await insertFlow({ state_hash: HASH })).toBeUndefined();
+    expect(await insertFlow({ state_hash: HASH })).toBe('23505');
+    expect(await insertFlow({ state_hash: 'the-state-itself-in-plaintext' })).toBe('23514');
+    expect(await insertFlow({ state_hash: 'A'.repeat(64) })).toBe('23514');
+  });
+
+  it('holds the code verifier to RFC 7636 and the nonce to a sane length', async () => {
+    expect(await insertFlow({ code_verifier: 'v'.repeat(42) })).toBe('23514');
+    expect(await insertFlow({ code_verifier: 'v'.repeat(129) })).toBe('23514');
+    expect(await insertFlow({ code_verifier: `${'v'.repeat(42)}+` })).toBe('23514');
+    expect(await insertFlow({ code_verifier: 'A-z0.9_~'.repeat(6) })).toBeUndefined();
+    expect(await insertFlow({ nonce: 'short' })).toBe('23514');
   });
 });
 

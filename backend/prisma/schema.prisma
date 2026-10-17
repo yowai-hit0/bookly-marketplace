@@ -78,6 +78,28 @@ model AppUser {
   @@map("app_user")
 }
 
+/// One Google sign-in in flight (marketplace-spec.md R2.4, Phase 2 decision 6;
+/// marketplace-data-model.md §3.14). Created by `POST /api/account/auth/google/start`,
+/// consumed exactly once by the callback, and good for 10 minutes. Belongs to no
+/// user: who is signing in is only known once Google answers.
+model OauthFlow {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// SHA-256 hex of the `state` sent to Google. The state itself is never stored.
+  stateHash    String    @unique @map("state_hash")
+  /// The PKCE verifier (RFC 7636): sent to the token endpoint with the code, so it
+  /// must be kept as is. Useless without the one-time code Google returns.
+  codeVerifier String    @map("code_verifier")
+  /// Must come back as the id_token's `nonce` claim.
+  nonce        String
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  /// Set by the one UPDATE that consumes the flow; a second callback finds it set.
+  consumedAt   DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("oauth_flow")
+}
+
 /// One row, CHECK (id = 1). What belongs to the payment infrastructure rather
 /// than to any photographer (marketplace-data-model.md §2.2). The subscription
 /// plan's prices, grace and reminder days arrive with Phase 5.

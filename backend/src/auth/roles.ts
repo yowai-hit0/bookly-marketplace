@@ -35,14 +35,23 @@ export const AREA_ROLE = {
 
 /**
  * Where each area's emailed links land in the web app (marketplace-spec.md URL
- * map, Phase 2 decision 9): the reset link and the lockout alert's sign-in
- * button. Paths on WEB_ORIGIN, never on the API host.
+ * map, Phase 2 decision 9): the reset link, the lockout alert's and the
+ * "you already have an account" notice's sign-in button, and the verification
+ * link, which appends `/<token>` to `verify`. Paths on WEB_ORIGIN, never on the
+ * API host.
  */
 export const AREA_WEB_PATHS = {
-  studio: { login: '/studio/login', resetPassword: '/studio/reset-password' },
-  platform: { login: '/platform/login', resetPassword: '/platform/reset-password' },
-  account: { login: '/account/login', resetPassword: '/account/reset-password' },
-} as const satisfies Record<AuthArea, { login: string; resetPassword: string }>;
+  studio: { login: '/studio/login', resetPassword: '/studio/reset-password', verify: '/studio/verify' },
+  platform: { login: '/platform/login', resetPassword: '/platform/reset-password', verify: '/platform/verify' },
+  account: { login: '/account/login', resetPassword: '/account/reset-password', verify: '/account/verify' },
+} as const satisfies Record<AuthArea, { login: string; resetPassword: string; verify: string }>;
+
+/** The area a role signs in to: the inverse of `AREA_ROLE`. */
+export function areaOfRole(role: UserRole): AuthArea {
+  const area = AUTH_AREAS.find((candidate) => AREA_ROLE[candidate] === role);
+  if (area === undefined) throw new Error(`No area admits the role ${role}`);
+  return area;
+}
 
 /** The columns `admitsArea` reads: an `app_user` row with its photographer's id, if it has one. */
 export type AreaCandidate = {
@@ -90,7 +99,8 @@ export function admitsArea(area: AuthArea, user: AreaCandidate): boolean {
  * same attempt counted, the same Argon2 cost. So the login reveals neither
  * that the address has an account nor that the account is unverified.
  *
- * Setting `email_verified_at` belongs to the verification flow (R2.2, R2.3) and
+ * Setting `email_verified_at` belongs to the verification flow (R2.2, R2.3,
+ * `auth/email-verification.ts`), to a completed password reset (R2.1c (b)) and
  * to Google sign-in (R2.4); this is the one place that decides what counts as
  * verified.
  */

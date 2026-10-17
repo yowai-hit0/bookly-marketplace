@@ -8,6 +8,9 @@ Companion to `docs/marketplace-spec.md`. Supersedes `docs/data-model_v2.md` for 
 - `booking` snapshots both at creation: `client_cancel_cutoff_hours int NOT NULL CHECK (>= 0)` and `booking_fee_refundable_on_client_cancel boolean NOT NULL`, no defaults (R1.8, §2.9). Incremental migration `20261017000000_booking_cancellation_policy`.
 - `app_user.password_hash` becomes **nullable**. Add `google_sub text` with a partial unique index `WHERE google_sub IS NOT NULL`, and the CHECKs `app_user_google_client_only (google_sub IS NULL OR role = 'client')` and `app_user_has_credential (password_hash IS NOT NULL OR google_sub IS NOT NULL)` (R2.4).
 - `platform_setting.trial_days` defaults to **30**, matching the decision.
+- **New table `oauth_flow`** (Phase 2 decision 6, §3.14), migration `20261017104433_oauth_flow`. The marketplace therefore has **27** tables once subscriptions and payouts land (22 after Phase 2).
+- `account_verify_email` and `photographer_application_received` have renderers from Phase 2 (no CHECK change); `account_security_alert` gains the variant `account_exists` (marketplace-spec.md R2.1c).
+- **Linking** (§2.8) runs on verification, on a password reset that verifies, and on Google sign-in; it skips erased client rows (`anonymized_at IS NULL`).
 
 | | |
 |---|---|
@@ -696,6 +699,25 @@ A future `review` table would hang off `booking`:
 - `booking_id` unique, allowed only for `completed` bookings
 - `photographer_id`, `client_id`, optional `author_user_id`
 - `rating smallint CHECK 1..5`, `body`, `photographer_reply`, `published_at` / `hidden_at`
+
+### 3.14 `OauthFlow` (`oauth_flow`), Phase 2
+One Google sign-in in flight (marketplace-spec.md R2.4, R2.1c; Phase 2 decision 6).
+```prisma
+model OauthFlow {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stateHash    String    @unique @map("state_hash")   /// SHA-256 hex of the state; never the state
+  codeVerifier String    @map("code_verifier")        /// PKCE verifier, sent with the code
+  nonce        String                                 /// must return as the id_token's nonce
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)   /// start + 10 minutes
+  consumedAt   DateTime? @map("consumed_at") @db.Timestamptz(6)  /// set by the one consuming UPDATE
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@index([expiresAt])
+  @@map("oauth_flow")
+}
+```
+- **Hand-written CHECKs:** `oauth_flow_state_hash_sha256 (state_hash ~ '^[0-9a-f]{64}$')`, `oauth_flow_code_verifier_rfc7636 (code_verifier ~ '^[A-Za-z0-9._~-]{43,128}$')`, `oauth_flow_nonce_length (char_length(nonce) BETWEEN 16 AND 128)`.
+- **Single-use:** the callback runs `UPDATE oauth_flow SET consumed_at = now WHERE state_hash = $1 AND consumed_at IS NULL AND expires_at > now RETURNING code_verifier, nonce`; a flow is spent even when the exchange that follows fails.
+- **Retention:** each start deletes flows that expired more than a day ago. No foreign keys: a flow belongs to no user until Google answers.
 
 ## 4. Vocabularies (text + CHECK, with TS consts)
 

@@ -240,3 +240,19 @@ describe('parseEnv: payments (plan.md Tasks 16 and 17)', () => {
     expect(() => parseEnv({ ...valid, [key]: '' })).toThrow(new RegExp(key));
   });
 });
+
+describe('parseEnv: Google sign-in (Phase 2 decision 6)', () => {
+  it('is off by default', () => {
+    const env = parseEnv(valid);
+    expect([env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET]).toEqual([undefined, undefined]);
+  });
+
+  it('accepts the client id and secret together', () => {
+    const env = parseEnv({ ...valid, GOOGLE_CLIENT_ID: 'id.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'secret' });
+    expect([env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET]).toEqual(['id.apps.googleusercontent.com', 'secret']);
+  });
+
+  it.each([{ GOOGLE_CLIENT_ID: 'id' }, { GOOGLE_CLIENT_SECRET: 'secret' }])('refuses one without the other: %j', (google) => {
+    expect(() => parseEnv({ ...valid, ...google })).toThrow(/GOOGLE_CLIENT_SECRET.*together/);
+  });
+});

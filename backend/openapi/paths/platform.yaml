@@ -77,6 +77,69 @@ resetConfirm:
       '429':
         $ref: ../components/common.yaml#/responses/RateLimited
 
+verify:
+  post:
+    operationId: verifyPlatformEmail
+    tags: [Platform auth]
+    summary: Confirm an email address
+    description: |
+      Posted by the page the verification link opens (`/platform/verify/<token>`;
+      opening the link changes nothing). Requires the token AND the password
+      the account was created with: the token proves the inbox, the password
+      proves the person at it is the one who signed up, so a stranger who
+      signed up with someone else's address cannot have it verified for them.
+      Either being wrong is one answer, `400 invalid_verification`, and a wrong
+      password counts toward the account's lockout.
+
+      On success the address is verified, the link is spent, and the
+      caller is signed in: the response is a login's. Someone who never chose
+      the password the page asks for should use "Forgot password" instead: a
+      completed reset verifies the address and replaces the password.
+      `Cache-Control: no-store`.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/VerifyRequest }
+    responses:
+      '200':
+        description: Verified and signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/auth.yaml#/responses/VerifyRefused
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+verifyResend:
+  post:
+    operationId: resendPlatformVerification
+    tags: [Platform auth]
+    summary: Send the verification link again
+    description: |
+      If the address is a platform admin's login whose address is still unverified, a new link
+      (valid 24 hours) replaces the old one and is emailed. Always `202`,
+      whether or not it is, so the endpoint does not reveal which addresses
+      have accounts or which are verified.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/auth.yaml#/schemas/ResendRequest }
+    responses:
+      '202':
+        description: Accepted (sent only for an unverified login of this area).
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/ResetAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
 me:
   get:
     operationId: getPlatformMe

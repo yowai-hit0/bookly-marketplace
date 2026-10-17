@@ -13,6 +13,7 @@ import {
   FIXTURE_RESET_TOKEN,
   FIXTURE_SECOND_ACCESS_TOKEN,
   FIXTURE_SECOND_REFERENCE,
+  FIXTURE_VERIFY_TOKEN,
   FIXTURE_WEB_ORIGIN,
   TEMPLATE_VARIANTS,
   emailFixture,
@@ -1166,6 +1167,66 @@ describe('account_security_alert login_lockout per area (Phase 2 decision 9)', (
 
   it('refuses an area that does not exist, naming the field', () => {
     expect(payloadError(() => renderWith('account_security_alert login_lockout', { area: 'admin' })).message).toContain('area');
+  });
+});
+
+describe('account_verify_email (Phase 2 decision 3)', () => {
+  it.each([
+    ['studio', '/studio/verify'],
+    ['platform', '/platform/verify'],
+    ['account', '/account/verify'],
+  ] as const)('links a %s account to %s/<token>, and carries the token nowhere else', (area, path) => {
+    const email = renderWith('account_verify_email', { area });
+    const link = `${FIXTURE_WEB_ORIGIN}${path}/${FIXTURE_VERIFY_TOKEN}`;
+
+    expect(email.subject).toBe('Confirm your email address');
+    expect(email.subject).not.toContain(FIXTURE_VERIFY_TOKEN);
+    expect(links(email.html)).toEqual([link]);
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain(link);
+      expect(body.replaceAll(link, '<link>')).not.toContain(FIXTURE_VERIFY_TOKEN);
+    }
+  });
+
+  it('tells a reader asked for a password they never chose to use "Forgot password" instead', () => {
+    expect(renderFixture(emailFixture('account_verify_email')).text).toContain('someone else signed up with your address');
+  });
+
+  it.each([['token', 'not a token/../admin'], ['token', 'short'], ['area', 'admin']])('refuses a bad %s, naming the field', (field, value) => {
+    expect(payloadError(() => renderWith('account_verify_email', { [field]: value })).message).toContain(field);
+  });
+});
+
+describe('photographer_application_received (Phase 2 decision 4)', () => {
+  it('names the applicant and opens the pending list of the platform console', () => {
+    const email = renderFixture(emailFixture('photographer_application_received'));
+
+    expect(email.subject).toBe('New photographer application');
+    expect(email.text).toContain('Kigali Lens has signed up as a photographer.');
+    expect(email.text).toContain('kigali-lens');
+    expect(email.text).toContain('studio@kigali-lens.example');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/platform/photographers?status=pending`]);
+  });
+
+  it('keeps the name the applicant typed out of the subject, and escaped in the body', () => {
+    const email = renderWith('photographer_application_received', { displayName: '<script>x</script> {{handle}}' });
+
+    expect(email.subject).toBe('New photographer application');
+    expect(email.html).not.toContain('<script>');
+    expect(email.text).toContain('<script>x</script> {{handle}} has signed up');
+  });
+});
+
+describe('account_security_alert account_exists (Phase 2 decision 4)', () => {
+  it.each([
+    ['studio', '/studio/login'],
+    ['account', '/account/login'],
+  ] as const)('sends a %s account holder to %s, changing nothing', (area, path) => {
+    const email = renderWith('account_security_alert account_exists', { area });
+
+    expect(email.subject).toBe('You already have an account');
+    expect(email.text).toContain('nothing was changed');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}${path}`]);
   });
 });
 
