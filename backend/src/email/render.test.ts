@@ -25,6 +25,7 @@ import { photographerAlert } from './templates/photographer-alert.js';
 import { platformAlert } from './templates/platform-alert.js';
 import { paymentReceipt } from './templates/payment-receipt.js';
 import { reschedule } from './templates/reschedule.js';
+import { subscriptionReminder } from './templates/subscription-reminder.js';
 import { EmailPayloadError } from './templates/shared.js';
 
 /**
@@ -99,11 +100,13 @@ describe('the fixtures', () => {
     ['photographer_alert', photographerAlert],
     ['platform_alert', platformAlert],
     ['account_security_alert', accountSecurityAlert],
+    ['subscription_reminder', subscriptionReminder],
   ] as const)('cover every %s variant, and the template accepts no other', (template, definition) => {
     const variants = EMAIL_FIXTURES.filter((fixture) => fixture.template === template).map(
       (fixture) => (fixture.payload as Payload).variant,
     );
-    expect([...variants].sort()).toEqual([...TEMPLATE_VARIANTS[template]].sort());
+    // A variant may have several fixtures (the trial's and a paid period's `ending`); every one is covered.
+    expect([...new Set(variants)].sort()).toEqual([...TEMPLATE_VARIANTS[template]].sort());
 
     const union = definition.payload as unknown as { options: { shape: { variant: { value: string } } }[] };
     expect(union.options.map((option) => option.shape.variant.value).sort()).toEqual([...TEMPLATE_VARIANTS[template]].sort());
@@ -560,7 +563,7 @@ describe('payload validation', () => {
     expect(payloadError(() => render(template, { variant, ...rest })).message).toContain('variant');
   });
 
-  it.each(['admin_alert', 'admin_new_booking', 'subscription_reminder', 'subscription_receipt', 'subscription_expired'])('refuses %s, which has no renderer, as an unknown template', (template) => {
+  it.each(['admin_alert', 'admin_new_booking'])('refuses %s, which has no renderer, as an unknown template', (template) => {
     expect(payloadError(() => render(template, {})).message).toBe(`Unknown email template: ${template}`);
   });
 
@@ -1324,5 +1327,80 @@ describe('photographer_approved and photographer_suspended (Phase 2 decision 7)'
     delete payload[field];
 
     expect(payloadError(() => render(template, payload)).message).toContain(field);
+  });
+});
+
+describe('the subscription emails (Phase 5: R5.1, R5.3, R5.4)', () => {
+  it('photographer_approved with a trial says until when, in Kigali; without one it promises none', () => {
+    const withTrial = renderFixture(emailFixture('photographer_approved with a trial'));
+    expect(withTrial.text).toContain('Your free trial has started: until Saturday, 31 October 2026, clients can book you at no cost to you.');
+    expect(withTrial.text).toContain('choose a monthly or yearly plan');
+    expect(renderFixture(emailFixture('photographer_approved')).text).not.toContain('free trial');
+    // An instant late on the 31st in UTC is already 1 November in Kigali.
+    expect(renderWith('photographer_approved with a trial', { trialEndsAt: '2026-10-31T22:30:00.000Z' }).text).toContain('until Sunday, 1 November 2026,');
+    expect(payloadError(() => renderWith('photographer_approved with a trial', { trialEndsAt: 'tomorrow' })).message).toContain('trialEndsAt');
+  });
+
+  it('subscription_reminder ending: counts the days left, words the trial as a trial, and links to the subscription page', () => {
+    const paid = renderFixture(emailFixture('subscription_reminder ending'));
+    expect(paid.subject).toBe('Your subscription ends in 3 days');
+    expect(paid.text).toContain('Your current period ends on Saturday, 31 October 2026.');
+    expect(paid.text).toContain('31 Oct 2026, 09:00');
+    expect(paid.text).toContain('Paying early loses nothing');
+    expect(links(paid.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/studio/subscription`]);
+
+    const trial = renderFixture(emailFixture('subscription_reminder ending trial'));
+    expect(trial.subject).toBe('Your free trial ends in 1 day');
+    expect(trial.text).toContain('Your free trial is ending soon');
+  });
+
+  it('subscription_reminder past_due: listed until the grace end, not bookable, existing bookings carry on (R5.5)', () => {
+    const email = renderFixture(emailFixture('subscription_reminder past_due'));
+    expect(email.subject).toBe('Your subscription has ended: renew to take bookings again');
+    expect(email.text).toContain('ended on Saturday, 31 October 2026');
+    expect(email.text).toContain('until Saturday, 7 November 2026');
+    expect(email.text).toContain('Bookings you already have are not affected');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/studio/subscription`]);
+  });
+
+  it('subscription_reminder refuses an unknown variant, a period kind outside trial and paid, and a day count of nought', () => {
+    expect(payloadError(() => renderWith('subscription_reminder ending', { variant: 'expired' })).message).toContain('variant');
+    expect(payloadError(() => renderWith('subscription_reminder ending', { periodKind: 'bonus' })).message).toContain('periodKind');
+    expect(payloadError(() => renderWith('subscription_reminder ending', { daysLeft: 0 })).message).toContain('daysLeft');
+    expect(payloadError(() => renderWith('subscription_reminder past_due', { graceEndsAt: undefined })).message).toContain('graceEndsAt');
+  });
+
+  it('subscription_receipt: the amount, the plan, the period it bought and the reference', () => {
+    const email = renderFixture(emailFixture('subscription_receipt'));
+    expect(email.subject).toBe('Subscription receipt: 10,000 RWF');
+    expect(email.text).toContain('for the monthly plan. Your studio is covered until Monday, 30 November 2026.');
+    expect(email.text).toContain('MTN-4100000001');
+    expect(email.text).toContain('31 Oct 2026, 09:00 to 30 Nov 2026, 09:00');
+    expect(renderWith('subscription_receipt', { planInterval: 'yearly' }).text).toContain('for the yearly plan.');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/studio/subscription`]);
+  });
+
+  it('subscription_receipt refuses a free payment, an unknown plan and a missing reference', () => {
+    expect(payloadError(() => renderWith('subscription_receipt', { amountRwf: 0 })).message).toContain('amountRwf');
+    expect(payloadError(() => renderWith('subscription_receipt', { planInterval: 'weekly' })).message).toContain('planInterval');
+    expect(payloadError(() => renderWith('subscription_receipt', { paymentReference: ' ' })).message).toContain('paymentReference');
+  });
+
+  it('subscription_expired: hidden from the directory, existing bookings carry on, and renewing brings the profile back', () => {
+    const email = renderFixture(emailFixture('subscription_expired'));
+    expect(email.subject).toBe('Your profile is no longer listed');
+    expect(email.text).toContain('ended on Saturday, 31 October 2026 and the grace period is over');
+    expect(email.text).toContain('Bookings you already have are not affected');
+    expect(email.text).toContain('listed again as soon as the payment goes through');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/studio/subscription`]);
+  });
+
+  it('escapes a display name in every subscription email', () => {
+    for (const name of ['subscription_reminder ending', 'subscription_reminder past_due', 'subscription_receipt', 'subscription_expired']) {
+      const email = renderWith(name, { displayName: '<b>Lens</b> & {{amount}}' });
+      expect(email.html, name).not.toContain('<b>Lens</b>');
+      expect(email.html, name).toContain('&lt;b&gt;Lens&lt;/b&gt;');
+      expect(email.text, name).toContain('<b>Lens</b> & {{amount}}');
+    }
   });
 });

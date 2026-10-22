@@ -78,7 +78,22 @@ schemas:
 
   PaymentKind:
     type: string
+    description: The kinds a booking's payment can be. A subscription payment (Phase 5) is never one of a booking's.
     enum: [booking_fee, session_fee]
+
+  PlanInterval:
+    type: string
+    description: The subscription plan's interval (marketplace-spec.md R5.2).
+    enum: [monthly, yearly]
+
+  SubscriptionStatus:
+    type: string
+    description: |
+      `trialing` or `active` while the current period runs; `past_due` from its
+      end until the grace days are over (listed, not bookable); then `expired`
+      (hidden). Computed from the clock, so it is right even when the job that
+      records it runs late (R5.4).
+    enum: [trialing, active, past_due, expired]
 
   PaymentMethod:
     type: string

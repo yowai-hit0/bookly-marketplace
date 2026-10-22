@@ -139,7 +139,21 @@ describe('routing', () => {
     for (const path of ['/studio/earnings', '/studio/payout-method', '/platform/payouts', '/platform/refunds']) expect(inShell).not.toContain(path)
   })
 
+  it('declares the Phase 5 pages: the subscription in the studio; every subscription and the settings on the platform', () => {
+    const studio = routes.find((route) => route.path === '/studio')
+    const platform = routes.find((route) => route.path === '/platform')
+
+    expect((studio?.children ?? []).map((child) => child.path)).toContain('subscription')
+    expect((platform?.children ?? []).map((child) => child.path)).toEqual(expect.arrayContaining(['subscriptions', 'settings']))
+    const shell = routes.find((route) => route.path === undefined)
+    const inShell = (shell?.children ?? []).map((child) => child.path)
+    for (const path of ['/studio/subscription', '/platform/subscriptions', '/platform/settings']) expect(inShell).not.toContain(path)
+  })
+
   it.each([
+    ['/studio/subscription', '/studio/login'],
+    ['/platform/subscriptions', '/platform/login'],
+    ['/platform/settings', '/platform/login'],
     ['/studio/earnings', '/studio/login'],
     ['/studio/payouts/p1', '/studio/login'],
     ['/studio/payout-method', '/studio/login'],
@@ -160,6 +174,23 @@ describe('routing', () => {
     ['studio', '/studio/payout-method', 'Payout method', { payoutMethod: null }],
     ['platform', '/platform/payouts', 'Payouts', { due: [] }],
     ['platform', '/platform/refunds', 'Refunds', { refunds: [] }],
+    ['studio', '/studio/subscription', 'Subscription', { subscription: null, prices: { monthly: 10_000, yearly: 100_000 }, methods: [], graceDays: 7 }],
+    ['platform', '/platform/subscriptions', 'Subscriptions', { subscriptions: [] }],
+    [
+      'platform',
+      '/platform/settings',
+      'Settings',
+      {
+        settings: {
+          holdMinutes: 15,
+          trialDays: 30,
+          subscriptionMonthlyPriceRwf: 10_000,
+          subscriptionYearlyPriceRwf: 100_000,
+          subscriptionGraceDays: 7,
+          subscriptionReminderDays: [7, 3, 1],
+        },
+      },
+    ],
   ] as const)('serves %s %s under its own heading', async (area, path, heading, body) => {
     sessionStorage.setItem(`bookly.${area}.session`, JSON.stringify({ token: 't', expiresAt: '2099-01-01T00:00:00.000Z' }))
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body))))

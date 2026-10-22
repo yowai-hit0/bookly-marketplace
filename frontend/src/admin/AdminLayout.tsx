@@ -1,5 +1,5 @@
-import { CalendarCheck, CircleX, Clock, LogOut } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { CalendarCheck, CircleX, Clock, LogOut, TriangleAlert } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useLocation } from 'react-router'
 import { RequireSession } from '@/auth/RequireSession'
@@ -8,11 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { SkipLink } from '@/components/ui/skip-link'
 import { StatusBadgeVariantContext } from '@/components/ui/status-badge-context'
+import { formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { BreadcrumbTailContext, useBreadcrumbTailState } from './breadcrumb-tail'
 import { Breadcrumbs } from './breadcrumbs'
 import { NAV_ITEMS, navItemFor } from './nav'
 import { adminFetch } from './api'
+import { type StudioSubscription, subscriptionApi, subscriptionBanner } from './subscription'
+import { SubscriptionRefreshContext } from './subscription-refresh'
 import { ThemeToggle } from './ThemeToggle'
 import { useAdminTheme } from './theme'
 
@@ -26,6 +29,10 @@ import { useAdminTheme } from './theme'
  * Above every page sits the studio's status from `GET /api/studio/me`
  * (marketplace spec R2.2): a pending photographer can sign in and set up, but
  * is not listed or bookable until approved, and a suspended one is hidden.
+ * Once `/me` says approved, the subscription is read too (Phase 5, R5.5), and
+ * a second banner says when it is past due or expired, or when the trial or
+ * the paid period ends within seven days, each linking to the subscription
+ * page (which says it all itself, so the banner is not repeated there).
  *
  * Layout (`design-system/bookly/admin-console.md` section 6.1, on top of
  * `pages/admin-shell.md`): a 56px top bar of bordered cells (the mark, the
@@ -50,6 +57,10 @@ function StudioShell() {
   const { preference, setPreference } = useAdminTheme()
   const [tail, setTail] = useBreadcrumbTailState()
   const current = navItemFor(pathname)?.page ?? null
+  const status = useStudioStatus()
+  const [subscriptionRead, setSubscriptionRead] = useState(0)
+  const refreshSubscription = useCallback(() => setSubscriptionRead((n) => n + 1), [])
+  const subscription = useBannerSubscription(status === 'approved', subscriptionRead)
 
   return (
     <div className="bg-background text-foreground min-h-svh lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[3.5rem_1fr]">
@@ -121,12 +132,15 @@ function StudioShell() {
       </aside>
 
       <div id="admin-content" tabIndex={-1} className="min-w-0 outline-none">
-        <StatusBanner />
+        <StatusBanner status={status} />
+        {current !== 'subscription' && <SubscriptionBanner subscription={subscription} />}
         <BreadcrumbTailContext.Provider value={setTail}>
-          {/* Every status badge in the admin takes the console look, the legend's popover included. */}
-          <StatusBadgeVariantContext.Provider value="console">
-            <Outlet />
-          </StatusBadgeVariantContext.Provider>
+          <SubscriptionRefreshContext.Provider value={refreshSubscription}>
+            {/* Every status badge in the admin takes the console look, the legend's popover included. */}
+            <StatusBadgeVariantContext.Provider value="console">
+              <Outlet />
+            </StatusBadgeVariantContext.Provider>
+          </SubscriptionRefreshContext.Provider>
         </BreadcrumbTailContext.Provider>
       </div>
     </div>
@@ -159,9 +173,8 @@ function useStudioStatus(): StudioStatus | null {
 }
 
 /** Pending or suspended, said above every studio page; nothing once approved. */
-function StatusBanner() {
+function StatusBanner({ status }: { status: StudioStatus | null }) {
   const { t } = useTranslation()
-  const status = useStudioStatus()
   if (status !== 'pending' && status !== 'suspended') return null
   return (
     <div className="px-4 pt-4 lg:px-12 lg:pt-6">
@@ -172,6 +185,69 @@ function StatusBanner() {
         data-studio-status={status}
       >
         <p>{t(`studio:banner.${status}`)}</p>
+      </Callout>
+    </div>
+  )
+}
+
+type BannerSubscription = Pick<StudioSubscription, 'status' | 'currentPeriodEndsAt' | 'graceEndsAt'>
+
+/**
+ * The subscription, for the banner: asked only once `/me` says approved (a
+ * pending or suspended photographer cannot pay, so a banner asking him to
+ * would mislead), and again whenever `read` changes (the subscription page
+ * bumps it when a payment settles). Null until then, for a photographer never
+ * approved, and on any failure: no banner is better than a wrong one.
+ */
+function useBannerSubscription(enabled: boolean, read: number): BannerSubscription | null {
+  const [subscription, setSubscription] = useState<BannerSubscription | null>(null)
+  useEffect(() => {
+    if (!enabled) return
+    let cancelled = false
+    subscriptionApi.load().then(
+      (page) => !cancelled && setSubscription(page.subscription),
+      () => {},
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [enabled, read])
+  return enabled ? subscription : null
+}
+
+const SUBSCRIPTION_BANNER_LOOK = {
+  past_due: { tone: 'warning', icon: TriangleAlert },
+  expired: { tone: 'destructive', icon: CircleX },
+  trial_ending: { tone: 'info', icon: Clock },
+  period_ending: { tone: 'info', icon: Clock },
+} as const
+
+/** Past due, expired, or ending within seven days; each links to the subscription page. */
+function SubscriptionBanner({ subscription }: { subscription: BannerSubscription | null }) {
+  const { t } = useTranslation()
+  const kind = subscriptionBanner(subscription, new Date())
+  if (subscription === null || kind === null) return null
+  const look = SUBSCRIPTION_BANNER_LOOK[kind]
+  return (
+    <div className="px-4 pt-4 lg:px-12 lg:pt-6">
+      <Callout
+        variant="console"
+        tone={look.tone}
+        icon={look.icon}
+        data-subscription-banner={kind}
+        action={
+          // Underlined at rest: a link inside a banner (admin-console.md section 3).
+          <Link to="/studio/subscription" className="rounded-xs font-medium underline underline-offset-4">
+            {t('studio:banner.subscription.link')}
+          </Link>
+        }
+      >
+        <p>
+          {t(`studio:banner.subscription.${kind}`, {
+            date: formatDateTime(subscription.currentPeriodEndsAt),
+            graceEndsAt: formatDateTime(subscription.graceEndsAt),
+          })}
+        </p>
       </Callout>
     </div>
   )

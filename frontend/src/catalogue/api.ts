@@ -7,9 +7,12 @@ import { env } from '@/env'
  * `/api/photographers/:handle`, `.../services` and `.../services/:slug` serve
  * them. Anonymous: no token travels with these requests.
  *
- * An unknown handle and a photographer who cannot be booked are the same 404,
- * so each per-photographer read answers null for both: to the public neither
- * exists.
+ * An unknown handle and a photographer who is not listed (pending, suspended,
+ * or with an expired subscription) are the same 404, so each per-photographer
+ * read answers null for both: to the public neither exists, and the pages word
+ * it as "unavailable" (marketplace spec R5.5). A listed photographer whose
+ * subscription is past due is served with `takingBookings: false`: shown, with
+ * a notice, and never offered a booking.
  */
 
 /** One photographer on the list. */
@@ -18,6 +21,8 @@ export type PublicPhotographerSummary = {
   displayName: string
   /** A pasted link; put through `safeHttpsUrl` before it reaches an `src`. */
   coverImageUrl: string | null
+  /** False while the subscription is past due (R5.5): listed, not bookable. */
+  takingBookings: boolean
 }
 
 /**
@@ -68,6 +73,8 @@ export type PublicService = {
 export type PublicServiceDetail = PublicService & {
   /** What this service's booking fee is charged at, 0 to 1. */
   bookingFeeRate: number
+  /** The photographer's, as on their profile: whether the slot picker and the booking form are offered. */
+  takingBookings: boolean
 }
 
 /** The API could not be reached, or answered with something other than the data. */

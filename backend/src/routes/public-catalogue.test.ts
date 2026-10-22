@@ -9,7 +9,7 @@ import { listPublicCatalogue } from '../catalogue/public.js';
 import { createPrismaClient } from '../db/client.js';
 import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, TEST_PLATFORM_SETTING, createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * The public catalogue over HTTP, against real PostgreSQL (plan.md Task 11;
@@ -92,6 +92,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
+  // The platform row: the listing reads its grace days (R5.5).
+  await prisma.platformSetting.create({ data: TEST_PLATFORM_SETTING });
   // Born with its settings row at the defaults: a 40% booking fee.
   ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
   app = createApp({ corsOrigin: WEB_ORIGIN, publicApi: { prisma } });
@@ -272,6 +274,7 @@ describe('GET /api/photographers/:handle/services/:slug', () => {
           { id: c.rushEdit.id, nameEn: 'Rush edit', priceRwf: 5_000 },
         ],
         bookingFeeRate: 0.4,
+        takingBookings: true,
       },
     });
   });
@@ -826,8 +829,8 @@ describe('GET /api/photographers', () => {
 
     expect(body).toStrictEqual({
       photographers: [
-        { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null },
-        { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg' },
+        { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null, takingBookings: true },
+        { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg', takingBookings: true },
       ],
     });
   });
@@ -863,6 +866,7 @@ describe('GET /api/photographers/:handle', () => {
         whatsappPhone: '+250788000002',
         email: 'hello@kigalilens.example',
         coverImageUrl: 'https://images.example.com/kigali.jpg',
+        takingBookings: true,
         cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
       },
     });

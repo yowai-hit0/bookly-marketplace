@@ -5,7 +5,7 @@ import { createPrismaClient } from '../db/client.js';
 import { sqlstateOf } from '../db/errors.js';
 import { updatePhotographerSettings, updatePlatformSettings } from '../settings/index.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer, grantAccessToken, insertPayment } from '../test/payment-fixtures.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, TEST_PLATFORM_SETTING, createPhotographer, grantAccessToken, insertPayment } from '../test/payment-fixtures.js';
 import { cancelByClient } from './cancel.js';
 import { type BookingRequest, type CreateBookingResult, MAX_LIVE_HOLDS_PER_EMAIL, MAX_REFERENCE_ATTEMPTS, createBooking } from './create.js';
 
@@ -65,7 +65,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await truncateAll(raw);
   // The platform's 30-minute hold, and a photographer at the defaults: 0.400 / 120 / 30 / 90.
-  await prisma.platformSetting.create({ data: { id: 1 } });
+  await prisma.platformSetting.create({ data: TEST_PLATFORM_SETTING });
   ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
   await weekdayHours(photographerId);
   catalogue = await seedCatalogue(photographerId);

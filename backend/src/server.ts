@@ -8,6 +8,7 @@ import { EnvValidationError, parseEnv } from './env.js';
 import { startOutboxWorker } from './outbox/worker.js';
 import { createPaymentProviders } from './payments/providers.js';
 import { reconcilerPlans, startPaymentReconciler } from './payments/reconcile.js';
+import { startSubscriptionJob } from './subscriptions/job.js';
 
 function boot(): void {
   let env;
@@ -69,6 +70,11 @@ function boot(): void {
     startPaymentReconciler({ prisma, provider: plan.provider, minAgeSeconds: plan.minAgeSeconds }, plan.schedule),
   );
 
+  // Subscription reminders and status moves (marketplace-spec.md R5.4).
+  // Bookability compares the period's end with the clock directly, so this job
+  // only records and tells: nothing breaks if it runs late.
+  const subscriptionJob = startSubscriptionJob({ prisma, now: () => new Date() });
+
   // Everything the system sends goes through the outbox (plan.md Task 14).
   // Calendar kinds get their handler with Task 22; until then they wait.
   const outboxWorker = startOutboxWorker({
@@ -82,6 +88,7 @@ function boot(): void {
     shuttingDown = true;
     console.log(JSON.stringify({ level: 'info', event: 'shutdown', signal }));
     void holdSweeper.stop();
+    void subscriptionJob.stop();
     for (const reconciler of reconcilers) void reconciler.stop();
     server.close(() => {
       // The worker finishes the message in hand before the connection goes, so

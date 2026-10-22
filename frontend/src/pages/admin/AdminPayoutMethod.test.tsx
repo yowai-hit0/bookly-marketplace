@@ -8,7 +8,7 @@ import { readSession, saveSession } from '@/auth/session'
 import { routes } from '@/routes'
 import { type Sent, json, stubApi } from '@/test/fetch'
 import { BANK_METHOD, MOMO_METHOD } from '@/test/payout-fixtures'
-import { STUDIO_ME_URL, studioMe } from '@/test/studio-me'
+import { isStudioLayout, studioLayout } from '@/test/studio-me'
 
 /**
  * `/studio/payout-method` (marketplace spec R4.1, R4.5, T4.4), through the
@@ -33,7 +33,7 @@ type Options = {
 
 function api({ current = MOMO_METHOD, load, save }: Options = {}) {
   return stubApi((call) => {
-    if (call.url === STUDIO_ME_URL) return studioMe()
+    if (isStudioLayout(call.url)) return studioLayout(call.url)
     if (call.url === URL_ && call.method === 'GET') return load === undefined ? json({ payoutMethod: current }) : load()
     if (call.url === URL_ && call.method === 'PUT') return save === undefined ? json({ payoutMethod: SAVED_MOMO }) : save(call)
     return undefined

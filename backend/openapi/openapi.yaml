@@ -67,6 +67,8 @@ tags:
     description: Services, packages and add-ons.
   - name: Studio earnings
     description: What the photographer has earned and been paid, and where payouts go (Phase 4).
+  - name: Studio subscription
+    description: The photographer's subscription, and paying for it by Mobile Money (Phase 5).
   - name: Platform auth
     description: Login, email verification and password reset for a platform admin.
   - name: Platform photographers
@@ -75,6 +77,8 @@ tags:
     description: Payouts due, building a draft, marking it paid with the transfer reference, or cancelling it (Phase 4).
   - name: Platform refunds
     description: Refunds of money paid online, which sits in the platform's account (Phase 4).
+  - name: Platform settings
+    description: The checkout hold, the free trial and the subscription plan; every photographer's subscription (Phase 5).
   - name: Account auth
     description: Signup, login, email verification, password reset and Google sign-in for a client.
   - name: Account
@@ -204,6 +208,13 @@ paths:
     $ref: paths/studio-payouts.yaml#/payout
   /api/studio/payout-method:
     $ref: paths/studio-payouts.yaml#/payoutMethod
+  # --- Studio subscription (Phase 5) -----------------------------------------
+  /api/studio/subscription:
+    $ref: paths/studio-subscription.yaml#/subscription
+  /api/studio/subscription/payments:
+    $ref: paths/studio-subscription.yaml#/payments
+  /api/studio/subscription/payments/{ourRef}:
+    $ref: paths/studio-subscription.yaml#/payment
   # --- Platform -------------------------------------------------------------
   /api/platform/auth/login:
     $ref: paths/platform.yaml#/login
@@ -239,6 +250,10 @@ paths:
     $ref: paths/platform-payouts.yaml#/refunds
   /api/platform/refunds/{paymentId}:
     $ref: paths/platform-payouts.yaml#/refund
+  /api/platform/settings:
+    $ref: paths/platform-settings.yaml#/settings
+  /api/platform/subscriptions:
+    $ref: paths/platform-settings.yaml#/subscriptions
   # --- Account --------------------------------------------------------------
   /api/account/auth/login:
     $ref: paths/account.yaml#/login

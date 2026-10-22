@@ -80,6 +80,10 @@
       "description": "What the photographer has earned and been paid, and where payouts go (Phase 4)."
     },
     {
+      "name": "Studio subscription",
+      "description": "The photographer's subscription, and paying for it by Mobile Money (Phase 5)."
+    },
+    {
       "name": "Platform auth",
       "description": "Login, email verification and password reset for a platform admin."
     },
@@ -94,6 +98,10 @@
     {
       "name": "Platform refunds",
       "description": "Refunds of money paid online, which sits in the platform's account (Phase 4)."
+    },
+    {
+      "name": "Platform settings",
+      "description": "The checkout hold, the free trial and the subscription plan; every photographer's subscription (Phase 5)."
     },
     {
       "name": "Account auth",
@@ -146,12 +154,12 @@
         "tags": [
           "Catalogue & availability"
         ],
-        "summary": "List the photographers who can be booked",
-        "description": "Every photographer who can be booked, by display name. No filters yet:\nthe directory's category, district, price and date filters come later.\nAnonymous.\n",
+        "summary": "List the listed photographers",
+        "description": "Every listed photographer, by display name: those who can be booked, and\nthose whose subscription is `past_due` (`takingBookings: false`,\nmarketplace-spec.md R5.5). Pending, suspended and `expired` photographers\nare not listed. No filters yet: the directory's category, district, price\nand date filters come later. Anonymous.\n",
         "security": [],
         "responses": {
           "200": {
-            "description": "The bookable photographers.",
+            "description": "The listed photographers.",
             "content": {
               "application/json": {
                 "schema": {
@@ -182,7 +190,7 @@
           "Catalogue & availability"
         ],
         "summary": "One photographer's public profile",
-        "description": "The profile behind `/p/{handle}`. Never the photographer's login email,\nstatus or operating settings: `email` is the public contact address they\nchose, or null. An unknown handle and the handle of a photographer who\ncannot be booked are the same 404. Anonymous.\n",
+        "description": "The profile behind `/p/{handle}`. Never the photographer's login email,\nstatus or operating settings: `email` is the public contact address they\nchose, or null. An unknown handle and the handle of a photographer who is\nnot listed -- pending, suspended, or with an `expired` subscription -- are\nthe same 404; the profile page words it as \"unavailable\" (R5.5). A\n`past_due` photographer's profile is served with `takingBookings: false`.\nAnonymous.\n",
         "security": [],
         "parameters": [
           {
@@ -222,7 +230,7 @@
           "Catalogue & availability"
         ],
         "summary": "List one photographer's active services",
-        "description": "The photographer's active services, each with its active packages and the\nadd-ons it offers: its own, then those the photographer offers on every\nservice. Never another photographer's. A 404 for a handle that is unknown\nor cannot be booked. Anonymous.\n",
+        "description": "The photographer's active services, each with its active packages and the\nadd-ons it offers: its own, then those the photographer offers on every\nservice. Never another photographer's. A 404 for a handle that is unknown\nor not listed (a `past_due` photographer's services are shown). Anonymous.\n",
         "security": [],
         "parameters": [
           {
@@ -265,7 +273,7 @@
           "Catalogue & availability"
         ],
         "summary": "One of a photographer's services by slug",
-        "description": "Slugs are unique per photographer, so the same slug under another handle is\nanother service. A 404 for an unknown or inactive slug, a slug only another\nphotographer has, and a handle that is unknown or cannot be booked.\nAnonymous.\n",
+        "description": "Slugs are unique per photographer, so the same slug under another handle is\nanother service. A 404 for an unknown or inactive slug, a slug only another\nphotographer has, and a handle that is unknown or not listed. Carries the\nphotographer's `takingBookings`. Anonymous.\n",
         "security": [],
         "parameters": [
           {
@@ -805,7 +813,7 @@
           "Checkout & payments"
         ],
         "summary": "Where a payment stands",
-        "description": "The confirmation page polls this while a Mobile Money payment settles —\noften 30 seconds or more. Addressed by the random `our_ref` the pay page\nwas handed; shows no contact details. `Cache-Control: no-store`.\n",
+        "description": "The confirmation page polls this while a Mobile Money payment settles —\noften 30 seconds or more. Addressed by the random `our_ref` the pay page\nwas handed; shows no contact details. `Cache-Control: no-store`. A\nsubscription payment's reference is a 404 here: the studio polls it at\n`/api/studio/subscription/payments/{ourRef}`.\n",
         "security": [],
         "parameters": [
           {
@@ -3422,6 +3430,148 @@
         }
       }
     },
+    "/api/studio/subscription": {
+      "get": {
+        "operationId": "getStudioSubscription",
+        "tags": [
+          "Studio subscription"
+        ],
+        "summary": "The subscription page",
+        "description": "The subscription's status, the end of its current period, every period, any\npayment in progress, the plan's prices for both intervals and the methods\non offer. `status` and `takingBookings` are computed from the clock, so they\nare right even if the job that records them is late. `subscription` is null\nfor a photographer never approved.\n",
+        "responses": {
+          "200": {
+            "description": "The subscription page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioSubscriptionPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/studio/subscription/payments": {
+      "post": {
+        "operationId": "startSubscriptionPayment",
+        "tags": [
+          "Studio subscription"
+        ],
+        "summary": "Pay for a month or a year",
+        "description": "Prompts the phone by Mobile Money for the platform's price of the chosen\nplan. The amount is the server's: any amount in the body is ignored (T5.3).\nWhen the payment succeeds (webhook or status lookup), a period of the plan\nis added on top of the time already covered -- starting at the later of now\nand the current period's end -- and a receipt is emailed (R5.3). Every\nsuccess adds its period, and none is ever refunded.\n\nAny subscription status may pay, `expired` included. Refused with `409`:\n`photographer_not_approved` (pending or suspended), `no_subscription`, and\n`payment_in_progress` while another payment of the subscription still waits\non the payer (only one at a time). Rate-limited per address.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionPayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The phone is prompted. Poll the payment's `ourRef`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionPaymentStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Not approved, no subscription, or a payment already in progress.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PaymentInProgress"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "photographer_not_approved",
+                            "no_subscription"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "The provider refused or could not be reached. The attempt is recorded as failed; try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentNotStarted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/subscription/payments/{ourRef}": {
+      "get": {
+        "operationId": "getStudioSubscriptionPayment",
+        "tags": [
+          "Studio subscription"
+        ],
+        "summary": "Where a subscription payment stands",
+        "description": "For the page to poll after a prompt: the payment, and the subscription as it\nnow stands. Another photographer's payment, a booking's payment and an\nunknown reference are all a 404.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OurRef"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The payment and the subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionPaymentStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/api/platform/auth/login": {
       "post": {
         "operationId": "platformLogin",
@@ -4324,6 +4474,153 @@
         }
       }
     },
+    "/api/platform/settings": {
+      "get": {
+        "operationId": "getPlatformSettings",
+        "tags": [
+          "Platform settings"
+        ],
+        "summary": "The platform settings",
+        "description": "The checkout hold, the free trial, the plan's monthly and yearly prices, the grace days and the reminder days.",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "settings"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "settings": {
+                      "$ref": "#/components/schemas/PlatformSettings"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePlatformSettings",
+        "tags": [
+          "Platform settings"
+        ],
+        "summary": "Change the platform settings",
+        "description": "Saves any subset and answers every value as stored. What a change touches:\nthe hold, the next booking's; the trial, later approvals; the prices, the\nnext payment (one already started keeps its amount); the grace and reminder\ndays, every subscription at once. Each change is logged with who made it.\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings as stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "settings"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "settings": {
+                      "$ref": "#/components/schemas/PlatformSettings"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      }
+    },
+    "/api/platform/subscriptions": {
+      "get": {
+        "operationId": "listPlatformSubscriptions",
+        "tags": [
+          "Platform settings"
+        ],
+        "summary": "Every subscription, with its history",
+        "description": "Every photographer's subscription, the soonest to end first, or only those in one status at the clock.",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SubscriptionStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subscriptions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "subscriptions"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "subscriptions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PlatformSubscription"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/account/auth/login": {
       "post": {
         "operationId": "accountLogin",
@@ -4923,13 +5220,18 @@
       }
     },
     "schemas": {
+      "TakingBookings": {
+        "type": "boolean",
+        "description": "Whether the photographer can be booked right now (marketplace-spec.md\nR5.4, R5.5). False while their subscription is `past_due`: they stay\nlisted, the page shows a \"not taking bookings\" notice, and their packages\nanswer the quote, the calendar and the booking form as an inactive package\ndoes. An `expired` photographer is not listed at all.\n"
+      },
       "PublicPhotographerSummary": {
         "type": "object",
-        "description": "One photographer who can be booked, as the photographers list shows them.",
+        "description": "One listed photographer, as the photographers list shows them.",
         "required": [
           "handle",
           "displayName",
-          "coverImageUrl"
+          "coverImageUrl",
+          "takingBookings"
         ],
         "additionalProperties": false,
         "properties": {
@@ -4948,6 +5250,9 @@
               "null"
             ],
             "format": "uri"
+          },
+          "takingBookings": {
+            "$ref": "#/components/schemas/TakingBookings"
           }
         }
       },
@@ -4982,6 +5287,7 @@
           "whatsappPhone",
           "email",
           "coverImageUrl",
+          "takingBookings",
           "cancellationPolicy"
         ],
         "additionalProperties": false,
@@ -4994,6 +5300,9 @@
           },
           "displayName": {
             "type": "string"
+          },
+          "takingBookings": {
+            "$ref": "#/components/schemas/TakingBookings"
           },
           "bio": {
             "type": [
@@ -5221,7 +5530,8 @@
           "coverImageUrl",
           "packages",
           "addons",
-          "bookingFeeRate"
+          "bookingFeeRate",
+          "takingBookings"
         ],
         "unevaluatedProperties": false,
         "properties": {
@@ -5230,6 +5540,14 @@
             "minimum": 0,
             "maximum": 1,
             "description": "The service's own override if set, else its photographer's rate."
+          },
+          "takingBookings": {
+            "description": "The photographer's, as on their profile, so the service page knows whether to open the slot picker.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakingBookings"
+              }
+            ]
           }
         }
       },
@@ -5974,6 +6292,7 @@
       },
       "PaymentKind": {
         "type": "string",
+        "description": "The kinds a booking's payment can be. A subscription payment (Phase 5) is never one of a booking's.",
         "enum": [
           "booking_fee",
           "session_fee"
@@ -8782,6 +9101,370 @@
           }
         }
       },
+      "SubscriptionStatus": {
+        "type": "string",
+        "description": "`trialing` or `active` while the current period runs; `past_due` from its\nend until the grace days are over (listed, not bookable); then `expired`\n(hidden). Computed from the clock, so it is right even when the job that\nrecords it runs late (R5.4).\n",
+        "enum": [
+          "trialing",
+          "active",
+          "past_due",
+          "expired"
+        ]
+      },
+      "PlanInterval": {
+        "type": "string",
+        "description": "The subscription plan's interval (marketplace-spec.md R5.2).",
+        "enum": [
+          "monthly",
+          "yearly"
+        ]
+      },
+      "SubscriptionPeriod": {
+        "type": "object",
+        "description": "One stretch of time the subscription covers: the free trial, or a paid month\nor year. A paid period starts where the time already covered ends, so\npaying early adds time on top (R5.3).\n",
+        "required": [
+          "id",
+          "kind",
+          "planInterval",
+          "priceRwf",
+          "startsAt",
+          "endsAt",
+          "paidAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "trial",
+              "paid"
+            ]
+          },
+          "planInterval": {
+            "description": "Null for the trial.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanInterval"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "priceRwf": {
+            "description": "What was paid; 0 for the trial.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Rwf"
+              }
+            ]
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "endsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "paidAt": {
+            "description": "When its payment succeeded; null for the trial.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Instant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SubscriptionPayment": {
+        "type": "object",
+        "description": "One subscription payment as the photographer may see it. `failure` says\nwhy a failed one failed, as the payer may be told it: `declined` (turned\ndown, timed out on the phone, an unknown number) or `unavailable` (the\nprovider could not be reached). The recorded reason stays internal.\n",
+        "required": [
+          "ourRef",
+          "status",
+          "planInterval",
+          "amountRwf",
+          "method",
+          "failure",
+          "initiatedAt",
+          "settledAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ourRef": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "planInterval": {
+            "$ref": "#/components/schemas/PlanInterval"
+          },
+          "amountRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "method": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "declined",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initiatedAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "settledAt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Instant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "StudioSubscription": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "currentPeriodEndsAt",
+          "graceEndsAt",
+          "takingBookings",
+          "currentPeriod",
+          "periods",
+          "paymentInProgress"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubscriptionStatus"
+          },
+          "currentPeriodEndsAt": {
+            "description": "The end of the latest period, paid or trial.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Instant"
+              }
+            ]
+          },
+          "graceEndsAt": {
+            "description": "When a lapsed subscription becomes `expired` and the profile is hidden.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Instant"
+              }
+            ]
+          },
+          "takingBookings": {
+            "type": "boolean",
+            "description": "Whether clients can book the photographer now (approved, and the period still running)."
+          },
+          "currentPeriod": {
+            "description": "The period now falls in; null once the last one has ended.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "periods": {
+            "type": "array",
+            "description": "Every period, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionPeriod"
+            }
+          },
+          "paymentInProgress": {
+            "description": "A payment still waiting on the payer, which blocks starting another; null if none.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionPayment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "StudioSubscriptionPage": {
+        "type": "object",
+        "required": [
+          "subscription",
+          "prices",
+          "methods",
+          "graceDays"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "subscription": {
+            "description": "Null before approval (the subscription and its trial start then, R5.1).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StudioSubscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prices": {
+            "type": "object",
+            "description": "The plan's prices, whole RWF, set by the platform.",
+            "required": [
+              "monthly",
+              "yearly"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "monthly": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "yearly": {
+                "$ref": "#/components/schemas/Rwf"
+              }
+            }
+          },
+          "methods": {
+            "type": "array",
+            "description": "The methods on offer, MoMo only while cards are deferred. Empty when no payment provider is configured.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentMethod"
+            }
+          },
+          "graceDays": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "SubscriptionPayRequest": {
+        "type": "object",
+        "description": "The plan and how to pay. The amount is never the request's: any other key\n(an `amountRwf`, a `status`) is ignored, and the platform's price for the\nplan is charged (T5.3).\n",
+        "required": [
+          "planInterval",
+          "method",
+          "phone"
+        ],
+        "properties": {
+          "planInterval": {
+            "$ref": "#/components/schemas/PlanInterval"
+          },
+          "method": {
+            "description": "One of `methods` from the subscription page; anything else is a 422.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              }
+            ]
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "The MoMo number to prompt, local (`0788…`) or international (`+250788…`). An unusable number is a 422.",
+            "examples": [
+              "+250788123456"
+            ]
+          }
+        }
+      },
+      "SubscriptionPaymentStarted": {
+        "type": "object",
+        "required": [
+          "payment"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payment": {
+            "type": "object",
+            "required": [
+              "ourRef",
+              "status",
+              "planInterval",
+              "amountRwf"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "ourRef": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "status": {
+                "const": "pending"
+              },
+              "planInterval": {
+                "$ref": "#/components/schemas/PlanInterval"
+              },
+              "amountRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              }
+            }
+          }
+        }
+      },
+      "SubscriptionPaymentStatus": {
+        "type": "object",
+        "required": [
+          "payment",
+          "subscription"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payment": {
+            "$ref": "#/components/schemas/SubscriptionPayment"
+          },
+          "subscription": {
+            "type": "object",
+            "required": [
+              "status",
+              "currentPeriodEndsAt",
+              "takingBookings"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              },
+              "currentPeriodEndsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "takingBookings": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
       "UserEnvelope": {
         "type": "object",
         "required": [
@@ -9591,6 +10274,167 @@
               "refundedByUserId": {
                 "$ref": "#/components/schemas/Uuid"
               }
+            }
+          }
+        }
+      },
+      "PlatformSettings": {
+        "type": "object",
+        "required": [
+          "holdMinutes",
+          "trialDays",
+          "subscriptionMonthlyPriceRwf",
+          "subscriptionYearlyPriceRwf",
+          "subscriptionGraceDays",
+          "subscriptionReminderDays"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "holdMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "The checkout hold. At most 60, the reconciler's window."
+          },
+          "trialDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 366,
+            "description": "The free trial approval starts. A change applies to later approvals."
+          },
+          "subscriptionMonthlyPriceRwf": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "subscriptionYearlyPriceRwf": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "subscriptionGraceDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 366,
+            "description": "Days of `past_due` after a period ends, before `expired`."
+          },
+          "subscriptionReminderDays": {
+            "type": "array",
+            "maxItems": 10,
+            "uniqueItems": true,
+            "description": "Days before a period ends that a reminder goes out, largest first. Empty sends none.",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 366
+            }
+          }
+        }
+      },
+      "PlatformSettingsUpdate": {
+        "type": "object",
+        "description": "Any subset of the settings. An unknown key is a 400; a value outside its bounds a 422 naming it.",
+        "additionalProperties": false,
+        "properties": {
+          "holdMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          },
+          "trialDays": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 366
+          },
+          "subscriptionMonthlyPriceRwf": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "subscriptionYearlyPriceRwf": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "subscriptionGraceDays": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 366
+          },
+          "subscriptionReminderDays": {
+            "type": "array",
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 366
+            }
+          }
+        }
+      },
+      "PlatformSubscription": {
+        "type": "object",
+        "required": [
+          "id",
+          "photographer",
+          "status",
+          "currentPeriodEndsAt",
+          "graceEndsAt",
+          "createdAt",
+          "periods"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "photographer": {
+            "type": "object",
+            "required": [
+              "id",
+              "handle",
+              "displayName",
+              "status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "handle": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "approved",
+                  "suspended"
+                ]
+              }
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubscriptionStatus"
+          },
+          "currentPeriodEndsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "graceEndsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "periods": {
+            "type": "array",
+            "description": "Every period, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionPeriod"
             }
           }
         }

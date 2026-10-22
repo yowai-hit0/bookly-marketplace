@@ -7,7 +7,7 @@ import { readSession, saveSession } from '@/auth/session'
 import { routes } from '@/routes'
 import { type Sent, json, stubApi } from '@/test/fetch'
 import { BANK_METHOD, earnings, studioPayoutDetail } from '@/test/payout-fixtures'
-import { STUDIO_ME_URL, studioMe } from '@/test/studio-me'
+import { isStudioLayout, studioLayout } from '@/test/studio-me'
 
 /**
  * `/studio/payouts/:id` (marketplace spec R4.5): one payout, its destination
@@ -22,7 +22,7 @@ const PATH = `/studio/payouts/${PAYOUT.id}`
 
 function api(answer: (call: Sent) => Response | Promise<Response> = () => json({ payout: PAYOUT })) {
   return stubApi((call) => {
-    if (call.url === STUDIO_ME_URL) return studioMe()
+    if (isStudioLayout(call.url)) return studioLayout(call.url)
     if (call.url.startsWith('/api/studio/payouts/')) return answer(call)
     if (call.url === '/api/studio/earnings') return json(earnings())
     return undefined
@@ -30,7 +30,7 @@ function api(answer: (call: Sent) => Response | Promise<Response> = () => json({
 }
 
 function pageCalls(sent: Sent[]) {
-  return sent.filter((call) => call.url !== STUDIO_ME_URL)
+  return sent.filter((call) => !isStudioLayout(call.url))
 }
 
 function renderAt(path = PATH) {

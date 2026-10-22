@@ -5,6 +5,7 @@ import { signUpPhotographer } from '../auth/signup.js';
 import { handleField } from '../photographers/handle.js';
 import { photographerLocals, requirePhotographer } from '../auth/middleware.js';
 import type { PaymentProviderId } from '../payments/provider.js';
+import type { PaymentRouting } from '../payments/routing.js';
 import { toPublicUser } from '../auth/public-user.js';
 import { MAX_PASSWORD_LENGTH, MIN_NEW_PASSWORD_LENGTH, areaAuthRouter, signupEmail } from './area-auth.js';
 import { blocksRouter, workingHoursRouter } from './studio-availability.js';
@@ -13,6 +14,7 @@ import { calendarRouter } from './studio-calendar.js';
 import { catalogueRouter } from './studio-catalogue.js';
 import { studioPayoutsRouter } from './studio-payouts.js';
 import { settingsRouter } from './studio-settings.js';
+import { studioSubscriptionRouter } from './studio-subscription.js';
 import { parseOrReject } from './validation.js';
 
 /**
@@ -30,6 +32,10 @@ import { parseOrReject } from './validation.js';
 export type StudioRouterDeps = AuthDeps & {
   /** Whom a session-fee request is recorded against, when any method is on offer (plan.md Task 20; R3.1). */
   paymentProviderId?: PaymentProviderId;
+  /** How the photographer pays for the subscription: the methods on offer and who collects each (R5.2, R3.1). */
+  paymentRouting?: PaymentRouting;
+  /** The provider call's deadline; injectable for tests. */
+  providerTimeoutMs?: number;
 };
 
 /**
@@ -103,6 +109,15 @@ export function studioRouter(deps: StudioRouterDeps): Router {
 
   // Earnings, payouts and the payout method (Phase 4: R4.1, R4.5).
   router.use(studioPayoutsRouter(deps));
+
+  // The subscription: its page, paying for it, and polling a payment (Phase 5: R5.2, R5.3).
+  router.use(
+    studioSubscriptionRouter({
+      ...deps,
+      ...(deps.paymentRouting === undefined ? {} : { routing: deps.paymentRouting }),
+      ...(deps.providerTimeoutMs === undefined ? {} : { providerTimeoutMs: deps.providerTimeoutMs }),
+    }),
+  );
 
   return router;
 }

@@ -14,6 +14,7 @@ import { AdminEarnings } from '@/pages/admin/AdminEarnings'
 import { AdminPayoutDetail } from '@/pages/admin/AdminPayoutDetail'
 import { AdminPayoutMethod } from '@/pages/admin/AdminPayoutMethod'
 import { AdminSettings } from '@/pages/admin/AdminSettings'
+import { AdminSubscription } from '@/pages/admin/AdminSubscription'
 import { AccountHome } from '@/pages/account/AccountHome'
 import { GoogleCallbackPage } from '@/pages/auth/GoogleCallbackPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
@@ -30,6 +31,8 @@ import { PlatformPayoutDetail } from '@/pages/platform/PlatformPayoutDetail'
 import { PlatformPayouts } from '@/pages/platform/PlatformPayouts'
 import { PlatformPhotographers } from '@/pages/platform/PlatformPhotographers'
 import { PlatformRefunds } from '@/pages/platform/PlatformRefunds'
+import { PlatformSettings } from '@/pages/platform/PlatformSettings'
+import { PlatformSubscriptions } from '@/pages/platform/PlatformSubscriptions'
 import { ServiceDetail } from '@/pages/services/ServiceDetail'
 import { ServiceList } from '@/pages/services/ServiceList'
 
@@ -116,6 +119,8 @@ export const routes: RouteObject[] = [
       { path: 'earnings', element: <AdminEarnings /> },
       { path: 'payouts/:id', element: <AdminPayoutDetail /> },
       { path: 'payout-method', element: <AdminPayoutMethod /> },
+      // Paying for the subscription that keeps the profile bookable (Phase 5, R5.2).
+      { path: 'subscription', element: <AdminSubscription /> },
       { path: 'settings', element: <AdminSettings /> },
     ],
   },
@@ -140,6 +145,9 @@ export const routes: RouteObject[] = [
       { path: 'payouts', element: <PlatformPayouts /> },
       { path: 'payouts/:id', element: <PlatformPayoutDetail /> },
       { path: 'refunds', element: <PlatformRefunds /> },
+      // Every subscription, and the settings it and the checkout run on (Phase 5, R5.1, R5.4).
+      { path: 'subscriptions', element: <PlatformSubscriptions /> },
+      { path: 'settings', element: <PlatformSettings /> },
     ],
   },
 ]

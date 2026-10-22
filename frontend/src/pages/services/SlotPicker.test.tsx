@@ -1121,3 +1121,39 @@ describe('reportTaken, when the booking API refuses the chosen start', () => {
     expect(onChange.mock.calls.at(-1)).toEqual([at('2026-10-07', '14:00')])
   })
 })
+
+describe('a package the API refuses (Phase 5, R5.5)', () => {
+  function renderWithRefusal() {
+    const onPackageRefused = vi.fn()
+    render(<SlotPicker packageId="p1" durationMinutes={60} value={null} onChange={() => {}} onPackageRefused={onPackageRefused} />)
+    return onPackageRefused
+  }
+
+  it('tells the page on a 422, and still shows its failed load', async () => {
+    stubApi({ 'p1|2026-10': [() => json({ error: 'validation_failed', fields: ['packageId'] }, 422)] })
+    const onPackageRefused = renderWithRefusal()
+
+    expect(await screen.findByText('Could not load available times.')).toBeInTheDocument()
+    expect(onPackageRefused).toHaveBeenCalledTimes(1)
+  })
+
+  it.each<[string, () => Response | Promise<Response>]>([
+    ['a 500', () => json({ error: 'internal_error' }, 500)],
+    ['a 400', () => json({ error: 'invalid_request' }, 400)],
+    ['a network failure', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('does not tell the page on %s', async (_label, reply) => {
+    stubApi({ 'p1|2026-10': [reply] })
+    const onPackageRefused = renderWithRefusal()
+
+    expect(await screen.findByText('Could not load available times.')).toBeInTheDocument()
+    expect(onPackageRefused).not.toHaveBeenCalled()
+  })
+
+  it('does not tell the page when the month loads', async () => {
+    stubApi()
+    const onPackageRefused = renderWithRefusal()
+
+    await loadedMonth('October 2026')
+    expect(onPackageRefused).not.toHaveBeenCalled()
+  })
+})

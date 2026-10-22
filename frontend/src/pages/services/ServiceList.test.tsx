@@ -30,6 +30,7 @@ const PROFILE: PublicPhotographerProfile = {
   contactPhone: null,
   whatsappPhone: null,
   email: null,
+  takingBookings: true,
   cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
 }
 
@@ -70,7 +71,7 @@ const NEW_SERVICE: PublicService = {
   addons: [],
 }
 
-const PORTRAITS_DETAIL: PublicServiceDetail = { ...PORTRAITS, bookingFeeRate: 0.4 }
+const PORTRAITS_DETAIL: PublicServiceDetail = { ...PORTRAITS, bookingFeeRate: 0.4, takingBookings: true }
 
 type Sent = { url: string; init: RequestInit }
 type Route = () => Response | Promise<Response>
@@ -173,11 +174,22 @@ describe('the service list', () => {
     expect(main().getByText('Choose a service to see its packages and prices.')).toBeInTheDocument()
   })
 
-  it('is the not-found page for a handle the API does not know, or cannot book', async () => {
+  it('says the photographer is unavailable for a handle the API answers 404 -- unknown, or not listed (Phase 5, R5.5)', async () => {
     stubApi({ [PROFILE_API]: () => json({ error: 'not_found' }, 404), [SERVICES_API]: () => json({ error: 'not_found' }, 404) })
     renderAt()
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'This photographer is unavailable' })).toBeInTheDocument()
+    expect(screen.getByText("Their profile can't be shown right now. Browse the other photographers to book a shoot.")).toBeInTheDocument()
+    expect(main().getByRole('link', { name: 'Browse photographers' })).toHaveAttribute('href', '/photographers')
+    // Not the generic not-found page: that stays for paths that really do not exist.
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument()
+  })
+
+  it('says unavailable too when only the services answer 404', async () => {
+    stubApi({ [SERVICES_API]: () => json({ error: 'not_found' }, 404) })
+    renderAt()
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'This photographer is unavailable' })).toBeInTheDocument()
   })
 
   it('shows placeholder cards while loading, hidden from assistive technology, then the real cards (2026-09-25)', async () => {
@@ -345,5 +357,33 @@ describe('from the list', () => {
     expect(router.state.location.pathname).toBe('/p/kigali-lens/portraits')
     expect(sent.map((request) => request.url)).toEqual([PROFILE_API, SERVICES_API, PROFILE_API, `${SERVICES_API}/portraits`])
     expect(screen.getByRole('radio', { name: /^Mini/ })).toBeInTheDocument()
+  })
+})
+
+describe('a photographer not taking bookings (Phase 5, R5.5)', () => {
+  it('shows the services under a notice, and no card offers to book', async () => {
+    stubApi({ [PROFILE_API]: () => json({ photographer: { ...PROFILE, takingBookings: false } }) })
+    renderAt()
+
+    await screen.findByRole('heading', { level: 1, name: 'Kigali Lens' })
+    const notice = document.querySelector('[data-not-taking-bookings]')
+    expect(notice).toHaveTextContent('Not taking bookings right now')
+    expect(notice).toHaveTextContent("This photographer isn't taking new bookings at the moment. You can still look through their services.")
+
+    // The services are still there, and still open; none says "Book".
+    expect(card('Portraits')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Portraits' })).toHaveAttribute('href', '/p/kigali-lens/portraits')
+    expect(within(card('Portraits')).getByText('See details')).toBeInTheDocument()
+    expect(main().queryByText('Book')).not.toBeInTheDocument()
+  })
+
+  it('shows no notice, and every card offers to book, while bookings are open', async () => {
+    stubApi()
+    renderAt()
+
+    await screen.findByRole('heading', { level: 1, name: 'Kigali Lens' })
+    expect(document.querySelector('[data-not-taking-bookings]')).toBeNull()
+    expect(within(card('Portraits')).getByText('Book')).toBeInTheDocument()
+    expect(main().queryByText('See details')).not.toBeInTheDocument()
   })
 })

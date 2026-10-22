@@ -5,7 +5,7 @@ import { findBookingByToken } from '../booking/access.js';
 import { bookingTotals } from '../booking/totals.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { createPrismaClient } from './client.js';
-import { STARTER_CATEGORIES, seedDatabase } from './seed.js';
+import { PLACEHOLDER_SUBSCRIPTION_PRICES, STARTER_CATEGORIES, seedDatabase } from './seed.js';
 import { DEMO_CLIENT_EMAIL, DEMO_PHOTOGRAPHERS, DEMO_PHOTOGRAPHER_PASSWORD, demoPhotographerEmail } from './seed-demo.js';
 
 const CREDENTIALS = { ADMIN_EMAIL: 'admin@example.com', ADMIN_PASSWORD: 'correct horse battery staple' };
@@ -43,6 +43,13 @@ describe('seedDatabase', () => {
     expect(users.map((user) => [user.email, user.role])).toEqual([[CREDENTIALS.ADMIN_EMAIL, 'platform_admin']]);
     await expect(prisma.photographer.count()).resolves.toBe(0);
     await expect(prisma.platformSetting.findUniqueOrThrow({ where: { id: 1 } })).resolves.toMatchObject({ holdMinutes: 30, trialDays: 30 });
+    // The subscription plan (Phase 5): the PLACEHOLDER prices, to be set before launch, and the R5.4 defaults.
+    await expect(prisma.platformSetting.findUniqueOrThrow({ where: { id: 1 } })).resolves.toMatchObject({
+      ...PLACEHOLDER_SUBSCRIPTION_PRICES,
+      subscriptionGraceDays: 7,
+      subscriptionReminderDays: [7, 3, 1],
+    });
+    expect(PLACEHOLDER_SUBSCRIPTION_PRICES).toEqual({ subscriptionMonthlyPriceRwf: 10_000, subscriptionYearlyPriceRwf: 100_000 });
 
     const categories = await prisma.category.findMany({ orderBy: { sortOrder: 'asc' } });
     expect(categories.map((category) => category.slug)).toEqual(['wedding', 'portrait', 'event', 'product', 'graduation', 'family', 'fashion', 'real-estate']);
@@ -69,6 +76,10 @@ describe('seedDatabase', () => {
 
     await expect(prisma.appUser.count()).resolves.toBe(1);
     await expect(prisma.platformSetting.count()).resolves.toBe(1);
+    // A reseed never overwrites prices a platform admin has set.
+    await prisma.platformSetting.update({ where: { id: 1 }, data: { subscriptionMonthlyPriceRwf: 15_000 } });
+    await seedDatabase(prisma, BASE_ENV);
+    await expect(prisma.platformSetting.findUniqueOrThrow({ where: { id: 1 } })).resolves.toMatchObject({ subscriptionMonthlyPriceRwf: 15_000 });
     await expect(prisma.category.count()).resolves.toBe(STARTER_CATEGORIES.length);
   });
 
@@ -121,7 +132,7 @@ describe('seedDatabase: demo data', () => {
 
     expect(summary.demo).toMatchObject({ photographersCreated: 3 });
     const photographers = await prisma.photographer.findMany({
-      include: { user: true, setting: true, workingHours: true, districts: true, categories: true },
+      include: { user: true, setting: true, workingHours: true, districts: true, categories: true, subscription: { include: { periods: true } } },
       orderBy: { handle: 'asc' },
     });
     expect(photographers.map((photographer) => photographer.handle)).toEqual(['hills-and-light', 'kigali-lens', 'umucyo-studio']);
@@ -135,6 +146,12 @@ describe('seedDatabase: demo data', () => {
       expect(photographer.workingHours.length).toBeGreaterThanOrEqual(5);
       expect(photographer.districts.length).toBeGreaterThan(0);
       expect(photographer.categories.length).toBeGreaterThan(0);
+      // Approved, so subscribed: trialing, one 30-day trial from the seed's run (R5.1, marketplace-data-model.md §7).
+      expect(photographer.subscription).toMatchObject({ status: 'trialing' });
+      expect(photographer.subscription?.periods).toHaveLength(1);
+      const trial = photographer.subscription?.periods[0];
+      expect(trial).toMatchObject({ kind: 'trial', priceRwf: 0, paymentId: null, endsAt: photographer.subscription?.currentPeriodEndsAt });
+      expect((trial?.endsAt.getTime() ?? 0) - (trial?.startsAt.getTime() ?? 0)).toBe(30 * 24 * 60 * 60_000);
     }
   });
 
@@ -213,6 +230,8 @@ describe('seedDatabase: demo data', () => {
       booking: { reference: first?.reference, created: false },
     });
     await expect(prisma.photographer.count()).resolves.toBe(3);
+    await expect(prisma.subscription.count()).resolves.toBe(3);
+    await expect(prisma.subscriptionPeriod.count()).resolves.toBe(3);
     await expect(prisma.appUser.count()).resolves.toBe(4);
     await expect(prisma.service.count()).resolves.toBe(6);
     await expect(prisma.booking.count()).resolves.toBe(1);

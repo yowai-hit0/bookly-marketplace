@@ -85,7 +85,7 @@ export async function createBooking(deps: CreateBookingDeps, request: BookingReq
   const { prisma, newReference = generateReference } = deps;
   const now = deps.now();
 
-  const basket = await resolveBasket(prisma, { packageId: request.packageId, addonIds: request.addonIds });
+  const basket = await resolveBasket(prisma, { packageId: request.packageId, addonIds: request.addonIds }, now);
   if (!basket.ok) return { status: 'invalid', fields: basket.fields };
   const { package: pkg, addons, settings, bookingFeeRate, quote } = basket;
   const { holdMinutes } = await getPlatformSettings(prisma);

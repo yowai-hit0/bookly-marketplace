@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
 import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, TEST_PLATFORM_SETTING, createPhotographer } from '../test/payment-fixtures.js';
 import {
   effectiveBookingFeeRate,
   findPublicPhotographer,
@@ -52,6 +52,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll(raw);
+  // The platform row: the listing reads its grace days (R5.5).
+  await prisma.platformSetting.create({ data: TEST_PLATFORM_SETTING });
   // Born with its settings row at the defaults: a 40% booking fee.
   ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
 });
@@ -563,8 +565,8 @@ describe('listPublicPhotographers', () => {
     await otherPhotographer({ handle: 'suspended-one', displayName: 'A Suspended One', status: 'suspended' });
 
     await expect(listPublicPhotographers(prisma)).resolves.toStrictEqual([
-      { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null },
-      { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg' },
+      { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null, takingBookings: true },
+      { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg', takingBookings: true },
     ]);
   });
 
@@ -601,6 +603,7 @@ describe('findPublicPhotographer', () => {
         whatsappPhone: '+250788000002',
         email: 'hello@kigalilens.example',
         coverImageUrl: 'https://images.example.com/kigali.jpg',
+        takingBookings: true,
         cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
       },
     });

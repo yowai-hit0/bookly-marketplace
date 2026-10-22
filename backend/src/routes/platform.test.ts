@@ -101,7 +101,14 @@ async function pendingPhotographer(): Promise<string> {
 }
 
 function photographerRow(id: string) {
-  return prisma.photographer.findUniqueOrThrow({ where: { id } });
+  return prisma.photographer.findUniqueOrThrow({ where: { id }, include: { subscription: true } });
+}
+
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
+/** Bookable at the test's clock, by the one rule (photographers/bookable.ts, R5.4). */
+function bookable(row: Awaited<ReturnType<typeof photographerRow>>): boolean {
+  return isBookable(row, row.subscription, clock);
 }
 
 function emails(template: 'photographer_approved' | 'photographer_suspended') {
@@ -254,8 +261,8 @@ describe('who the platform admits', () => {
   }
 
   it('covers every platform route the spec declares', async () => {
-    // Moderation (5) and Phase 4's payouts and refunds (8).
-    expect((await platformRoutes()).length).toBe(13);
+    // Moderation (5), Phase 4's payouts and refunds (8), and Phase 5's settings (2) and subscriptions (1).
+    expect((await platformRoutes()).length).toBe(16);
   });
 
   it.each<[string, () => Promise<string | null>, 'invalid_token' | undefined]>([
@@ -335,11 +342,74 @@ describe('POST /api/platform/photographers/:id/approve', () => {
     expect(res.body).toMatchObject({ photographer: { id, status: 'approved', approvedAt: START.toISOString(), approvedByUserId: admin.id } });
     const row = await photographerRow(id);
     expect(row).toMatchObject({ status: 'approved', approvedAt: START, approvedByUserId: admin.id });
-    expect(isBookable(row)).toBe(true);
+    expect(bookable(row)).toBe(true);
     const sent = await emails('photographer_approved');
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ recipient: PENDING_EMAIL, photographerId: id, bookingId: null, status: 'pending' });
-    expect(sent[0]?.payload).toEqual({ displayName: 'New in Town', handle: 'new-in-town' });
+    // The trial this approval started, in the email (R5.1).
+    expect(sent[0]?.payload).toEqual({ displayName: 'New in Town', handle: 'new-in-town', trialEndsAt: new Date(START.getTime() + 30 * DAY_MS).toISOString() });
+  });
+
+  it('starts the subscription and its 30-day trial at the approval, in the same change (R5.1)', async () => {
+    const id = await pendingPhotographer();
+    await expect(prisma.subscription.count({ where: { photographerId: id } })).resolves.toBe(0);
+
+    await approve(id);
+
+    const subscription = await prisma.subscription.findUniqueOrThrow({ where: { photographerId: id }, include: { periods: true } });
+    const trialEnd = new Date(START.getTime() + 30 * DAY_MS);
+    expect(subscription).toMatchObject({ status: 'trialing', currentPeriodEndsAt: trialEnd, createdAt: START });
+    expect(subscription.periods).toEqual([
+      expect.objectContaining({ kind: 'trial', planInterval: null, priceRwf: 0, startsAt: START, endsAt: trialEnd, paymentId: null, voidedAt: null }),
+    ]);
+    // Bookable from the approval until the trial's last instant, and not at it.
+    const row = await photographerRow(id);
+    clock = new Date(trialEnd.getTime() - 1);
+    expect(bookable(row)).toBe(true);
+    clock = trialEnd;
+    expect(bookable(row)).toBe(false);
+  });
+
+  it("uses the platform's trial days as they stand at the approval", async () => {
+    await prisma.platformSetting.update({ where: { id: 1 }, data: { trialDays: 14 } });
+    const id = await pendingPhotographer();
+
+    await approve(id);
+
+    await expect(prisma.subscription.findUniqueOrThrow({ where: { photographerId: id } })).resolves.toMatchObject({
+      currentPeriodEndsAt: new Date(START.getTime() + 14 * DAY_MS),
+    });
+  });
+
+  it('never grants a second trial: a photographer approved again keeps the subscription they have, and the email promises none', async () => {
+    const id = await pendingPhotographer();
+    await approve(id);
+    const first = await prisma.subscription.findUniqueOrThrow({ where: { photographerId: id }, include: { periods: true } });
+    // Back to pending by hand (no route does this), then approved again later.
+    await prisma.photographer.update({ where: { id }, data: { status: 'pending' } });
+    clock = new Date(START.getTime() + 40 * DAY_MS);
+    token = (await issueToken(SECRET, 'platform', admin, clock)).token;
+
+    expect((await approve(id)).status).toBe(200);
+
+    await expect(prisma.subscription.findUniqueOrThrow({ where: { photographerId: id }, include: { periods: true } })).resolves.toEqual(first);
+    await expect(prisma.subscriptionPeriod.count({ where: { subscriptionId: first.id, kind: 'trial' } })).resolves.toBe(1);
+    const sent = await emails('photographer_approved');
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.payload).toEqual({ displayName: 'New in Town', handle: 'new-in-town' });
+    // Its trial ran out long ago: approved, and still not bookable until it pays (R5.4).
+    expect(bookable(await photographerRow(id))).toBe(false);
+  });
+
+  it('keeps the subscription through a suspension and a reactivation: no new trial, the same clock', async () => {
+    const before = await prisma.subscription.findUniqueOrThrow({ where: { photographerId: world.photographerId }, include: { periods: true } });
+
+    await suspend(world.photographerId);
+    expect(bookable(await photographerRow(world.photographerId))).toBe(false);
+    await reactivate(world.photographerId);
+
+    await expect(prisma.subscription.findUniqueOrThrow({ where: { photographerId: world.photographerId }, include: { periods: true } })).resolves.toEqual(before);
+    expect(bookable(await photographerRow(world.photographerId))).toBe(true);
   });
 
   it('is idempotent: approving again changes nothing and sends nothing', async () => {
@@ -365,6 +435,9 @@ describe('POST /api/platform/photographers/:id/approve', () => {
     expect(results.map((res) => res.status)).toEqual([200, 200, 200, 200, 200]);
     await expect(emails('photographer_approved')).resolves.toHaveLength(1);
     await expect(photographerRow(id)).resolves.toMatchObject({ status: 'approved', approvedAt: START });
+    // One subscription, one trial (R5.1).
+    await expect(prisma.subscription.count({ where: { photographerId: id } })).resolves.toBe(1);
+    await expect(prisma.subscriptionPeriod.count({ where: { subscription: { photographerId: id } } })).resolves.toBe(1);
   });
 
   it('refuses to approve a suspended photographer with 409: they are reactivated instead', async () => {
@@ -376,6 +449,7 @@ describe('POST /api/platform/photographers/:id/approve', () => {
     await expectMatchesSpec(res, 'approvePhotographer', 409);
     expect(res.body).toMatchObject({ error: 'invalid_transition', photographer: { status: 'suspended' } });
     await expect(emails('photographer_approved')).resolves.toHaveLength(0);
+    await expect(prisma.subscriptionPeriod.count()).resolves.toBe(1);
   });
 
   it('answers 404 for an id that names nobody, and 400 for one that is not a uuid', async () => {
@@ -397,7 +471,7 @@ describe('POST /api/platform/photographers/:id/suspend', () => {
     await expectMatchesSpec(res, 'suspendPhotographer', 200);
     const row = await photographerRow(world.photographerId);
     expect(row).toMatchObject({ status: 'suspended', suspendedAt: START, suspensionReason: 'Clients reported shoots that never happened.' });
-    expect(isBookable(row)).toBe(false);
+    expect(bookable(row)).toBe(false);
     // Existing bookings carry on (decisions table).
     await expect(prisma.booking.findUniqueOrThrow({ where: { id: booking.id } })).resolves.toMatchObject({ status: 'confirmed' });
     const sent = await emails('photographer_suspended');
@@ -468,7 +542,7 @@ describe('POST /api/platform/photographers/:id/reactivate', () => {
     await expectMatchesSpec(res, 'reactivatePhotographer', 200);
     const row = await photographerRow(world.photographerId);
     expect(row).toMatchObject({ status: 'approved', suspendedAt: null, suspensionReason: null, approvedAt: new Date('2026-09-02T06:00:00Z') });
-    expect(isBookable(row)).toBe(true);
+    expect(bookable(row)).toBe(true);
   });
 
   it('returns a photographer suspended before approval to pending: reactivating approves nobody', async () => {

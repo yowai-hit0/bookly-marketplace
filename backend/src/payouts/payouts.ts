@@ -535,7 +535,10 @@ export async function listRefundsDue(prisma: PrismaClient): Promise<RefundDueVie
   });
   return payments.flatMap((payment) => {
     const refundKind = pendingRefundKind(payment);
-    if (refundKind === null) return [];
+    // A subscription payment has no booking, and is never refunded: every one
+    // that succeeds adds its period, and none is ever refund_due or overpaid
+    // (Phase 5 decision). Left out all the same, should one ever appear.
+    if (refundKind === null || payment.booking === null) return [];
     return [
       {
         paymentId: payment.id,

@@ -351,7 +351,8 @@
       "heading": "Your studio is approved",
       "intro": "Good news: your studio has been approved. Your profile is now listed in the directory, and clients can book your services.",
       "profileLabel": "Your public profile",
-      "button": "Open your studio"
+      "button": "Open your studio",
+      "trial": "Your free trial has started: until {{date}}, clients can book you at no cost to you. Before it ends, choose a monthly or yearly plan in your studio to keep taking bookings."
     },
     "photographerSuspended": {
       "subject": "Your studio has been suspended",
@@ -375,6 +376,51 @@
       "linesLabel": "Earnings lines",
       "feeNote": "No commission is taken. The transfer fee is deducted by the provider, so the amount that arrives may be slightly less.",
       "button": "See your earnings"
+    },
+    "subscriptionReminder": {
+      "endingSubject_one": "Your subscription ends in {{count}} day",
+      "endingSubject_other": "Your subscription ends in {{count}} days",
+      "trialEndingSubject_one": "Your free trial ends in {{count}} day",
+      "trialEndingSubject_other": "Your free trial ends in {{count}} days",
+      "endingPreheader": "Renew before {{date}} to keep taking bookings.",
+      "endingHeading": "Your subscription is ending soon",
+      "trialEndingHeading": "Your free trial is ending soon",
+      "endingIntro": "Your current period ends on {{date}}. Pay for a month or a year before then, and clients can keep booking you without a break.",
+      "periodEndsLabel": "Period ends",
+      "earlyNote": "Paying early loses nothing: the time you pay for starts when your current period ends.",
+      "pastDueSubject": "Your subscription has ended: renew to take bookings again",
+      "pastDuePreheader": "Your profile stays listed until {{date}}.",
+      "pastDueHeading": "Your subscription has ended",
+      "pastDueIntro": "Your subscription period ended on {{endedOn}}, so clients cannot make new bookings with you. Your profile stays in the directory, marked as not taking bookings, until {{graceEndsOn}}. After that it is hidden.",
+      "periodEndedLabel": "Period ended",
+      "graceEndsLabel": "Profile hidden from",
+      "existingBookings": "Bookings you already have are not affected: they carry on as planned, and clients can still pay what they owe.",
+      "button": "Renew your subscription"
+    },
+    "subscriptionReceipt": {
+      "subject": "Subscription receipt: {{amount}}",
+      "preheader": "Your studio is covered until {{date}}.",
+      "heading": "Thank you for your payment",
+      "intro": "We received your payment of {{amount}} for the {{plan}} plan. Your studio is covered until {{date}}.",
+      "planMonthly": "monthly",
+      "planYearly": "yearly",
+      "planLabel": "Plan",
+      "amountLabel": "Amount",
+      "paidAtLabel": "Paid on",
+      "referenceLabel": "Payment reference",
+      "periodLabel": "Period",
+      "periodValue": "{{start}} to {{end}}",
+      "stackNote": "Each payment adds its time after the time you have already paid for, so nothing is lost by paying early.",
+      "button": "See your subscription"
+    },
+    "subscriptionExpired": {
+      "subject": "Your profile is no longer listed",
+      "preheader": "Renew your subscription to be listed again.",
+      "heading": "Your subscription has expired",
+      "intro": "Your subscription period ended on {{endedOn}} and the grace period is over. Your profile is no longer listed in the directory, and clients cannot make new bookings with you.",
+      "existingBookings": "Bookings you already have are not affected: they carry on as planned, and clients can still pay what they owe.",
+      "renewNote": "You can renew at any time from your studio. Your profile is listed again as soon as the payment goes through.",
+      "button": "Renew your subscription"
     }
   }
 }

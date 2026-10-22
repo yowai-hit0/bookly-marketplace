@@ -8,8 +8,9 @@ import { PlatformLayout } from './PlatformLayout'
 
 /**
  * The platform console's shell (Phase 2 brief decision 7; Phase 4 adds
- * Payouts and Refunds): the studio console's layout with the platform's own
- * sections, rendered here around stand-in pages.
+ * Payouts and Refunds; Phase 5 Subscriptions and Settings): the studio
+ * console's layout with the platform's own sections, rendered here around
+ * stand-in pages.
  */
 
 const SESSION = { token: 'platform.jwt', expiresAt: '2099-01-01T00:00:00.000Z' }
@@ -33,6 +34,8 @@ function renderShell(path = '/platform/photographers') {
           { path: 'payouts', element: page('Payouts') },
           { path: 'payouts/:id', element: page('One payout') },
           { path: 'refunds', element: page('Refunds') },
+          { path: 'subscriptions', element: page('Subscriptions') },
+          { path: 'settings', element: page('Settings') },
         ],
       },
       { path: '/platform/login', element: page('Platform sign in') },
@@ -59,11 +62,17 @@ afterEach(() => {
 })
 
 describe('the platform shell', () => {
-  it('lists Photographers, Payouts and Refunds, in that order', () => {
+  it('lists Photographers, Subscriptions, Payouts, Refunds and Settings, in that order', () => {
     renderShell()
 
-    expect(navLinks().map((link) => link.textContent)).toEqual(['Photographers', 'Payouts', 'Refunds'])
-    expect(navLinks().map((link) => link.getAttribute('href'))).toEqual(['/platform/photographers', '/platform/payouts', '/platform/refunds'])
+    expect(navLinks().map((link) => link.textContent)).toEqual(['Photographers', 'Subscriptions', 'Payouts', 'Refunds', 'Settings'])
+    expect(navLinks().map((link) => link.getAttribute('href'))).toEqual([
+      '/platform/photographers',
+      '/platform/subscriptions',
+      '/platform/payouts',
+      '/platform/refunds',
+      '/platform/settings',
+    ])
   })
 
   it.each([
@@ -71,6 +80,8 @@ describe('the platform shell', () => {
     ['/platform/payouts', 'Payouts'],
     ['/platform/payouts/po1', 'Payouts'],
     ['/platform/refunds', 'Refunds'],
+    ['/platform/subscriptions', 'Subscriptions'],
+    ['/platform/settings', 'Settings'],
   ])('on %s marks %s current with a weight change, and nothing else', (path, current) => {
     renderShell(path)
 

@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
 import { findAvailability } from '../availability/query.js';
-import { BOOKABLE_PACKAGE } from '../catalogue/public.js';
+import { bookablePackageWhere } from '../catalogue/public.js';
 import { kigaliDate, parseOrReject } from './validation.js';
 
 /**
@@ -46,8 +46,11 @@ export function availabilityRouter(prisma: PrismaClient, now: () => Date): Route
     const query = parseOrReject(availabilityQuery, req.query, res);
     if (query === undefined) return;
 
+    // Read at the request's clock: a photographer whose period has ended is not
+    // offered, job or no job (R5.4).
+    const at = now();
     const pkg = await prisma.package.findFirst({
-      where: { id: query.packageId, ...BOOKABLE_PACKAGE },
+      where: { id: query.packageId, ...bookablePackageWhere(at) },
       select: { durationMinutes: true, photographerId: true },
     });
     if (pkg === null) {
@@ -60,7 +63,7 @@ export function availabilityRouter(prisma: PrismaClient, now: () => Date): Route
       from: `${query.month}-01`,
       to: `${query.month}-${lastDayOfMonth(query.month)}`,
       packageDurationMinutes: pkg.durationMinutes,
-      now: now(),
+      now: at,
     });
     res.json({ days });
   });

@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { formatMoney } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { container, eyebrow, lead, pageTitle, pageY } from '@/pages/client/classes'
-import { NotFound } from '@/pages/NotFound'
+import { NotTakingBookingsNotice, PhotographerUnavailable } from '@/pages/photographers/notices'
 
 /**
  * One photographer's services (plan.md Task 11, spec §3.1 step 1; marketplace
@@ -25,8 +25,12 @@ import { NotFound } from '@/pages/NotFound'
  * nothing is filtered or hidden here (spec §2.2: no permission is enforced by
  * hiding UI alone).
  *
- * An unknown handle, and a photographer who cannot be booked, are the
- * not-found page: the API answers 404 for both, and says nothing more.
+ * An unknown handle, and a photographer who is not listed, are one page
+ * saying the photographer is unavailable (marketplace spec R5.5): the API
+ * answers 404 for both, and says nothing more. A photographer whose
+ * subscription is past due is listed with `takingBookings: false`: the page
+ * shows the services with a "not taking bookings" notice, and no card offers
+ * to book.
  */
 
 type Loaded = { handle: string } & (
@@ -68,7 +72,7 @@ export function ServiceList() {
   // loading, not the previous one's services.
   const current = loaded?.handle === handle ? loaded : null
 
-  if (current?.status === 'missing') return <NotFound />
+  if (current?.status === 'missing') return <PhotographerUnavailable />
 
   return (
     <main className={cn(container, pageY, 'flex flex-col gap-8')}>
@@ -99,6 +103,8 @@ export function ServiceList() {
         </div>
       )}
 
+      {current?.status === 'ok' && current.photographer.takingBookings === false && <NotTakingBookingsNotice />}
+
       {current?.status === 'failed' && (
         <Callout
           variant="console"
@@ -124,7 +130,12 @@ export function ServiceList() {
           <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {current.services.map((service, index) => (
               <li key={service.id}>
-                <ServiceCard handle={handle} service={service} priority={index === 0} />
+                <ServiceCard
+                  handle={handle}
+                  service={service}
+                  priority={index === 0}
+                  takingBookings={current.photographer.takingBookings !== false}
+                />
               </li>
             ))}
           </ul>
@@ -143,12 +154,15 @@ export function ServiceCard({
   service,
   priority,
   headingLevel = 2,
+  takingBookings = true,
 }: {
   /** The photographer the service belongs to: its page lives under their handle. */
   handle: string
   service: PublicService
   priority: boolean
   headingLevel?: 2 | 3
+  /** False while the photographer is not taking bookings: the card offers the details, not "Book". */
+  takingBookings?: boolean
 }) {
   const { t } = useTranslation()
   const lowestPrice = service.packages.length === 0 ? null : Math.min(...service.packages.map((pkg) => pkg.priceRwf))
@@ -195,7 +209,7 @@ export function ServiceCard({
             <span />
           )}
           <span aria-hidden="true" className="text-console-link flex items-center gap-1.5 text-[0.9375rem] font-medium">
-            {t('services:book')}
+            {takingBookings ? t('services:book') : t('services:seeDetails')}
             <ArrowRight className="size-4 motion-safe:transition-transform motion-safe:duration-250 motion-safe:group-has-[a:hover]/card:translate-x-1.25 motion-safe:group-has-[a:focus-visible]/card:translate-x-1.25" />
           </span>
         </div>

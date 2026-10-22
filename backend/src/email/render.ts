@@ -22,6 +22,9 @@ import { photographerSuspended } from './templates/photographer-suspended.js';
 import { platformAlert } from './templates/platform-alert.js';
 import { reschedule } from './templates/reschedule.js';
 import { sessionFeeRequest } from './templates/session-fee-request.js';
+import { subscriptionExpired } from './templates/subscription-expired.js';
+import { subscriptionReceipt } from './templates/subscription-receipt.js';
+import { subscriptionReminder } from './templates/subscription-reminder.js';
 import { type AnyEmailTemplate, EmailPayloadError } from './templates/shared.js';
 
 /**
@@ -30,8 +33,8 @@ import { type AnyEmailTemplate, EmailPayloadError } from './templates/shared.js'
  * payload; none composes copy.
  *
  * One entry per value of the `outbox_template_allowed` CHECK but the names
- * reserved for later phases (`RESERVED_EMAIL_TEMPLATES`), each in its own file
- * under `templates/`. The record type makes a missing template a compile error;
+ * reserved for later phases (`RESERVED_EMAIL_TEMPLATES`, empty since Phase 5
+ * made the subscription emails sendable), each in its own file under `templates/`. The record type makes a missing template a compile error;
  * a test holds the CHECK and the files to each other. A reserved name renders
  * as an unknown template: nothing may enqueue one before it has a file here.
  */
@@ -58,6 +61,9 @@ export const TEMPLATES: Record<SendableEmailTemplate, AnyEmailTemplate> = {
   photographer_approved: photographerApproved,
   photographer_suspended: photographerSuspended,
   payout_sent: payoutSent,
+  subscription_reminder: subscriptionReminder,
+  subscription_receipt: subscriptionReceipt,
+  subscription_expired: subscriptionExpired,
 };
 
 export type RenderOptions = {

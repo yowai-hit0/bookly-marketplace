@@ -30,12 +30,16 @@ beforeEach(async () => {
  * The 14 single-photographer tables, less `admin_user` and `setting`, plus the
  * nine Phase 1 adds (marketplace-spec.md brief decision 1), plus Phase 2's
  * `oauth_flow` (decision 6), plus Phase 4's `payout_method`, `payout` and
- * `payout_item`. Subscriptions take it to 27 in Phase 5.
+ * `payout_item`, plus Phase 5's `subscription` and `subscription_period`: 27,
+ * the marketplace's full count (marketplace-data-model.md, amendments).
  */
-const APPLICATION_TABLE_COUNT = 25;
+const APPLICATION_TABLE_COUNT = 27;
 
-/** Tables a later phase adds; nothing before Phase 5 may. */
-const LATER_PHASE_TABLES = ['subscription', 'subscription_period'];
+/** Phase 5's tables (marketplace-data-model.md §3.7). */
+const SUBSCRIPTION_TABLES = ['subscription', 'subscription_period'];
+
+/** The platform settings row, with the prices that have no column default (§3.2). */
+const PLATFORM_SETTING_INSERT = `INSERT INTO platform_setting (id, subscription_monthly_price_rwf, subscription_yearly_price_rwf) VALUES ($1, 10000, 100000)`;
 
 type Ids = { photographerId: string; serviceId: string; packageId: string; clientId: string };
 
@@ -142,7 +146,7 @@ const SLOT = { startsAt: NINE, endsAt: TEN, bufferEndsAt: TEN_THIRTY };
 // --- Shape ------------------------------------------------------------------
 
 describe('the schema', () => {
-  it('has 25 application tables (Phase 1 of the marketplace, Phase 2 oauth_flow, Phase 4 payouts) plus Prisma migration history, and no view', async () => {
+  it('has 27 application tables (Phase 1 of the marketplace, Phase 2 oauth_flow, Phase 4 payouts, Phase 5 subscriptions) plus Prisma migration history, and no view', async () => {
     const tables = await db.query<{ tablename: string }>(
       `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`,
     );
@@ -158,12 +162,14 @@ describe('the schema', () => {
     expect(views.rowCount).toBe(0);
   });
 
-  it('leaves subscriptions to Phase 5, and admin_user and setting behind', async () => {
-    const tables = await db.query<{ tablename: string }>(
-      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1)`,
-      [[...LATER_PHASE_TABLES, 'admin_user', 'setting']],
+  it('has the Phase 5 subscription tables, and leaves admin_user and setting behind', async () => {
+    const present = await db.query<{ tablename: string }>(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1) ORDER BY tablename`,
+      [SUBSCRIPTION_TABLES],
     );
-    expect(tables.rows).toEqual([]);
+    expect(present.rows.map((row) => row.tablename)).toEqual(SUBSCRIPTION_TABLES);
+    const retired = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1)`, [['admin_user', 'setting']]);
+    expect(retired.rows).toEqual([]);
   });
 
   it('has btree_gist, which the per-photographer exclusion needs', async () => {
@@ -510,6 +516,78 @@ describe('payment_provider_ref_unique', () => {
 });
 
 describe('payment CHECKs', () => {
+  /** A subscription for the world's photographer, as approval leaves it. */
+  async function insertSubscription(photographerId: string): Promise<string> {
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO subscription (photographer_id, current_period_ends_at) VALUES ($1, now() + interval '30 days') RETURNING id`,
+      [photographerId],
+    );
+    return firstRow(result).id;
+  }
+
+  const insertPayment = (values: { booking_id: string | null; subscription_id: string | null; kind: string; plan_interval: string | null; provider?: string }) =>
+    db.query(
+      `INSERT INTO payment (booking_id, subscription_id, kind, plan_interval, provider, amount_rwf) VALUES ($1, $2, $3, $4, $5, 10000) RETURNING id`,
+      [values.booking_id, values.subscription_id, values.kind, values.plan_interval, values.provider ?? 'mtn_momo_direct'],
+    );
+
+  it('takes a subscription payment with its subscription and plan, and no booking (§2.11)', async () => {
+    const ids = await insertWorld();
+    const subscriptionId = await insertSubscription(ids.photographerId);
+    for (const plan of ['monthly', 'yearly']) {
+      expect(await sqlstateOf(db, () => insertPayment({ booking_id: null, subscription_id: subscriptionId, kind: 'subscription', plan_interval: plan }))).toBeUndefined();
+    }
+  });
+
+  it('holds a payment to exactly one subject: a booking or a subscription, never both, never neither (payment_subject_exactly_one)', async () => {
+    const ids = await insertWorld();
+    const bookingId = await insertBooking(ids, 'BKY-2610-AAAAA', SLOT);
+    const subscriptionId = await insertSubscription(ids.photographerId);
+
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: null, subscription_id: null, kind: 'booking_fee', plan_interval: null }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: null, subscription_id: null, kind: 'subscription', plan_interval: 'monthly' }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: bookingId, subscription_id: subscriptionId, kind: 'subscription', plan_interval: 'monthly' }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: bookingId, subscription_id: subscriptionId, kind: 'booking_fee', plan_interval: null }))).toBe('23514');
+  });
+
+  it('matches the subject to the kind: a fee has a booking, a subscription payment a subscription (payment_subject_matches_kind)', async () => {
+    const ids = await insertWorld();
+    const bookingId = await insertBooking(ids, 'BKY-2610-AAAAA', SLOT);
+    const subscriptionId = await insertSubscription(ids.photographerId);
+
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: bookingId, subscription_id: null, kind: 'subscription', plan_interval: 'monthly' }))).toBe('23514');
+    for (const kind of ['booking_fee', 'session_fee']) {
+      expect(await sqlstateOf(db, () => insertPayment({ booking_id: null, subscription_id: subscriptionId, kind, plan_interval: null })), kind).toBe('23514');
+      expect(await sqlstateOf(db, () => insertPayment({ booking_id: bookingId, subscription_id: null, kind, plan_interval: null })), kind).toBeUndefined();
+    }
+  });
+
+  it('freezes a plan on a subscription payment and only there, from the two intervals (payment_plan_interval_*)', async () => {
+    const ids = await insertWorld();
+    const bookingId = await insertBooking(ids, 'BKY-2610-AAAAA', SLOT);
+    const subscriptionId = await insertSubscription(ids.photographerId);
+
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: null, subscription_id: subscriptionId, kind: 'subscription', plan_interval: null }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: null, subscription_id: subscriptionId, kind: 'subscription', plan_interval: 'weekly' }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: bookingId, subscription_id: null, kind: 'session_fee', plan_interval: 'monthly' }))).toBe('23514');
+  });
+
+  it('keeps the kind vocabulary closed, and cash a session fee only: never a subscription', async () => {
+    const ids = await insertWorld();
+    const bookingId = await insertBooking(ids, 'BKY-2610-AAAAA', SLOT);
+    const subscriptionId = await insertSubscription(ids.photographerId);
+
+    expect(await sqlstateOf(db, () => insertPayment({ booking_id: bookingId, subscription_id: null, kind: 'tip', plan_interval: null }))).toBe('23514');
+    expect(
+      await sqlstateOf(db, () => insertPayment({ booking_id: null, subscription_id: subscriptionId, kind: 'subscription', plan_interval: 'monthly', provider: 'cash' })),
+    ).toBe('23514');
+  });
+
+  it('indexes a subscription payment by (subscription_id, status) for the one-in-progress check', async () => {
+    const result = await db.query<{ indexdef: string }>(`SELECT indexdef FROM pg_indexes WHERE indexname = 'payment_subscription_id_status_idx'`);
+    expect(firstRow(result).indexdef).toMatch(/\(subscription_id, status\)/);
+  });
+
   it('takes cash as a session fee only (marketplace-data-model.md §2.11)', async () => {
     const ids = await insertWorld();
     const bookingId = await insertBooking(ids, 'BKY-2610-AAAAA', SLOT);
@@ -864,22 +942,208 @@ describe('the columns erasure nulls', () => {
   });
 });
 
+// --- Subscriptions (Phase 5; marketplace-data-model.md §3.7, §3.11, §7) ----------
+
+describe('subscriptions', () => {
+  type SubscriptionWorld = Ids & { subscriptionId: string };
+
+  async function subscriptionWorld(handle = 'studio-a'): Promise<SubscriptionWorld> {
+    const ids = await insertWorld(handle);
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO subscription (photographer_id, current_period_ends_at) VALUES ($1, '2026-11-01T00:00:00Z') RETURNING id`,
+      [ids.photographerId],
+    );
+    return { ...ids, subscriptionId: firstRow(result).id };
+  }
+
+  async function subscriptionPayment(w: SubscriptionWorld, plan = 'monthly'): Promise<string> {
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO payment (subscription_id, kind, plan_interval, provider, amount_rwf, status) VALUES ($1, 'subscription', $2, 'mtn_momo_direct', 10000, 'succeeded') RETURNING id`,
+      [w.subscriptionId, plan],
+    );
+    return firstRow(result).id;
+  }
+
+  type PeriodValues = { kind?: string; plan_interval?: string | null; price_rwf?: number; starts_at: string; ends_at: string; payment_id?: string | null; voided_at?: string | null };
+
+  const insertPeriod = (w: SubscriptionWorld, v: PeriodValues) =>
+    db.query(
+      `INSERT INTO subscription_period (subscription_id, kind, plan_interval, price_rwf, starts_at, ends_at, payment_id, voided_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [w.subscriptionId, v.kind ?? 'trial', v.plan_interval ?? null, v.price_rwf ?? 0, v.starts_at, v.ends_at, v.payment_id ?? null, v.voided_at ?? null],
+    );
+
+  const OCT = { starts_at: '2026-10-01T00:00:00Z', ends_at: '2026-10-31T00:00:00Z' };
+  const NOV = { starts_at: '2026-10-31T00:00:00Z', ends_at: '2026-11-30T00:00:00Z' };
+
+  it('has the overlap exclusion, the one-trial unique and the indexes, by name and definition', async () => {
+    const exclusion = await db.query<{ def: string }>(
+      `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'subscription_period_no_overlap' AND contype = 'x'`,
+    );
+    expect(firstRow(exclusion).def).toMatch(/EXCLUDE USING gist \(subscription_id WITH =, tstzrange\(starts_at, ends_at, '\[\)'::text\) WITH &&\) WHERE \(\(voided_at IS NULL\)\)/);
+
+    const indexes = await db.query<{ indexname: string; indexdef: string }>(`SELECT indexname, indexdef FROM pg_indexes WHERE indexname = ANY($1)`, [
+      [
+        'subscription_period_one_trial',
+        'subscription_period_payment_id_key',
+        'subscription_photographer_id_key',
+        'subscription_status_current_period_ends_at_idx',
+        'subscription_period_subscription_id_ends_at_idx',
+      ],
+    ]);
+    const defs = Object.fromEntries(indexes.rows.map((row) => [row.indexname, row.indexdef]));
+    expect(defs.subscription_period_one_trial).toMatch(/UNIQUE.*\(subscription_id\) WHERE \(kind = 'trial'::text\)/);
+    expect(defs.subscription_period_payment_id_key).toMatch(/UNIQUE.*\(payment_id\)/);
+    expect(defs.subscription_photographer_id_key).toMatch(/UNIQUE.*\(photographer_id\)/);
+    expect(defs.subscription_status_current_period_ends_at_idx).toMatch(/\(status, current_period_ends_at\)/);
+    expect(defs.subscription_period_subscription_id_ends_at_idx).toMatch(/\(subscription_id, ends_at\)/);
+  });
+
+  it('gives a photographer one subscription, born trialing', async () => {
+    const w = await subscriptionWorld();
+    await expect(db.query(`SELECT status FROM subscription WHERE id = $1`, [w.subscriptionId]).then(firstRow)).resolves.toEqual({ status: 'trialing' });
+    expect(
+      await sqlstateOf(db, () => db.query(`INSERT INTO subscription (photographer_id, current_period_ends_at) VALUES ($1, now())`, [w.photographerId])),
+    ).toBe('23505');
+  });
+
+  it('holds the status to its vocabulary', async () => {
+    const w = await subscriptionWorld();
+    for (const status of ['trialing', 'active', 'past_due', 'expired']) {
+      expect(await sqlstateOf(db, () => db.query(`UPDATE subscription SET status = $1 WHERE id = $2`, [status, w.subscriptionId])), status).toBeUndefined();
+    }
+    expect(await sqlstateOf(db, () => db.query(`UPDATE subscription SET status = 'cancelled' WHERE id = $1`, [w.subscriptionId]))).toBe('23514');
+  });
+
+  it('refuses two periods of one subscription that overlap, and allows them end to start (23P01)', async () => {
+    const w = await subscriptionWorld();
+    await insertPeriod(w, OCT);
+    const paymentId = await subscriptionPayment(w);
+
+    expect(
+      await sqlstateOf(db, () =>
+        insertPeriod(w, { kind: 'paid', plan_interval: 'monthly', price_rwf: 10000, payment_id: paymentId, starts_at: '2026-10-30T00:00:00Z', ends_at: '2026-11-30T00:00:00Z' }),
+      ),
+    ).toBe('23P01');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { kind: 'paid', plan_interval: 'monthly', price_rwf: 10000, payment_id: paymentId, ...NOV }))).toBeUndefined();
+  });
+
+  it('lets two subscriptions cover the same time: the exclusion is per subscription', async () => {
+    const a = await subscriptionWorld('studio-a');
+    const b = await db.query<{ id: string }>(
+      `INSERT INTO subscription (photographer_id, current_period_ends_at) VALUES ($1, now()) RETURNING id`,
+      [await insertPhotographer('studio-b')],
+    );
+    await insertPeriod(a, OCT);
+    expect(await sqlstateOf(db, () => insertPeriod({ ...a, subscriptionId: firstRow(b).id }, OCT))).toBeUndefined();
+  });
+
+  it('frees the range of a voided period', async () => {
+    const w = await subscriptionWorld();
+    const paymentId = await subscriptionPayment(w);
+    await insertPeriod(w, { kind: 'paid', plan_interval: 'monthly', price_rwf: 10000, payment_id: paymentId, voided_at: '2026-10-02T00:00:00Z', ...OCT });
+    expect(await sqlstateOf(db, () => insertPeriod(w, OCT))).toBeUndefined();
+  });
+
+  it('allows one trial per subscription, even one that does not overlap (subscription_period_one_trial)', async () => {
+    const w = await subscriptionWorld();
+    await insertPeriod(w, OCT);
+    expect(await sqlstateOf(db, () => insertPeriod(w, NOV))).toBe('23505');
+  });
+
+  it('holds a period to its shape: a free trial with no plan or payment, a paid one with both and a price (subscription_period_shape)', async () => {
+    const w = await subscriptionWorld();
+    const paymentId = await subscriptionPayment(w);
+    const paid = { kind: 'paid', plan_interval: 'monthly', price_rwf: 10000, payment_id: paymentId, ...NOV };
+
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...OCT, price_rwf: 5000 }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...OCT, plan_interval: 'monthly' }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...OCT, payment_id: paymentId }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...paid, payment_id: null }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...paid, plan_interval: null }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...paid, price_rwf: 0 }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...paid, plan_interval: 'weekly' }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { ...paid, kind: 'bonus' }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, paid))).toBeUndefined();
+  });
+
+  it('refuses a period that ends at or before it starts (subscription_period_range_valid)', async () => {
+    const w = await subscriptionWorld();
+    expect(await sqlstateOf(db, () => insertPeriod(w, { starts_at: OCT.starts_at, ends_at: OCT.starts_at }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPeriod(w, { starts_at: OCT.ends_at, ends_at: OCT.starts_at }))).toBe('23514');
+  });
+
+  it('lets one payment buy one period only (unique payment_id)', async () => {
+    const w = await subscriptionWorld();
+    const paymentId = await subscriptionPayment(w);
+    await insertPeriod(w, { kind: 'paid', plan_interval: 'monthly', price_rwf: 10000, payment_id: paymentId, ...OCT });
+    expect(await sqlstateOf(db, () => insertPeriod(w, { kind: 'paid', plan_interval: 'monthly', price_rwf: 10000, payment_id: paymentId, ...NOV }))).toBe('23505');
+  });
+
+  it('restricts deleting a photographer, a subscription or a payment that subscription rows name', async () => {
+    const w = await subscriptionWorld();
+    const paymentId = await subscriptionPayment(w);
+    await insertPeriod(w, { kind: 'paid', plan_interval: 'monthly', price_rwf: 10000, payment_id: paymentId, ...OCT });
+
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM payment WHERE id = $1', [paymentId]))).toBe('23503');
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM subscription WHERE id = $1', [w.subscriptionId]))).toBe('23503');
+    for (const table of ['package', 'service']) await db.query(`DELETE FROM ${table}`);
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM photographer WHERE id = $1', [w.photographerId]))).toBe('23503');
+  });
+});
+
 // --- Configuration -------------------------------------------------------------
 
 describe('settings', () => {
   it('allows exactly one platform_setting row', async () => {
-    await db.query(`INSERT INTO platform_setting (id) VALUES (1)`);
-    expect(
-      await sqlstateOf(db, () => db.query(`INSERT INTO platform_setting (id) VALUES (2)`)),
-    ).toBe('23514');
+    await db.query(PLATFORM_SETTING_INSERT, [1]);
+    expect(await sqlstateOf(db, () => db.query(PLATFORM_SETTING_INSERT, [2]))).toBe('23514');
   });
 
   it('defaults the platform hold to 30 minutes and the trial to 30 days, and refuses a zero hold', async () => {
-    const row = await db.query<{ hold_minutes: number; trial_days: number }>(`INSERT INTO platform_setting (id) VALUES (1) RETURNING hold_minutes, trial_days`);
+    const row = await db.query<{ hold_minutes: number; trial_days: number }>(`${PLATFORM_SETTING_INSERT} RETURNING hold_minutes, trial_days`, [1]);
     expect(firstRow(row)).toEqual({ hold_minutes: 30, trial_days: 30 });
     expect(await sqlstateOf(db, () => db.query(`UPDATE platform_setting SET hold_minutes = 0`))).toBe('23514');
     expect(await sqlstateOf(db, () => db.query(`UPDATE platform_setting SET trial_days = -1`))).toBe('23514');
   });
+
+  it('refuses a trial of no days: a trial is a period, and a period has a length (Phase 5)', async () => {
+    await db.query(PLATFORM_SETTING_INSERT, [1]);
+    expect(await sqlstateOf(db, () => db.query(`UPDATE platform_setting SET trial_days = 0`))).toBe('23514');
+    expect(await sqlstateOf(db, () => db.query(`UPDATE platform_setting SET trial_days = 1`))).toBeUndefined();
+  });
+
+  it('gives the prices no default: a row without them is refused (§3.2)', async () => {
+    expect(await sqlstateOf(db, () => db.query(`INSERT INTO platform_setting (id) VALUES (1)`))).toBe('23502');
+    expect(await sqlstateOf(db, () => db.query(`INSERT INTO platform_setting (id, subscription_monthly_price_rwf) VALUES (1, 10000)`))).toBe('23502');
+  });
+
+  it('defaults the grace to 7 days and the reminders to 7, 3 and 1 days (R5.4)', async () => {
+    const row = await db.query(`${PLATFORM_SETTING_INSERT} RETURNING subscription_grace_days, subscription_reminder_days`, [1]);
+    expect(firstRow(row)).toEqual({ subscription_grace_days: 7, subscription_reminder_days: [7, 3, 1] });
+  });
+
+  it.each([
+    ['subscription_monthly_price_rwf = 0'],
+    ['subscription_yearly_price_rwf = 0'],
+    ['subscription_monthly_price_rwf = -1'],
+    ['subscription_grace_days = -1'],
+    ['subscription_reminder_days = NULL'],
+    ["subscription_reminder_days = '{7,0}'"],
+    ["subscription_reminder_days = '{-1}'"],
+    ["subscription_reminder_days = '{7,NULL,1}'"],
+    ["subscription_reminder_days = '{1,2,3,4,5,6,7,8,9,10,11}'"],
+  ])('refuses platform_setting SET %s', async (assignment) => {
+    await db.query(PLATFORM_SETTING_INSERT, [1]);
+    expect(await sqlstateOf(db, () => db.query(`UPDATE platform_setting SET ${assignment}`))).toBe('23514');
+  });
+
+  it.each([["subscription_reminder_days = '{}'"], ["subscription_reminder_days = '{1,2,3,4,5,6,7,8,9,10}'"], ['subscription_grace_days = 0']])(
+    'accepts platform_setting SET %s',
+    async (assignment) => {
+      await db.query(PLATFORM_SETTING_INSERT, [1]);
+      expect(await sqlstateOf(db, () => db.query(`UPDATE platform_setting SET ${assignment}`))).toBeUndefined();
+    },
+  );
 
   it('gives a photographer the single-photographer defaults and the R1.8 cancellation policy', async () => {
     const photographerId = await insertPhotographer();

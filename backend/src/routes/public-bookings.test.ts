@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, TEST_PLATFORM_SETTING, createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * `POST /api/bookings` over HTTP, against real PostgreSQL (plan.md Task 13;
@@ -61,7 +61,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await truncateAll(raw);
   // The platform's 30-minute hold, and a photographer at the defaults: 0.400 / 120 / 30 / 90.
-  await prisma.platformSetting.create({ data: { id: 1 } });
+  await prisma.platformSetting.create({ data: TEST_PLATFORM_SETTING });
   ({ photographerId } = await createPhotographer(prisma, { email: PHOTOGRAPHER_EMAIL, handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens' }));
   await weekdayHours(photographerId);
   catalogue = await seedCatalogue(photographerId);

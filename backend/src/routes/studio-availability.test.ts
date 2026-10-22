@@ -9,7 +9,7 @@ import { issueToken } from '../auth/token.js';
 import { findAvailability } from '../availability/query.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { createPhotographer } from '../test/payment-fixtures.js';
+import { TEST_PLATFORM_SETTING, createPhotographer } from '../test/payment-fixtures.js';
 
 /**
  * `/api/studio/working-hours` and `/api/studio/blocks` over HTTP, against real
@@ -91,7 +91,7 @@ beforeEach(async () => {
   await truncateAll(raw);
   // findAvailability reads the photographer's settings row, which
   // createPhotographer makes at the schema defaults: 0.400 / 120 / 30 / 90.
-  await prisma.platformSetting.create({ data: { id: 1 } });
+  await prisma.platformSetting.create({ data: TEST_PLATFORM_SETTING });
   const created = await createPhotographer(prisma, {
     email: 'photographer@bookly.example',
     handle: 'kigali-lens',

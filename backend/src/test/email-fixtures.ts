@@ -282,6 +282,45 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     payload: { displayName: 'Kigali Lens', handle: 'kigali-lens' },
   },
   {
+    name: 'photographer_approved with a trial',
+    template: 'photographer_approved',
+    /** The trial approval starts (R5.1). format.json `formatDate`-style: Saturday, 31 October 2026 in Kigali. */
+    payload: { displayName: 'Kigali Lens', handle: 'kigali-lens', trialEndsAt: '2026-10-31T07:00:00.000Z' },
+  },
+  {
+    name: 'subscription_reminder ending',
+    template: 'subscription_reminder',
+    payload: { variant: 'ending', displayName: 'Kigali Lens', periodKind: 'paid', periodEndsAt: '2026-10-31T07:00:00.000Z', daysLeft: 3 },
+  },
+  {
+    name: 'subscription_reminder ending trial',
+    template: 'subscription_reminder',
+    payload: { variant: 'ending', displayName: 'Kigali Lens', periodKind: 'trial', periodEndsAt: '2026-10-31T07:00:00.000Z', daysLeft: 1 },
+  },
+  {
+    name: 'subscription_reminder past_due',
+    template: 'subscription_reminder',
+    payload: { variant: 'past_due', displayName: 'Kigali Lens', periodEndedAt: '2026-10-31T07:00:00.000Z', graceEndsAt: '2026-11-07T07:00:00.000Z' },
+  },
+  {
+    name: 'subscription_receipt',
+    template: 'subscription_receipt',
+    payload: {
+      displayName: 'Kigali Lens',
+      planInterval: 'monthly',
+      amountRwf: 10_000,
+      paidAt: '2026-10-26T07:00:00.000Z',
+      paymentReference: 'MTN-4100000001',
+      periodStartsAt: '2026-10-31T07:00:00.000Z',
+      periodEndsAt: '2026-11-30T07:00:00.000Z',
+    },
+  },
+  {
+    name: 'subscription_expired',
+    template: 'subscription_expired',
+    payload: { displayName: 'Kigali Lens', periodEndedAt: '2026-10-31T07:00:00.000Z' },
+  },
+  {
     name: 'photographer_suspended',
     template: 'photographer_suspended',
     payload: { displayName: 'Kigali Lens', reason: 'Several clients reported shoots that did not happen.' },
@@ -324,6 +363,7 @@ export const TEMPLATE_VARIANTS = {
   photographer_alert: ['payment_received', 'retries_exhausted', 'refund_due', 'booking_cancelled'],
   platform_alert: ['retries_exhausted'],
   account_security_alert: ['login_lockout', 'account_exists', 'payout_method_changed'],
+  subscription_reminder: ['ending', 'past_due'],
 } as const satisfies Partial<Record<SendableEmailTemplate, readonly string[]>>;
 
 export function emailFixture(name: string): EmailFixture {

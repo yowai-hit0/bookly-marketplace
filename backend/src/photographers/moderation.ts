@@ -1,5 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { enqueue } from '../outbox/enqueue.js';
+import { getPlatformSettings } from '../settings/index.js';
+import { createTrialSubscription } from '../subscriptions/lifecycle.js';
 
 /**
  * A platform admin's decisions about a photographer (Phase 2 decision 7,
@@ -25,6 +27,13 @@ import { enqueue } from '../outbox/enqueue.js';
  * Suspension keeps every existing booking (marketplace-spec.md decisions
  * table): it changes the status only, and `photographers/bookable.ts` stops
  * new bookings and hides the profile.
+ *
+ * Approval also starts the subscription and its free trial, in the same
+ * transaction as the status change (marketplace-spec.md R5.1;
+ * subscriptions/lifecycle.ts). A photographer who already has a subscription
+ * keeps it and gets no second trial. Suspension and reactivation leave the
+ * subscription alone: its clock keeps running, and reactivating restores
+ * bookability only while the period still does.
  */
 
 /** `photographer_status_allowed`. */
@@ -84,7 +93,10 @@ export async function listPhotographers(prisma: PrismaClient, status?: Photograp
   return rows.map(toPlatformPhotographer);
 }
 
-/** pending -> approved, recording who and when, and emails `photographer_approved`. */
+/**
+ * pending -> approved, recording who and when; starts the subscription and its
+ * trial (R5.1), and emails `photographer_approved` with the trial's end.
+ */
 export function approvePhotographer(deps: ModerationDeps, action: ModerationAction): Promise<ModerationResult> {
   const now = deps.now();
   return transition(deps, action, now, 'approve', 'approved', async (tx) => {
@@ -96,6 +108,11 @@ export function approvePhotographer(deps: ModerationDeps, action: ModerationActi
       RETURNING id`;
     if (rows.length === 0) return false;
 
+    // After the photographer row (held by the UPDATE above): the lock order of
+    // every subscription writer is photographer, then subscription (payments/webhooks.ts).
+    const { trialDays } = await getPlatformSettings(tx);
+    const subscription = await createTrialSubscription(tx, action.photographerId, now, trialDays);
+
     const photographer = await tx.photographer.findUniqueOrThrow({ where: { id: action.photographerId }, select: SELECT });
     await enqueue(tx, {
       kind: 'email',
@@ -103,7 +120,12 @@ export function approvePhotographer(deps: ModerationDeps, action: ModerationActi
       recipient: photographer.user.email,
       photographerId: photographer.id,
       dedupeKey: `email:photographer_approved:${photographer.id}:${now.toISOString()}`,
-      payload: { displayName: photographer.displayName, handle: photographer.handle },
+      payload: {
+        displayName: photographer.displayName,
+        handle: photographer.handle,
+        // The trial this approval started; none is promised to a photographer who already had one.
+        ...(subscription.created ? { trialEndsAt: subscription.currentPeriodEndsAt.toISOString() } : {}),
+      },
     });
     return true;
   });

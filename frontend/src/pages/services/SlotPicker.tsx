@@ -3,6 +3,7 @@ import { type Ref, useEffect, useId, useImperativeHandle, useRef, useState } fro
 import { useTranslation } from 'react-i18next'
 import { type KigaliDate, kigaliDateOf } from '@/admin/calendar-dates'
 import {
+  AvailabilityLoadError,
   type DayAvailability,
   type KigaliMonth,
   addMonths,
@@ -56,6 +57,12 @@ type Props = {
   /** The chosen start, an ISO-8601 UTC instant, or null. */
   value: string | null
   onChange: (start: string | null) => void
+  /**
+   * The API refused the package itself (`422`), which an inactive package and,
+   * since Phase 5, a photographer not taking bookings both answer (R5.5). The
+   * page decides which it is; the picker still shows its failed load.
+   */
+  onPackageRefused?: () => void
   ref?: Ref<SlotPickerHandle>
 }
 
@@ -70,7 +77,7 @@ const MS_PER_MINUTE = 60_000
  *  spinning on a stalled mobile connection. A developer default. */
 const CHECK_TIMEOUT_MS = 15_000
 
-export function SlotPicker({ packageId, durationMinutes, value, onChange, ref }: Props) {
+export function SlotPicker({ packageId, durationMinutes, value, onChange, onPackageRefused, ref }: Props) {
   const { t } = useTranslation()
   const headingId = useId()
   const monthLabelId = useId()
@@ -94,6 +101,11 @@ export function SlotPicker({ packageId, durationMinutes, value, onChange, ref }:
   const check = useRef<AbortController | null>(null)
   /** The package `value` was last confirmed free for. */
   const confirmedFor = useRef(value === null ? null : packageId)
+  /** The latest `onPackageRefused`, so a new callback does not reload the month. */
+  const refused = useRef(onPackageRefused)
+  useEffect(() => {
+    refused.current = onPackageRefused
+  })
 
   useEffect(
     () => () => {
@@ -107,7 +119,11 @@ export function SlotPicker({ packageId, durationMinutes, value, onChange, ref }:
     const controller = new AbortController()
     fetchAvailability(packageId, month, controller.signal)
       .then((days) => !controller.signal.aborted && setLoaded({ key, days }))
-      .catch(() => !controller.signal.aborted && setLoaded({ key, days: null }))
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setLoaded({ key, days: null })
+        if (error instanceof AvailabilityLoadError && error.status === 422) refused.current?.()
+      })
     return () => controller.abort()
   }, [packageId, month, key, attempt])
 

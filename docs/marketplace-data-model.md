@@ -486,6 +486,15 @@ Rules:
 - **Bookable** iff `photographer.status = 'approved' AND subscription.status IN ('trialing','active') AND current_period_ends_at > now()`.
 - **Reminders:** an outbox row with `dedupe_key = 'email:subscription_reminder:<sub_id>:<period_end ISO>:<days>'`.
 
+**Phase 5 refinements (as built, migration `20261022135830_subscriptions`; marketplace-spec.md Phase 5 "as built"):**
+- **`platform_setting`:** the two prices are added through a temporary default (the seed's placeholders, 10,000 and 100,000 RWF) that is dropped at once, as in the cancellation-policy migration, so the existing row is filled and no insert may skip them. `subscription_reminder_days` is a nullable column to Prisma (scalar lists always are), so NOT NULL is part of `platform_setting_reminder_days_valid`, which also refuses NULL elements (`array_position(…, NULL) IS NULL`): `0 < ALL(…)` alone lets a NULL element through. `platform_setting_trial_days_non_negative` is replaced by **`platform_setting_trial_days_positive` (`trial_days > 0`)**: a trial is a period, and `subscription_period_range_valid` refuses one of no length.
+- **`payment`:** `booking_id` nullable, `subscription_id` (RESTRICT → `subscription`), `plan_interval`, `payment_kind_allowed` gains `subscription`, and the four CHECKs of §2.11 (`payment_subject_exactly_one`, `payment_subject_matches_kind`, `payment_plan_interval_matches_kind`, `payment_plan_interval_allowed`); `payment_cash_is_session_fee` stays and now also keeps cash off subscriptions. `@@index([subscriptionId, status])`. `checkout_url`, `flutterwave_checkout` and `payment_checkout_url_https` stay deferred with cards.
+- **No composite key period → payment's subscription:** Prisma refuses a composite relation mixing the optional `payment_id` with the required `subscription_id` (as for `addon.service_id`, §2.7), so a paid period's payment being its own subscription's is held in code (`subscriptions/payments.ts` `addPaidPeriod` inserts it from the payment it settles).
+- **`subscription.status`** is the job's record; every reader that must be right when the job is late computes the status from `current_period_ends_at`, the clock and the grace days (`subscriptions/plan.ts` `statusAt`). Bookable and listed compare the clock directly (§3.7 rules).
+- **`voided_at`** is reserved: nothing in the app sets it yet (no subscription payment is ever refunded, Phase 5 decision).
+- **Backfill:** every photographer with `approved_at` set and no subscription gets one, `trialing`, with a trial of `trial_days` (30 if the row is missing) from the migration's moment.
+- **Indexes and constraints added:** `subscription_period_one_trial`, the exclusion `subscription_period_no_overlap`, `subscription_status_allowed`, `subscription_period_kind_allowed`, `subscription_period_plan_interval_allowed`, `subscription_period_shape`, `subscription_period_range_valid`, and Prisma's unique `photographer_id`, unique `payment_id`, `(status, current_period_ends_at)` and `(subscription_id, ends_at)`. The table count is now **27**.
+
 ### 3.8 `PayoutMethod`
 ```prisma
 /// IMMUTABLE: a change retires the row and inserts a new one.

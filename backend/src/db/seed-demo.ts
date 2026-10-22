@@ -4,6 +4,8 @@ import { accessTokenExpiry, generateAccessToken } from '../booking/access-token.
 import { generateReference } from '../booking/reference.js';
 import { quoteBasket } from '../catalogue/quote.js';
 import { recordEarning } from '../payouts/ledger.js';
+import { getPlatformSettings } from '../settings/index.js';
+import { createTrialSubscription } from '../subscriptions/lifecycle.js';
 import { isSlotTaken } from './errors.js';
 
 /**
@@ -187,7 +189,8 @@ export async function seedDemoData(prisma: PrismaClient, now: Date = new Date())
 /**
  * One photographer in one transaction: the login, the photographer and their
  * settings row together, as signup and approval leave them (marketplace-data-model.md
- * §2.2), then their hours, districts, categories and catalogue.
+ * §2.2), with the subscription and free trial approval starts (R5.1), then
+ * their hours, districts, categories and catalogue.
  */
 async function seedPhotographer(
   prisma: PrismaClient,
@@ -213,6 +216,8 @@ async function seedPhotographer(
       },
     });
     const photographerId = photographer.id;
+    // What approval creates with it (subscriptions/lifecycle.ts): the trial starts now.
+    await createTrialSubscription(tx, photographerId, now, (await getPlatformSettings(tx)).trialDays);
 
     await tx.workingHours.createMany({
       data: demo.hours.weekdays.map((weekday) => ({ photographerId, weekday, opensMinute: demo.hours.opensMinute, closesMinute: demo.hours.closesMinute, isOpen: true })),

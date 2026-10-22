@@ -20,15 +20,17 @@ photographers:
   get:
     operationId: listPhotographers
     tags: [Catalogue & availability]
-    summary: List the photographers who can be booked
+    summary: List the listed photographers
     description: |
-      Every photographer who can be booked, by display name. No filters yet:
-      the directory's category, district, price and date filters come later.
-      Anonymous.
+      Every listed photographer, by display name: those who can be booked, and
+      those whose subscription is `past_due` (`takingBookings: false`,
+      marketplace-spec.md R5.5). Pending, suspended and `expired` photographers
+      are not listed. No filters yet: the directory's category, district, price
+      and date filters come later. Anonymous.
     security: []
     responses:
       '200':
-        description: The bookable photographers.
+        description: The listed photographers.
         content:
           application/json:
             schema:
@@ -48,8 +50,11 @@ photographer:
     description: |
       The profile behind `/p/{handle}`. Never the photographer's login email,
       status or operating settings: `email` is the public contact address they
-      chose, or null. An unknown handle and the handle of a photographer who
-      cannot be booked are the same 404. Anonymous.
+      chose, or null. An unknown handle and the handle of a photographer who is
+      not listed -- pending, suspended, or with an `expired` subscription -- are
+      the same 404; the profile page words it as "unavailable" (R5.5). A
+      `past_due` photographer's profile is served with `takingBookings: false`.
+      Anonymous.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/Handle
@@ -76,7 +81,7 @@ services:
       The photographer's active services, each with its active packages and the
       add-ons it offers: its own, then those the photographer offers on every
       service. Never another photographer's. A 404 for a handle that is unknown
-      or cannot be booked. Anonymous.
+      or not listed (a `past_due` photographer's services are shown). Anonymous.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/Handle
@@ -104,8 +109,8 @@ service:
     description: |
       Slugs are unique per photographer, so the same slug under another handle is
       another service. A 404 for an unknown or inactive slug, a slug only another
-      photographer has, and a handle that is unknown or cannot be booked.
-      Anonymous.
+      photographer has, and a handle that is unknown or not listed. Carries the
+      photographer's `takingBookings`. Anonymous.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/Handle

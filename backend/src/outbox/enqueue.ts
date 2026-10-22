@@ -31,12 +31,11 @@ export type OutboxKind = (typeof OUTBOX_KINDS)[number];
  * need no template migration (marketplace-data-model.md §5). None has a
  * renderer yet, so none can be enqueued: `SendableEmailTemplate` leaves them
  * out, and the template catalogue test holds the two lists to the CHECK.
+ *
+ * Empty since Phase 5, which made the three `subscription_*` names sendable
+ * (R5.3, R5.4). Kept, so a name reserved for a later phase has its place.
  */
-export const RESERVED_EMAIL_TEMPLATES = [
-  'subscription_reminder',
-  'subscription_receipt',
-  'subscription_expired',
-] as const;
+export const RESERVED_EMAIL_TEMPLATES = [] as const satisfies readonly string[];
 export type ReservedEmailTemplate = (typeof RESERVED_EMAIL_TEMPLATES)[number];
 
 /**
@@ -74,6 +73,12 @@ export const EMAIL_TEMPLATES = [
   'photographer_suspended',
   /** To a photographer: a platform admin marked their payout paid (Phase 4, R4.4). */
   'payout_sent',
+  /** To a photographer: their period ends in a few days (`ending`), or has ended (`past_due`) (Phase 5, R5.4). */
+  'subscription_reminder',
+  /** To a photographer: a subscription payment succeeded and added its period (Phase 5, R5.3). */
+  'subscription_receipt',
+  /** To a photographer: the grace days are over and the profile is hidden (Phase 5, R5.4). */
+  'subscription_expired',
   ...RESERVED_EMAIL_TEMPLATES,
 ] as const;
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];

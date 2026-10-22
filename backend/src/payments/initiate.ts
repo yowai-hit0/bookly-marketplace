@@ -1,7 +1,7 @@
-import { type Photographer, Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { bookingTotals, TOTALS_PAYMENT_SELECT } from '../booking/totals.js';
-import { isBookable } from '../photographers/bookable.js';
-import { type PaymentMethod, type PaymentProvider, PaymentProviderError } from './provider.js';
+import { BOOKABLE_SQL } from '../photographers/bookable.js';
+import { type PaymentKind, type PaymentMethod, type PaymentProvider, PaymentProviderError } from './provider.js';
 
 /**
  * Starting a booking-fee payment (plan.md Task 16; spec §3.1 step 9,
@@ -24,8 +24,9 @@ import { type PaymentMethod, type PaymentProvider, PaymentProviderError } from '
  * record says how the client chose to pay before any provider answers.
  *
  * A new booking fee needs a photographer who can still be booked (R3.4, T3.4):
- * one suspended (or, from Phase 5, out of subscription) since the hold was
- * taken is `photographer_unavailable`, and no money is asked for. A session
+ * one suspended, or out of subscription (R5.4: the period's end compared with
+ * the database clock directly), since the hold was taken is
+ * `photographer_unavailable`, and no money is asked for. A session
  * fee is not refused: it is owed on a booking that already stands, and
  * existing bookings carry on whatever the photographer's status (R5.5, T9.2).
  */
@@ -123,18 +124,17 @@ export async function startBookingFeePayment(deps: StartPaymentDeps, request: St
 
   const opened = await prisma.$transaction(async (tx): Promise<OpenedAttempt> => {
     // Locked, so two taps on "Pay" serialise here and the second sees the first.
-    // The photographer row is read, not locked: the provider is called after
-    // this transaction anyway, so no lock could keep a suspension from landing
-    // between the check and the prompt -- the check is that nobody is asked to
-    // pay for a photographer already unavailable (R3.4).
-    const bookings = await tx.$queryRaw<
-      { id: string; status: string; booking_fee_rwf: number; hold_live: boolean; photographer_status: Photographer['status'] }[]
-    >`
+    // The photographer and subscription rows are read, not locked: the provider
+    // is called after this transaction anyway, so no lock could keep a
+    // suspension from landing between the check and the prompt -- the check is
+    // that nobody is asked to pay for a photographer already unavailable (R3.4).
+    const bookings = await tx.$queryRaw<{ id: string; status: string; booking_fee_rwf: number; hold_live: boolean; bookable: boolean }[]>`
       SELECT b.id::text AS id, b.status, b.booking_fee_rwf,
              (b.hold_expires_at IS NOT NULL AND b.hold_expires_at > now()) AS hold_live,
-             ph.status AS photographer_status
+             ${BOOKABLE_SQL} AS bookable
         FROM booking b
         JOIN photographer ph ON ph.id = b.photographer_id
+        LEFT JOIN subscription s ON s.photographer_id = ph.id
        WHERE b.reference = ${request.reference}
          FOR UPDATE OF b`;
     const booking = bookings[0];
@@ -144,8 +144,8 @@ export async function startBookingFeePayment(deps: StartPaymentDeps, request: St
     if (paid > 0) return { status: 'already_paid' };
     // Measured on the database clock, like the hold itself (booking/claim.ts).
     if (booking.status !== 'pending_payment' || !booking.hold_live) return { status: 'hold_expired' };
-    // The one rule (photographers/bookable.ts), over the row in hand (R3.4, T3.4).
-    if (!isBookable({ status: booking.photographer_status })) return { status: 'photographer_unavailable' };
+    // The one rule (photographers/bookable.ts), on the database clock (R3.4, T3.4, R5.4).
+    if (!booking.bookable) return { status: 'photographer_unavailable' };
     if (booking.booking_fee_rwf <= 0) return { status: 'nothing_to_pay' };
 
     const waiting = await tx.$queryRaw<{ our_ref: string }[]>`
@@ -170,7 +170,7 @@ export async function startBookingFeePayment(deps: StartPaymentDeps, request: St
   });
 
   if (opened.status !== 'opened') return opened;
-  return attempt(deps, opened, { ...request, kind: 'booking_fee' });
+  return attemptPayment(deps, opened, { ...request, kind: 'booking_fee' });
 }
 
 /**
@@ -291,18 +291,28 @@ export async function startSessionFeePayment(
   });
 
   if (opened.status !== 'opened') return opened;
-  return attempt(deps, opened, { ...request, kind: 'session_fee' });
+  return attemptPayment(deps, opened, { ...request, kind: 'session_fee' });
 }
+
+/** What calling the provider for an attempt on record came to. */
+export type AttemptResult = { status: 'started'; ourRef: string } | { status: 'provider_failed'; ourRef: string; outcome: 'rejected' | 'unavailable' };
 
 /**
  * Calls the provider for an attempt already on record, and writes down what it
  * said. Outside every transaction: a slow provider must not hold a row lock.
+ * Shared by the booking fee, the session fee and the subscription payment
+ * (subscriptions/payments.ts, R5.2): one deadline, one record of a refusal, and
+ * one vocabulary of failure reasons -- the one the webhook's revival rule reads
+ * (payments/webhooks.ts `locallyFailed`).
+ *
+ * `reference` is for the payer's statement line only: the booking reference, or
+ * for a subscription `SUB-<handle>`.
  */
-async function attempt(
+export async function attemptPayment(
   deps: StartPaymentDeps,
   opened: { paymentId: string; ourRef: string; amountRwf: number },
-  request: { method: PaymentMethod; payerPhone: string; reference: string; kind: 'booking_fee' | 'session_fee' },
-): Promise<StartPaymentResult> {
+  request: { method: PaymentMethod; payerPhone: string; reference: string; kind: PaymentKind },
+): Promise<AttemptResult> {
   const { prisma, provider } = deps;
 
   let failure: { outcome: 'rejected' | 'unavailable'; reason: string } | null = null;

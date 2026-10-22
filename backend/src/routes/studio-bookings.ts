@@ -379,7 +379,8 @@ export function studioBookingsRouter(deps: AdminBookingsDeps): Router {
         where: { id, booking: { photographerId: scope.photographerId } },
         select: { bookingId: true },
       });
-      if (payment === null) {
+      // A payment found through its booking always has one; a subscription payment never matches.
+      if (payment === null || payment.bookingId === null) {
         res.status(404).json({ error: 'not_found' });
         return;
       }
@@ -389,6 +390,8 @@ export function studioBookingsRouter(deps: AdminBookingsDeps): Router {
       return;
     }
 
+    // Recorded through its booking's photographer (cash on one of their bookings), so it has one.
+    if (result.payment.bookingId === null) throw new Error(`Refunded payment ${result.payment.id} has no booking`);
     const booking = await findAdminBooking(prisma, scope.photographerId, result.payment.bookingId);
     res.json({ booking: booking === null ? null : adminBookingView(booking, now()) });
   });

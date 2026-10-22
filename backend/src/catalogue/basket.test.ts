@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPrismaClient } from '../db/client.js';
 import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
-import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
+import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer, grantSubscription } from '../test/payment-fixtures.js';
 import { type BasketResult, type PricedBasket, priceBasket } from './basket.js';
 import { findPublicService } from './public.js';
 
@@ -427,6 +427,8 @@ describe('priceBasket per photographer', () => {
     expect((await priceBasket(prisma, { packageId: pkg.id, addonIds: [] })).ok).toBe(false);
 
     await prisma.photographer.update({ where: { id: other.photographerId }, data: { status: 'approved', approvedAt: new Date('2026-10-01T06:00:00Z') } });
+    // What approval creates with it since Phase 5 (R5.1): bookable needs a live subscription.
+    await grantSubscription(prisma, other.photographerId);
 
     expect((await priceBasket(prisma, { packageId: pkg.id, addonIds: [] })).ok).toBe(true);
   });

@@ -1,0 +1,99 @@
+# The studio's subscription page and paying for it (marketplace-spec.md Phase 5:
+# R5.2, R5.3, T5.3). All require the studio bearer token and are the signed-in
+# photographer's own. All `Cache-Control: no-store`.
+
+subscription:
+  get:
+    operationId: getStudioSubscription
+    tags: [Studio subscription]
+    summary: The subscription page
+    description: |
+      The subscription's status, the end of its current period, every period, any
+      payment in progress, the plan's prices for both intervals and the methods
+      on offer. `status` and `takingBookings` are computed from the clock, so they
+      are right even if the job that records them is late. `subscription` is null
+      for a photographer never approved.
+    responses:
+      '200':
+        description: The subscription page.
+        content:
+          application/json:
+            schema: { $ref: ../components/subscriptions.yaml#/schemas/StudioSubscriptionPage }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+payments:
+  post:
+    operationId: startSubscriptionPayment
+    tags: [Studio subscription]
+    summary: Pay for a month or a year
+    description: |
+      Prompts the phone by Mobile Money for the platform's price of the chosen
+      plan. The amount is the server's: any amount in the body is ignored (T5.3).
+      When the payment succeeds (webhook or status lookup), a period of the plan
+      is added on top of the time already covered -- starting at the later of now
+      and the current period's end -- and a receipt is emailed (R5.3). Every
+      success adds its period, and none is ever refunded.
+
+      Any subscription status may pay, `expired` included. Refused with `409`:
+      `photographer_not_approved` (pending or suspended), `no_subscription`, and
+      `payment_in_progress` while another payment of the subscription still waits
+      on the payer (only one at a time). Rate-limited per address.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/subscriptions.yaml#/schemas/SubscriptionPayRequest }
+    responses:
+      '201':
+        description: The phone is prompted. Poll the payment's `ourRef`.
+        content:
+          application/json:
+            schema: { $ref: ../components/subscriptions.yaml#/schemas/SubscriptionPaymentStarted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '409':
+        description: Not approved, no subscription, or a payment already in progress.
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: ../components/common.yaml#/schemas/PaymentInProgress
+                - type: object
+                  required: [error]
+                  additionalProperties: false
+                  properties:
+                    error: { type: string, enum: [photographer_not_approved, no_subscription] }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+      '502':
+        description: The provider refused or could not be reached. The attempt is recorded as failed; try again.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/PaymentNotStarted }
+
+payment:
+  get:
+    operationId: getStudioSubscriptionPayment
+    tags: [Studio subscription]
+    summary: Where a subscription payment stands
+    description: |
+      For the page to poll after a prompt: the payment, and the subscription as it
+      now stands. Another photographer's payment, a booking's payment and an
+      unknown reference are all a 404.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/OurRef
+    responses:
+      '200':
+        description: The payment and the subscription.
+        content:
+          application/json:
+            schema: { $ref: ../components/subscriptions.yaml#/schemas/SubscriptionPaymentStatus }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound

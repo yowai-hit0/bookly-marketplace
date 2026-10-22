@@ -114,7 +114,9 @@ paymentStatus:
     description: |
       The confirmation page polls this while a Mobile Money payment settles —
       often 30 seconds or more. Addressed by the random `our_ref` the pay page
-      was handed; shows no contact details. `Cache-Control: no-store`.
+      was handed; shows no contact details. `Cache-Control: no-store`. A
+      subscription payment's reference is a 404 here: the studio polls it at
+      `/api/studio/subscription/payments/{ourRef}`.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/OurRef

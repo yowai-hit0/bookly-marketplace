@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { defineTemplate, personName, siteUrl, tr } from './shared.js';
+import { dateOf, defineTemplate, instant, personName, siteUrl, tr } from './shared.js';
 
 /**
  * To a photographer, when a platform admin approves their studio (Phase 2
@@ -7,7 +7,10 @@ import { defineTemplate, personName, siteUrl, tr } from './shared.js';
  * be booked (`photographers/bookable.ts`). Sent once per approval: the
  * approval's instant is in the dedupe key (`photographers/moderation.ts`).
  *
- * Phase 5 adds the free trial that starts at approval; its copy belongs there.
+ * The approval starts the free trial (marketplace-spec.md R5.1;
+ * subscriptions/lifecycle.ts), and the email says until when. `trialEndsAt` is
+ * optional: a photographer who already had a subscription gets no new trial,
+ * and no trial is promised.
  */
 
 /** `photographer_handle_format`: the public profile is `/p/<handle>`. */
@@ -17,6 +20,7 @@ export const photographerApproved = defineTemplate({
   payload: z.object({
     displayName: personName,
     handle,
+    trialEndsAt: instant.optional(),
   }),
   compose(p, ctx) {
     return {
@@ -26,6 +30,7 @@ export const photographerApproved = defineTemplate({
         { type: 'heading', text: tr(ctx, 'email:photographerApproved.heading') },
         { type: 'paragraph', text: tr(ctx, 'email:common.greeting', { name: p.displayName }) },
         { type: 'paragraph', text: tr(ctx, 'email:photographerApproved.intro') },
+        ...(p.trialEndsAt === undefined ? [] : [{ type: 'paragraph' as const, text: tr(ctx, 'email:photographerApproved.trial', { date: dateOf(p.trialEndsAt) }) }]),
         {
           type: 'details',
           rows: [{ label: tr(ctx, 'email:photographerApproved.profileLabel'), value: siteUrl(ctx, `/p/${p.handle}`) }],

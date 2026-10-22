@@ -14,13 +14,15 @@ import {
 } from '../photographers/moderation.js';
 import { areaAuthRouter } from './area-auth.js';
 import { platformPayoutsRouter } from './platform-payouts.js';
+import { platformSettingsRouter } from './platform-settings.js';
 import { parseOrReject } from './validation.js';
 
 /**
  * `/api/platform/*`: the platform admin's console (Phase 2 decision 7, the
  * minimum of marketplace-spec.md Phase 9 that signups need), plus Phase 4's
- * payouts and refunds (routes/platform-payouts.ts). Phase 9 adds the trial
- * start, categories and the rest.
+ * payouts and refunds (routes/platform-payouts.ts), and Phase 5's platform
+ * settings and subscriptions (routes/platform-settings.ts). Phase 9 adds
+ * categories and the rest.
  *
  * Order is the security model, as in the studio: the unauthenticated
  * `/auth/*` endpoints first, then `requirePlatformAdmin`, behind which every
@@ -82,6 +84,9 @@ export function platformRouter(deps: PlatformRouterDeps): Router {
 
   // Payouts and refunds of money paid online (Phase 4: R4.4, R4.6).
   router.use(platformPayoutsRouter(deps));
+
+  // The hold, the trial and the subscription plan; the subscriptions list (Phase 5: R5.1, R9.3).
+  router.use(platformSettingsRouter(deps));
 
   return router;
 }

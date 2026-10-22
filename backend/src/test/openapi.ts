@@ -116,6 +116,9 @@ const MOUNTS: Record<string, string | readonly string[]> = {
   // Phase 4: earnings and the payout method (routes/studio.ts), payouts and refunds (routes/platform.ts).
   studioPayoutsRouter: '/api/studio',
   platformPayoutsRouter: '/api/platform',
+  // Phase 5: the subscription page and payments; the platform's settings and subscriptions.
+  studioSubscriptionRouter: '/api/studio',
+  platformSettingsRouter: '/api/platform',
 };
 
 /**

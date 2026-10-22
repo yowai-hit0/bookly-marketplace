@@ -51,7 +51,11 @@ export const APPLICATION_TABLES = [
   // A booking's notes to its client (2026-09-25).
   'booking_note',
   'booking_addon',
+  // Subscriptions (Phase 5): a period references its payment and subscription,
+  // a payment may reference a subscription, and a subscription its photographer.
+  'subscription_period',
   'payment',
+  'subscription',
   'webhook_event',
   'outbox',
   'booking',

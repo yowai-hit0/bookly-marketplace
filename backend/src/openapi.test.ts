@@ -292,6 +292,35 @@ describe('responses match the spec', () => {
     );
   });
 
+  it('the subscription: the studio page, paying, polling, and the platform settings and list (Phase 5)', async () => {
+    const server = app();
+    const auth = { Authorization: `Bearer ${await studioToken()}` };
+    await expectMatchesSpec(await request(server).get('/api/studio/subscription').set(auth), 'getStudioSubscription', 200);
+    const started = await request(server).post('/api/studio/subscription/payments').set(auth).send({ planInterval: 'monthly', method: 'momo_mtn', phone: '0788123456' });
+    await expectMatchesSpec(started, 'startSubscriptionPayment', 201);
+    await expectMatchesSpec(
+      await request(server).post('/api/studio/subscription/payments').set(auth).send({ planInterval: 'yearly', method: 'momo_mtn', phone: '0788123456' }),
+      'startSubscriptionPayment',
+      409,
+    );
+    await expectMatchesSpec(
+      await request(server).post('/api/studio/subscription/payments').set(auth).send({ planInterval: 'monthly', method: 'momo_mtn', phone: '12' }),
+      'startSubscriptionPayment',
+      422,
+    );
+    const { ourRef } = (started.body as { payment: { ourRef: string } }).payment;
+    await expectMatchesSpec(await request(server).get(`/api/studio/subscription/payments/${ourRef}`).set(auth), 'getStudioSubscriptionPayment', 200);
+    await expectMatchesSpec(await request(server).get('/api/studio/subscription').set(auth), 'getStudioSubscription', 200);
+
+    const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
+    const platform = { Authorization: `Bearer ${(await issueToken(TEST_SECRET, 'platform', admin, NOW)).token}` };
+    await expectMatchesSpec(await request(server).get('/api/platform/settings').set(platform), 'getPlatformSettings', 200);
+    await expectMatchesSpec(await request(server).patch('/api/platform/settings').set(platform).send({ subscriptionGraceDays: 5 }), 'updatePlatformSettings', 200);
+    await expectMatchesSpec(await request(server).patch('/api/platform/settings').set(platform).send({ trialDays: 0 }), 'updatePlatformSettings', 422);
+    await expectMatchesSpec(await request(server).get('/api/platform/subscriptions').set(platform), 'listPlatformSubscriptions', 200);
+    await expectMatchesSpec(await request(server).get('/api/platform/subscriptions?status=trialing').set(platform), 'listPlatformSubscriptions', 200);
+  });
+
   it('studio catalogue and bookings', async () => {
     const { booking } = await insertBookingWithToken(prisma, world);
     await insertPayment(prisma, booking.id, { kind: 'booking_fee', status: 'succeeded', amountRwf: 20_000 });

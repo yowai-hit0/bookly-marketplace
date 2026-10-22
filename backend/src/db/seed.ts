@@ -26,6 +26,18 @@ export const STARTER_CATEGORIES = [
   { slug: 'real-estate', nameEn: 'Real estate' },
 ] as const;
 
+/**
+ * PLACEHOLDER subscription prices (user decision, Phase 5; marketplace-spec.md
+ * R1.9). NOT real prices: a platform admin must set the real ones in
+ * `/platform/settings` before launch (marketplace-spec.md Phase 10). The
+ * columns have no default (marketplace-data-model.md §3.2), so these are what a
+ * fresh database starts with; a reseed never overwrites prices already set.
+ */
+export const PLACEHOLDER_SUBSCRIPTION_PRICES = {
+  subscriptionMonthlyPriceRwf: 10_000,
+  subscriptionYearlyPriceRwf: 100_000,
+} as const;
+
 export type SeedSummary = {
   platformAdminCreated: boolean;
   platformSettingCreated: boolean;
@@ -77,10 +89,16 @@ async function seedPlatformSetting(prisma: PrismaClient): Promise<boolean> {
   if (existing) return false;
 
   // Spelled out rather than relying on schema.prisma's @default values, so the
-  // seed reads correctly in isolation (data-model_v2.md §5.2). The subscription
-  // prices arrive with their columns in Phase 5.
+  // seed reads correctly in isolation (data-model_v2.md §5.2).
   await prisma.platformSetting.create({
-    data: { id: 1, holdMinutes: 30, trialDays: 30 },
+    data: {
+      id: 1,
+      holdMinutes: 30,
+      trialDays: 30,
+      ...PLACEHOLDER_SUBSCRIPTION_PRICES,
+      subscriptionGraceDays: 7,
+      subscriptionReminderDays: [7, 3, 1],
+    },
   });
   return true;
 }

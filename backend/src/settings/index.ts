@@ -33,11 +33,22 @@ export type PhotographerSettings = {
 /**
  * What belongs to the platform rather than to any photographer. The checkout
  * hold is payment infrastructure: it must stay inside the reconciler's window
- * and match how long a MoMo prompt lasts, so no photographer sets it.
+ * and match how long a MoMo prompt lasts, so no photographer sets it. The rest
+ * is the one subscription plan (marketplace-spec.md R5.1, R5.4;
+ * marketplace-data-model.md §3.2), edited by a platform admin
+ * (`PATCH /api/platform/settings`).
  */
 export type PlatformSettings = {
   holdMinutes: number;
+  /** The free trial a photographer gets at approval. Changing it affects later approvals only. */
   trialDays: number;
+  /** Whole RWF. The seed's values are placeholders to set before launch (db/seed.ts). */
+  subscriptionMonthlyPriceRwf: number;
+  subscriptionYearlyPriceRwf: number;
+  /** Days of `past_due` after a period ends, before `expired`. */
+  subscriptionGraceDays: number;
+  /** Days before a period ends that a reminder goes out, largest first. */
+  subscriptionReminderDays: number[];
 };
 
 // Re-exported so callers have one settings entrypoint. They are defined in a
@@ -102,5 +113,13 @@ function toPhotographerSettings(row: PhotographerSettingRow): PhotographerSettin
 }
 
 function toPlatformSettings(row: PlatformSettingRow): PlatformSettings {
-  return { holdMinutes: row.holdMinutes, trialDays: row.trialDays };
+  return {
+    holdMinutes: row.holdMinutes,
+    trialDays: row.trialDays,
+    subscriptionMonthlyPriceRwf: row.subscriptionMonthlyPriceRwf,
+    subscriptionYearlyPriceRwf: row.subscriptionYearlyPriceRwf,
+    subscriptionGraceDays: row.subscriptionGraceDays,
+    // Stored as the admin saved them; read largest first, the order they fall due in.
+    subscriptionReminderDays: [...row.subscriptionReminderDays].sort((a, b) => b - a),
+  };
 }

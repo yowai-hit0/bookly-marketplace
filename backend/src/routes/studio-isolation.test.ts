@@ -85,6 +85,9 @@ type TheirIds = {
   /** B's current payout method, and its MoMo number. */
   payoutMethodId: string;
   momoNumber: string;
+  /** B's subscription (Phase 5), and a payment of it waiting on the payer. */
+  subscriptionId: string;
+  subscriptionOurRef: string;
   serviceId: string;
   packageId: string;
   ownAddonId: string;
@@ -161,7 +164,18 @@ async function seedTheirs(world: PaymentWorld): Promise<TheirIds> {
     earningPaymentId: fee.id,
     payoutMethodId: payouts.methodId,
     momoNumber: '+250788000999',
+    ...(await subscriptionPayment(world)),
   };
+}
+
+/** The world's subscription (the fixture's trial) and a pending payment of it. */
+async function subscriptionPayment(world: PaymentWorld): Promise<{ subscriptionId: string; subscriptionOurRef: string }> {
+  const subscription = await prisma.subscription.findUniqueOrThrow({ where: { photographerId: world.photographerId } });
+  const rows = await prisma.$queryRaw<{ our_ref: string }[]>`
+    INSERT INTO payment (subscription_id, kind, provider, method, amount_rwf, plan_interval, status)
+    VALUES (${subscription.id}::uuid, 'subscription', 'mtn_momo_direct', 'momo_mtn', 10000, 'monthly', 'pending')
+    RETURNING our_ref::text AS our_ref`;
+  return { subscriptionId: subscription.id, subscriptionOurRef: rows[0]?.our_ref ?? '' };
 }
 
 /** The fee's earning, a current MoMo method, and a paid payout holding the earning. */
@@ -223,6 +237,10 @@ async function rowsOf(photographerId: string): Promise<Record<string, unknown[]>
     payout_method: owned('payout_method'),
     payout: owned('payout'),
     payout_item: owned('payout_item'),
+    // Phase 5: the subscription, its periods and its payments.
+    subscription: owned('subscription'),
+    subscription_period: `SELECT t.* FROM subscription_period t JOIN subscription s ON s.id = t.subscription_id WHERE s.photographer_id = $1 ORDER BY t.id`,
+    subscription_payment: `SELECT t.* FROM payment t JOIN subscription s ON s.id = t.subscription_id WHERE s.photographer_id = $1 ORDER BY t.id`,
   };
   const rows: Record<string, unknown[]> = {};
   for (const [table, sql] of Object.entries(queries)) rows[table] = (await raw.query(sql, [photographerId])).rows;
@@ -289,6 +307,8 @@ const SWEEP: Record<string, Case[]> = {
   ],
   // Phase 4 (T4.4).
   'GET /api/studio/payouts/:id': [{ label: 'their paid payout', params: (ids) => ({ id: ids.payoutId }) }],
+  // Phase 5.
+  'GET /api/studio/subscription/payments/:ourRef': [{ label: 'their subscription payment', params: (ids) => ({ ourRef: ids.subscriptionOurRef }) }],
   'PATCH /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }), body: { nameEn: 'Mine now', isActive: false } }],
   'DELETE /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }) }],
   'PATCH /api/studio/packages/:id': [{ label: 'their package', params: (ids) => ({ id: ids.packageId }), body: { priceRwf: 1 } }],
@@ -392,6 +412,8 @@ describe('A’s lists never hold B’s rows', () => {
       theirs.earningPaymentId,
       theirs.payoutMethodId,
       theirs.momoNumber,
+      theirs.subscriptionId,
+      theirs.subscriptionOurRef,
       'THEIR-NOTE',
       'THEIR-BLOCK',
       'THEIR-TRANSFER',
@@ -411,6 +433,7 @@ describe('A’s lists never hold B’s rows', () => {
     ['the catalogue', '/api/studio/catalogue'],
     ['the earnings (T4.4)', '/api/studio/earnings'],
     ['the payout method (T4.4)', '/api/studio/payout-method'],
+    ['the subscription page (Phase 5)', '/api/studio/subscription'],
   ])('%s', async (_label, path) => {
     const res = await get(path);
 
@@ -428,6 +451,8 @@ describe('A’s lists never hold B’s rows', () => {
     const earnings = (await get('/api/studio/earnings')).text;
     for (const mark of [mine.payoutId, 'MY-TRANSFER', mine.reference]) expect(earnings).toContain(mark);
     expect((await get('/api/studio/payout-method')).text).toContain(mine.payoutMethodId);
+    const subscription = await prisma.subscription.findUniqueOrThrow({ where: { photographerId: a.photographerId } });
+    expect((await get('/api/studio/subscription')).text).toContain(subscription.id);
     expect((await get(`/api/studio/payouts/${mine.payoutId}`)).status).toBe(200);
   });
 

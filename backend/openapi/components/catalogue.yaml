@@ -4,13 +4,23 @@
 schemas:
   PublicPhotographerSummary:
     type: object
-    description: One photographer who can be booked, as the photographers list shows them.
-    required: [handle, displayName, coverImageUrl]
+    description: One listed photographer, as the photographers list shows them.
+    required: [handle, displayName, coverImageUrl, takingBookings]
     additionalProperties: false
     properties:
       handle: { type: string, examples: [kigali-lens] }
       displayName: { type: string }
       coverImageUrl: { type: [string, 'null'], format: uri }
+      takingBookings: { $ref: '#/schemas/TakingBookings' }
+
+  TakingBookings:
+    type: boolean
+    description: |
+      Whether the photographer can be booked right now (marketplace-spec.md
+      R5.4, R5.5). False while their subscription is `past_due`: they stay
+      listed, the page shows a "not taking bookings" notice, and their packages
+      answer the quote, the calendar and the booking form as an inactive package
+      does. An `expired` photographer is not listed at all.
 
   PublicPhotographerProfile:
     type: object
@@ -19,11 +29,12 @@ schemas:
       no operating settings. `email` is the contact address the photographer
       chose to publish, or null -- never their login. `cancellationPolicy` is
       the one setting on it: the terms a new booking would be made under.
-    required: [handle, displayName, bio, contactPhone, whatsappPhone, email, coverImageUrl, cancellationPolicy]
+    required: [handle, displayName, bio, contactPhone, whatsappPhone, email, coverImageUrl, takingBookings, cancellationPolicy]
     additionalProperties: false
     properties:
       handle: { type: string, examples: [kigali-lens] }
       displayName: { type: string }
+      takingBookings: { $ref: '#/schemas/TakingBookings' }
       bio: { type: [string, 'null'] }
       contactPhone: { type: [string, 'null'] }
       whatsappPhone: { type: [string, 'null'] }
@@ -95,7 +106,7 @@ schemas:
     allOf:
       - $ref: '#/schemas/PublicServiceFields'
     type: object
-    required: [id, slug, nameEn, descriptionEn, coverImageUrl, packages, addons, bookingFeeRate]
+    required: [id, slug, nameEn, descriptionEn, coverImageUrl, packages, addons, bookingFeeRate, takingBookings]
     unevaluatedProperties: false
     properties:
       bookingFeeRate:
@@ -103,6 +114,10 @@ schemas:
         minimum: 0
         maximum: 1
         description: The service's own override if set, else its photographer's rate.
+      takingBookings:
+        description: The photographer's, as on their profile, so the service page knows whether to open the slot picker.
+        allOf:
+          - $ref: '#/schemas/TakingBookings'
 
   # PublicService without `additionalProperties: false`, so the detail can extend it.
   PublicServiceFields:

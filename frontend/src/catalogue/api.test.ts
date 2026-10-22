@@ -27,6 +27,7 @@ const PORTRAITS: PublicServiceDetail = {
   packages: [],
   addons: [],
   bookingFeeRate: 0.4,
+  takingBookings: true,
 }
 
 const KIGALI_LENS: PublicPhotographerProfile = {
@@ -37,6 +38,7 @@ const KIGALI_LENS: PublicPhotographerProfile = {
   contactPhone: null,
   whatsappPhone: null,
   email: null,
+  takingBookings: true,
   cancellationPolicy: { cutoffHours: 24, bookingFeeRefundable: true },
 }
 

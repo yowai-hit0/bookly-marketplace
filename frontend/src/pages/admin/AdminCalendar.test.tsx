@@ -6,7 +6,7 @@ import '@/i18n'
 import type { CalendarBlock, CalendarBooking, CalendarData } from '@/admin/calendar-events'
 import { readSession, saveSession } from '@/admin/session'
 import { routes } from '@/routes'
-import { isStudioMe, studioMe } from '@/test/studio-me'
+import { isStudioLayout, studioLayout } from '@/test/studio-me'
 
 /**
  * The admin calendar page (plan.md Task 9; spec §3.3 step 1, §6.4, §6.5):
@@ -84,7 +84,7 @@ type Handler = (url: string) => Response | Promise<Response>
 function stubFetch(handler: Handler = () => json(OCTOBER)) {
   const mock = vi.fn((input: string | URL | Request, _init?: RequestInit) =>
     // The layout's banner request is answered here, so `handler` sees only the page's own.
-    Promise.resolve().then(() => (isStudioMe(input) ? studioMe() : handler(String(input)))),
+    Promise.resolve().then(() => (isStudioLayout(input) ? studioLayout(input) : handler(String(input)))),
   )
   vi.stubGlobal('fetch', mock)
   return mock
@@ -99,7 +99,7 @@ function calendarUrl(from: string, to: string): string {
 }
 
 function requestedUrls(mock: ReturnType<typeof stubFetch>): string[] {
-  return mock.mock.calls.map(([input]) => String(input)).filter((url) => !isStudioMe(url))
+  return mock.mock.calls.map(([input]) => String(input)).filter((url) => !isStudioLayout(url))
 }
 
 function signIn() {
@@ -206,7 +206,7 @@ describe('month view (plan.md Task 9)', () => {
     await waitForEntries(5)
 
     expect(requestedUrls(fetchMock)).toEqual([calendarUrl('2026-09-28', '2026-11-01')])
-    const init = fetchMock.mock.calls.find(([input]) => !isStudioMe(input))?.[1] as RequestInit | undefined
+    const init = fetchMock.mock.calls.find(([input]) => !isStudioLayout(input))?.[1] as RequestInit | undefined
     expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${TOKEN}`)
   })
 })
@@ -384,7 +384,7 @@ function stubWritableFetch(data: CalendarData = OCTOBER) {
         return json({ block: { id: 'new', startsAt: '', endsAt: '', isAllDay: true, reason: null } }, 201)
       }
       if (url.startsWith(CALENDAR_API)) return json(data)
-      if (isStudioMe(url)) return studioMe()
+      if (isStudioLayout(url)) return studioLayout(url)
       return json({})
     }),
   )

@@ -118,7 +118,8 @@
       "sessionFee": "Session fee, due after the shoot",
       "nonRefundable": "The booking fee is non-refundable if you cancel."
     },
-    "book": "Book"
+    "book": "Book",
+    "seeDetails": "See details"
   },
   "admin": {
     "skipToContent": "Skip to content",
@@ -163,7 +164,8 @@
       "bookings": "Bookings",
       "availability": "Availability",
       "settings": "Settings",
-      "earnings": "Earnings"
+      "earnings": "Earnings",
+      "subscription": "Subscription"
     },
     "theme": {
       "label": "Theme",
@@ -834,6 +836,85 @@
       "save": "Save payout method",
       "saving": "Saving…",
       "cancel": "Cancel"
+    },
+    "subscription": {
+      "title": "Subscription",
+      "intro": "Your subscription keeps your profile listed and open for bookings. Pay for a month or a year by Mobile Money.",
+      "loading": "Loading your subscription…",
+      "loadFailed": "Could not load your subscription. Check your connection and try again.",
+      "retry": "Try again",
+      "none": "Your subscription starts with a free trial when your profile is approved. There is nothing to pay until then.",
+      "status": {
+        "label": "Status",
+        "trialing": "Free trial",
+        "active": "Active",
+        "past_due": "Past due",
+        "expired": "Expired"
+      },
+      "summary": {
+        "trialing": "Free trial ends {{date}}.",
+        "active": "Renews by payment; paid until {{date}}.",
+        "past_due": "Your subscription ended {{date}}. Clients can't book you; your profile is hidden after {{graceEndsAt}}.",
+        "expired": "Your profile is hidden. Pay to come back."
+      },
+      "plan": {
+        "legend": "Choose a plan",
+        "monthly": "Monthly",
+        "yearly": "Yearly",
+        "monthlyPrice": "{{price}} a month",
+        "yearlyPrice": "{{price}} a year",
+        "saving": "Save {{amount}} a year compared with paying monthly"
+      },
+      "pay": {
+        "title": "Pay for your subscription",
+        "onTop": "Paying early adds the new period on top of the current one: it starts when your current period ends, on {{date}}, so you lose no days.",
+        "startsNow": "The new period starts as soon as the payment arrives.",
+        "submit": "Pay {{amount}}",
+        "submitting": "Starting the payment…",
+        "noMethods": "Online payment isn't available right now, so the subscription can't be paid here. Try again later."
+      },
+      "errors": {
+        "invalid_request": "The payment did not start: the request could not be read. Reload the page and try again.",
+        "photographer_not_approved": "Your profile isn't approved right now, so the subscription can't be paid. Bookings you already have carry on.",
+        "no_subscription": "Your studio has no subscription yet. It starts, with a free trial, when your profile is approved.",
+        "method": "That payment method isn't on offer any more. Reload the page and choose another.",
+        "rate_limited": "Too many payment attempts from this connection. Wait a minute, then try again.",
+        "rejected": "Mobile Money did not accept the request. Check that the number has a Mobile Money account, then try again.",
+        "unavailable": "We could not reach Mobile Money just now. Please try again in a moment.",
+        "failed": "The payment did not start. Check your connection and try again."
+      },
+      "progress": {
+        "waitingTitle": "Approve the payment on your phone",
+        "waitingBody": "We have sent a request for {{amount}} to your phone. Enter your Mobile Money PIN to approve it.",
+        "waitingWait": "Mobile Money can take a minute to confirm. This page updates by itself.",
+        "resumed": "A payment you started is still waiting for approval, so this page follows it. Another can start once it settles.",
+        "connectionTrouble": "We are having trouble checking on the payment. We will keep trying.",
+        "stillWaiting": "We have not heard back yet. If you approved the payment, your subscription updates once it settles.",
+        "checkAgain": "Check again",
+        "succeededTitle": "Payment received",
+        "succeededBody": "Thank you. You're paid until {{date}}. A receipt is on its way by email.",
+        "failedTitle": "The payment did not go through",
+        "failedDeclined": "The payment was declined, or was not approved in time. Nothing was charged.",
+        "failedUnavailable": "We could not reach Mobile Money to start the payment. Nothing was charged.",
+        "missing": "We could not find that payment. Check your subscription below, and pay again if it is not covered."
+      },
+      "history": {
+        "title": "History",
+        "empty": "No periods yet.",
+        "columns": {
+          "period": "Period",
+          "dates": "Dates",
+          "price": "Price",
+          "paid": "Paid"
+        },
+        "trial": "Free trial",
+        "monthly": "Monthly",
+        "yearly": "Yearly",
+        "dates": "{{start}} to {{end}}",
+        "free": "Free",
+        "current": "Current",
+        "notPaid": "Not paid"
+      }
     }
   },
   "checkout": {
@@ -1193,7 +1274,13 @@
     "empty": "No photographers are available to book right now.",
     "viewServices": "See services",
     "all": "All photographers",
-    "servicesEyebrow": "Services"
+    "servicesEyebrow": "Services",
+    "notTakingBookings": "Not taking bookings right now",
+    "notTakingBookingsBody": "This photographer isn't taking new bookings at the moment. You can still look through their services.",
+    "unavailable": {
+      "title": "This photographer is unavailable",
+      "body": "Their profile can't be shown right now. Browse the other photographers to book a shoot."
+    }
   },
   "cancellation": {
     "policy": {
@@ -1305,7 +1392,14 @@
   "studio": {
     "banner": {
       "pending": "Your profile is waiting for approval: clients can't find or book you yet.",
-      "suspended": "Your studio is suspended: clients can't find or book you. Bookings you already have carry on."
+      "suspended": "Your studio is suspended: clients can't find or book you. Bookings you already have carry on.",
+      "subscription": {
+        "past_due": "Your subscription ended {{date}}. Clients can't book you, and your profile is hidden after {{graceEndsAt}}.",
+        "expired": "Your subscription has expired and your profile is hidden. Pay to come back.",
+        "trial_ending": "Your free trial ends {{date}}. Pay to keep taking bookings.",
+        "period_ending": "Your subscription ends {{date}}. Pay to keep taking bookings.",
+        "link": "Go to subscription"
+      }
     }
   },
   "platform": {
@@ -1315,7 +1409,9 @@
       "photographers": "Photographers",
       "signOut": "Sign out",
       "payouts": "Payouts",
-      "refunds": "Refunds"
+      "refunds": "Refunds",
+      "subscriptions": "Subscriptions",
+      "settings": "Settings"
     },
     "photographers": {
       "title": "Photographers",
@@ -1544,6 +1640,76 @@
       "paidOf": "of {{amount}} paid",
       "overpaymentNote": "The client paid {{overpaid}} more than was due; the photographer earns only what was due.",
       "reducedNote": "{{overpaid}} of this payment was already returned as an overpayment, so the amount to send is reduced."
+    },
+    "settings": {
+      "title": "Settings",
+      "intro": "The values the whole platform runs on. The hold applies from the next booking, the trial from the next approval and the prices from the next payment; the grace and reminder days apply to every subscription at once.",
+      "loading": "Loading the settings…",
+      "loadFailed": "Could not load the settings. Check your connection and try again.",
+      "retry": "Try again",
+      "groups": {
+        "checkout": "Checkout",
+        "subscription": "Subscription"
+      },
+      "fields": {
+        "holdMinutes": "Checkout hold (minutes)",
+        "trialDays": "Free trial (days)",
+        "subscriptionMonthlyPriceRwf": "Monthly price (RWF)",
+        "subscriptionYearlyPriceRwf": "Yearly price (RWF)",
+        "subscriptionGraceDays": "Grace after a period ends (days)",
+        "subscriptionReminderDays": "Reminders (days before a period ends)"
+      },
+      "hints": {
+        "holdMinutes": "How long a booking keeps its time while the client pays the booking fee. 1 to 60.",
+        "trialDays": "The free trial a photographer starts with on approval. 1 to 366; applies to later approvals.",
+        "subscriptionMonthlyPriceRwf": "Whole RWF, at least 1. A payment already started keeps its amount.",
+        "subscriptionYearlyPriceRwf": "Whole RWF, at least 1. A payment already started keeps its amount.",
+        "subscriptionGraceDays": "Days a lapsed photographer stays listed, but not bookable, before the profile is hidden. 0 to 366.",
+        "subscriptionReminderDays": "Up to 10 different numbers from 1 to 366, separated by commas, such as 7, 3, 1. Leave it empty to send no reminders."
+      },
+      "invalid": {
+        "holdMinutes": "Enter a whole number of minutes from 1 to 60.",
+        "trialDays": "Enter a whole number of days from 1 to 366.",
+        "subscriptionMonthlyPriceRwf": "Enter a whole number of RWF, 1 or more.",
+        "subscriptionYearlyPriceRwf": "Enter a whole number of RWF, 1 or more.",
+        "subscriptionGraceDays": "Enter a whole number of days from 0 to 366.",
+        "subscriptionReminderDays": "Enter at most 10 different whole numbers from 1 to 366, separated by commas.",
+        "reminderDay": "Reminder {{position}} ({{value}}) must be a whole number of days from 1 to 366."
+      },
+      "placeholder": "The subscription prices are still the placeholders ({{monthly}} a month, {{yearly}} a year). Set the real prices before launch.",
+      "save": "Save changes",
+      "saving": "Saving…",
+      "saved": "Settings saved.",
+      "unchanged": "Nothing has changed, so nothing was saved.",
+      "saveFailed": "The settings were not saved. Check your connection and try again.",
+      "badRequest": "The settings were not saved: the change could not be read. Reload the page and try again."
+    },
+    "subscriptions": {
+      "title": "Subscriptions",
+      "intro": "Every photographer's subscription, the soonest to end first. The status is as of now, even when the job that records it is running late.",
+      "filter": {
+        "label": "Status",
+        "all": "All"
+      },
+      "columns": {
+        "photographer": "Photographer",
+        "status": "Status",
+        "periodEnd": "Period ends",
+        "graceEnd": "Hidden after",
+        "lastPaid": "Last paid period"
+      },
+      "loading": "Loading subscriptions…",
+      "loadFailed": "Could not load the subscriptions. Check your connection and try again.",
+      "retry": "Try again",
+      "empty": "No subscriptions yet.",
+      "emptyFiltered": "No subscriptions with this status.",
+      "neverPaid": "Never paid",
+      "lastPaid": "{{plan}}, {{price}}",
+      "paidOn": "Paid {{date}}",
+      "plans": {
+        "monthly": "Monthly",
+        "yearly": "Yearly"
+      }
     }
   },
   "account": {

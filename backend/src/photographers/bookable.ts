@@ -1,38 +1,118 @@
-import type { Photographer, Prisma } from '@prisma/client';
+import { Prisma, type Photographer, type Subscription } from '@prisma/client';
 
 /**
- * Whether a photographer can be booked: the one rule, in one place (brief
- * decision 2; marketplace-spec.md R1.3).
+ * Whether a photographer can be booked, and whether they are listed: the rules,
+ * in one place (brief decision 2; marketplace-spec.md R1.3, R5.4, R5.5).
  *
- * In Phase 1 that is `status = 'approved'`. Phase 5 adds the subscription --
- * a `past_due` photographer stays visible but cannot be booked -- and changes
- * this file only. Every public read and every write into a calendar goes
- * through one of the three forms below, so the Prisma filter, the in-memory
- * check and the locked re-check inside the claim can never disagree.
+ * BOOKABLE (R5.4; marketplace-data-model.md §3.7):
  *
- * An unbookable photographer is never named as such to the public: their handle
- * is a 404 and their packages answer exactly like an inactive package, so the
- * catalogue does not reveal whether someone is pending, suspended or unknown.
+ *   photographer.status = 'approved'
+ *   AND subscription.status IN ('trialing', 'active')
+ *   AND subscription.current_period_ends_at > now
+ *
+ * The period's end is compared with the clock DIRECTLY, every time: the
+ * subscription job (subscriptions/job.ts) moves `status` to `past_due` when a
+ * period ends, but nothing waits for it, so a job that runs late -- or not at
+ * all -- can never keep a lapsed photographer bookable. A photographer with no
+ * subscription (never approved) is not bookable.
+ *
+ * LISTED (R5.5): approved, and the subscription not yet `expired` -- `trialing`,
+ * `active` or `past_due`, with the period's end plus the grace days still ahead.
+ * A `past_due` photographer is listed with `takingBookings: false`; an expired
+ * one is hidden, and their profile is the same 404 as a suspended or unknown
+ * handle (catalogue/public.ts says why). The grace end is compared with the
+ * clock directly too, for the same reason.
+ *
+ * Every public read and every write into a calendar goes through one of the
+ * forms below, so the Prisma filter, the in-memory check and the SQL re-checked
+ * inside a transaction can never disagree:
+ *
+ *   bookablePhotographerWhere(now)   Prisma, the app's clock: the public reads
+ *   isBookable(...)                  in memory, the app's clock
+ *   BOOKABLE_SQL / lockBookablePhotographer   SQL on the DATABASE clock: the slot
+ *                                    claim (R1.3) and the booking-fee initiation
+ *                                    (R3.4), which already measure the hold there
+ *
+ * An unbookable photographer is never named as such to the public: their
+ * packages answer exactly like an inactive package, so the catalogue does not
+ * reveal whether someone is pending, suspended, out of subscription or unknown
+ * (R3.4 as built).
  */
 
-/** The Prisma filter for a bookable photographer, for the public reads. */
-export const BOOKABLE_PHOTOGRAPHER = { status: 'approved' } satisfies Prisma.PhotographerWhereInput;
+/** The subscription statuses a photographer can be booked in, while the period runs (§3.7). */
+export const BOOKABLE_SUBSCRIPTION_STATUSES = ['trialing', 'active'] as const;
+/** The subscription statuses a photographer is listed in: `past_due` too, not taking bookings (R5.5). */
+export const LISTED_SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due'] as const;
 
-/** The same rule over a row already in hand. */
-export function isBookable(photographer: Pick<Photographer, 'status'>): boolean {
-  return photographer.status === BOOKABLE_PHOTOGRAPHER.status;
+const DAY_MS = 24 * 60 * 60_000;
+
+/** The Prisma filter for a bookable photographer at `now`, for the public reads. */
+export function bookablePhotographerWhere(now: Date): Prisma.PhotographerWhereInput {
+  return {
+    status: 'approved',
+    subscription: { is: { status: { in: [...BOOKABLE_SUBSCRIPTION_STATUSES] }, currentPeriodEndsAt: { gt: now } } },
+  };
 }
 
 /**
- * The same rule again, read inside a transaction that is about to write into the
- * photographer's calendar (the slot claim, R1.3). `FOR SHARE` holds the row, so
- * a suspension cannot commit between this check and the insert that relies on
- * it: it waits for the claim, and the claim sees the photographer as they were
- * when it decided. A photographer id that names nobody is not bookable.
+ * The Prisma filter for a listed photographer at `now` (R5.5): bookable, or
+ * `past_due` and inside the grace days. Kigali keeps no daylight saving, so a
+ * grace day is 24 hours.
+ */
+export function listedPhotographerWhere(now: Date, graceDays: number): Prisma.PhotographerWhereInput {
+  return {
+    status: 'approved',
+    subscription: {
+      is: { status: { in: [...LISTED_SUBSCRIPTION_STATUSES] }, currentPeriodEndsAt: { gt: new Date(now.getTime() - graceDays * DAY_MS) } },
+    },
+  };
+}
+
+/** The same rule over rows already in hand. No subscription is not bookable. */
+export function isBookable(
+  photographer: Pick<Photographer, 'status'>,
+  subscription: Pick<Subscription, 'status' | 'currentPeriodEndsAt'> | null,
+  now: Date,
+): boolean {
+  return (
+    photographer.status === 'approved' &&
+    subscription !== null &&
+    (BOOKABLE_SUBSCRIPTION_STATUSES as readonly string[]).includes(subscription.status) &&
+    subscription.currentPeriodEndsAt.getTime() > now.getTime()
+  );
+}
+
+/**
+ * The rule as a SQL expression over `ph` (photographer) and `s` (its
+ * subscription, LEFT JOINed), on the database clock. A missing subscription
+ * makes it false, never null.
+ */
+export const BOOKABLE_SQL = Prisma.sql`(
+  ph.status = 'approved'
+  AND s.id IS NOT NULL
+  AND s.status = ANY(${[...BOOKABLE_SUBSCRIPTION_STATUSES]}::text[])
+  AND s.current_period_ends_at > now())`;
+
+/**
+ * The rule read inside a transaction that is about to write into the
+ * photographer's calendar (the slot claim, R1.3). `FOR SHARE OF ph` holds the
+ * photographer row, so a suspension cannot commit between this check and the
+ * insert that relies on it: it waits for the claim.
+ *
+ * The subscription row is read, not locked. Nothing that commits meanwhile can
+ * make a bookable photographer unbookable except the clock: a payment only ever
+ * moves the period's end later, and the job moves the status only once the end
+ * has passed, which this already compares directly. So no subscription lock is
+ * needed, and none is taken -- the subscription's own lock order
+ * (payments/webhooks.ts) never meets the calendar's. A photographer id that
+ * names nobody is not bookable.
  */
 export async function lockBookablePhotographer(tx: Prisma.TransactionClient, photographerId: string): Promise<boolean> {
-  const rows = await tx.$queryRaw<Pick<Photographer, 'status'>[]>`
-    SELECT status FROM photographer WHERE id = ${photographerId}::uuid FOR SHARE`;
-  const row = rows[0];
-  return row !== undefined && isBookable(row);
+  const rows = await tx.$queryRaw<{ bookable: boolean }[]>`
+    SELECT ${BOOKABLE_SQL} AS bookable
+      FROM photographer ph
+      LEFT JOIN subscription s ON s.photographer_id = ph.id
+     WHERE ph.id = ${photographerId}::uuid
+       FOR SHARE OF ph`;
+  return rows[0]?.bookable === true;
 }

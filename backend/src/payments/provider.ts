@@ -31,7 +31,9 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
  */
 export const SETTLED_PAYMENT_STATUSES = ['succeeded', 'failed', 'refunded', 'refund_due'] as const satisfies readonly PaymentStatus[];
 
-export type PaymentKind = 'booking_fee' | 'session_fee';
+/** `payment_kind_allowed`. A subscription payment (Phase 5, R5.2) has a subscription for its subject, never a booking. */
+export const PAYMENT_KINDS = ['booking_fee', 'session_fee', 'subscription'] as const;
+export type PaymentKind = (typeof PAYMENT_KINDS)[number];
 
 /** What a provider may assert about a payment. */
 export type ReportedStatus = 'pending' | 'succeeded' | 'failed';
@@ -45,6 +47,10 @@ export type InitiatePaymentRequest = {
   /** E.164 as `normalizePhone` returns it, or the digits typed. */
   payerPhone: string;
   kind: PaymentKind;
+  /**
+   * For the payer's statement line only: the booking reference, or for a
+   * subscription payment `SUB-<handle>` (Phase 5). The name predates subscriptions.
+   */
   bookingReference: string;
 };
 

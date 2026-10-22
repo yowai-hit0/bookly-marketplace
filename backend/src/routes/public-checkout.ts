@@ -200,7 +200,10 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
           },
         })
       : null;
-    if (payment === null) {
+    // A subscription payment has no booking: it is the photographer's, polled in
+    // the studio (`/api/studio/subscription/payments/:ourRef`), and to this public
+    // route it is as unknown as any other reference (Phase 5).
+    if (payment === null || payment.booking === null) {
       res.status(404).json({ error: 'not_found' });
       return;
     }

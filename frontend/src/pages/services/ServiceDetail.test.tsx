@@ -49,6 +49,7 @@ const PROFILE: PublicPhotographerProfile = {
   contactPhone: null,
   whatsappPhone: null,
   email: null,
+  takingBookings: true,
   cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
 }
 
@@ -71,6 +72,7 @@ const PORTRAITS: PublicServiceDetail = {
     { id: 'a2', nameEn: 'Rush edit', priceRwf: 5_000 },
   ],
   bookingFeeRate: 0.4,
+  takingBookings: true,
 }
 
 const WEDDINGS: PublicServiceDetail = {
@@ -82,6 +84,7 @@ const WEDDINGS: PublicServiceDetail = {
   packages: [{ id: 'p5', nameEn: 'Standard', descriptionEn: null, priceRwf: 40_000, photoCount: 150, durationMinutes: 240 }],
   addons: [{ id: 'a3', nameEn: 'Second shooter', priceRwf: 10_000 }],
   bookingFeeRate: 0.3,
+  takingBookings: true,
 }
 
 const PRODUCTS: PublicServiceDetail = {
@@ -93,6 +96,7 @@ const PRODUCTS: PublicServiceDetail = {
   packages: [],
   addons: [{ id: 'a2', nameEn: 'Rush edit', priceRwf: 5_000 }],
   bookingFeeRate: 0.4,
+  takingBookings: true,
 }
 
 const NOTICE = 'The booking fee is non-refundable if you cancel.'
@@ -229,11 +233,12 @@ describe('loading a service', () => {
     expect(sent).toEqual([PROFILE_API, `${API}/portraits`])
   })
 
-  it('renders the not-found page for a handle the API answers 404 -- unknown, or not bookable', async () => {
+  it('says the photographer is unavailable for a handle the API answers 404 -- unknown, or not listed (Phase 5, R5.5)', async () => {
     stubApi({ [PROFILE_API]: () => json({ error: 'not_found' }, 404), [`${API}/portraits`]: () => json({ error: 'not_found' }, 404) })
     renderAt('/p/kigali-lens/portraits')
 
-    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'This photographer is unavailable' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument()
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument()
   })
 
@@ -1033,6 +1038,60 @@ describe('booking from the service page', () => {
     expect(field('fullName')).toHaveValue('Aline Uwase')
   })
 
+  it('on a 422 naming the package, reads the profile again; one no longer taking bookings is the notice, not a changed catalogue (Phase 5)', async () => {
+    let profileCalls = 0
+    const posts: unknown[] = []
+    const sent = stubApi({
+      [PROFILE_API]: () => json({ photographer: { ...PROFILE, takingBookings: ++profileCalls === 1 } }),
+      [BOOKINGS]: (init = {}) => {
+        posts.push(JSON.parse(String(init.body)))
+        return json({ error: 'validation_failed', fields: ['packageId'] }, 422)
+      },
+      '/api/availability?packageId=p2&month=2026-10': () => json({ days: availabilityFor('p2', '2026-10') }),
+    })
+    await renderLoaded()
+    const u = user()
+    await chooseStart(u)
+    await fillForm(u)
+
+    await u.click(confirmButton())
+
+    await waitFor(() => expect(document.querySelector('[data-not-taking-bookings]')).not.toBeNull())
+    expect(screen.queryByText(CATALOGUE_CHANGED)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm booking' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Your details' })).not.toBeInTheDocument()
+    expect(sent.filter((url) => url === PROFILE_API)).toHaveLength(2)
+    expect(posts).toHaveLength(1)
+  })
+
+  it('on a 422 naming the package, says the catalogue changed when the profile still takes bookings', async () => {
+    const { sent } = stubBookingApi(() => json({ error: 'validation_failed', fields: ['packageId'] }, 422))
+    await renderLoaded()
+    const u = user()
+    await chooseStart(u)
+    await fillForm(u)
+
+    await u.click(confirmButton())
+
+    expect(await within(summary()).findByRole('alert')).toHaveTextContent(CATALOGUE_CHANGED)
+    expect(document.querySelector('[data-not-taking-bookings]')).toBeNull()
+    expect(sent.filter((url) => url === PROFILE_API)).toHaveLength(2)
+  })
+
+  it('does not read the profile again for a 422 that does not name the package', async () => {
+    const { sent } = stubBookingApi(() => json({ error: 'validation_failed', fields: ['addonIds'] }, 422))
+    await renderLoaded()
+    const u = user()
+    await u.click(addonCheckbox('Extra hour'))
+    await chooseStart(u)
+    await fillForm(u)
+
+    await u.click(confirmButton())
+
+    expect(await within(summary()).findByRole('alert')).toHaveTextContent(CATALOGUE_CHANGED)
+    expect(sent.filter((url) => url === PROFILE_API)).toHaveLength(1)
+  })
+
   it('still says the catalogue changed when the same 422 also refuses the start, which clears it', async () => {
     stubBookingApi(() => json({ error: 'validation_failed', fields: ['addonIds', 'startsAt'] }, 422))
     await renderLoaded()
@@ -1157,5 +1216,112 @@ describe('booking from the service page', () => {
 
     expect(field('fullName')).toHaveValue('Aline Uwase')
     expect(consentBox()).toBeChecked()
+  })
+})
+
+describe('a photographer not taking bookings (Phase 5, R5.5)', () => {
+  const NOT_TAKING = "This photographer isn't taking new bookings at the moment. You can still look through their services."
+
+  it.each([
+    ['the profile', { profile: false, service: true }],
+    ['the service', { profile: true, service: false }],
+    ['both', { profile: false, service: false }],
+  ])('when %s says so, shows the notice in place of the slot picker and the booking form', async (_label, taking) => {
+    const sent = stubApi({
+      [PROFILE_API]: () => json({ photographer: { ...PROFILE, takingBookings: taking.profile } }),
+      [`${API}/portraits`]: () => json({ service: { ...PORTRAITS, takingBookings: taking.service } }),
+    })
+    renderAt('/p/kigali-lens/portraits')
+
+    await screen.findByRole('heading', { level: 1, name: 'Portraits' })
+    expect(document.querySelector('[data-not-taking-bookings]')).toHaveTextContent(NOT_TAKING)
+
+    // The packages and prices stay to be read; choosing one offers no time and no form.
+    await user().click(packageRadio('Standard'))
+    expect(screen.queryByRole('heading', { name: 'Choose a date and time' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Choose a package to see available times.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Your details' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirm booking' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Choose a date and time to continue.')).not.toBeInTheDocument()
+    // Nothing asks for availability.
+    expect(sent.filter((url) => url.startsWith('/api/availability'))).toEqual([])
+  })
+
+  it('shows no notice while bookings are open', async () => {
+    stubApi()
+    renderAt('/p/kigali-lens/portraits')
+
+    await screen.findByRole('heading', { level: 1, name: 'Portraits' })
+    expect(document.querySelector('[data-not-taking-bookings]')).toBeNull()
+  })
+
+  /** The public API, with the calendar refusing the package; the profile answers `taking` in turn (the last repeats). */
+  function stubRefusingCalendar(...taking: boolean[]) {
+    const sent: string[] = []
+    let profileCalls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        sent.push(url)
+        if (url === PROFILE_API) {
+          const answer = taking[Math.min(profileCalls++, taking.length - 1)]
+          return json({ photographer: { ...PROFILE, takingBookings: answer } })
+        }
+        if (url === `${API}/portraits`) return json({ service: PORTRAITS })
+        if (url.startsWith('/api/availability?')) return json({ error: 'validation_failed', fields: ['packageId'] }, 422)
+        return json({ error: 'not_found' }, 404)
+      }),
+    )
+    return sent
+  }
+
+  it('on a 422 for the package from the calendar, reads the profile again and shows the notice when it says so', async () => {
+    const sent = stubRefusingCalendar(true, false)
+    renderAt('/p/kigali-lens/portraits')
+
+    await screen.findByRole('heading', { level: 1, name: 'Portraits' })
+    await user().click(packageRadio('Standard'))
+
+    await waitFor(() => expect(document.querySelector('[data-not-taking-bookings]')).toHaveTextContent(NOT_TAKING))
+    expect(sent.filter((url) => url === PROFILE_API)).toHaveLength(2)
+    expect(screen.queryByRole('heading', { name: 'Choose a date and time' })).not.toBeInTheDocument()
+  })
+
+  it('on a 422 for the package from the calendar, keeps the picker when the profile still takes bookings', async () => {
+    const sent = stubRefusingCalendar(true)
+    renderAt('/p/kigali-lens/portraits')
+
+    await screen.findByRole('heading', { level: 1, name: 'Portraits' })
+    await user().click(packageRadio('Standard'))
+
+    expect(await screen.findByText('Could not load available times.')).toBeInTheDocument()
+    await waitFor(() => expect(sent.filter((url) => url === PROFILE_API)).toHaveLength(2))
+    expect(document.querySelector('[data-not-taking-bookings]')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Choose a date and time' })).toBeInTheDocument()
+  })
+
+  it('on a 422 for the package from the calendar, keeps the picker when the profile cannot be read again', async () => {
+    const sent: string[] = []
+    let profileCalls = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        sent.push(url)
+        if (url === PROFILE_API) return ++profileCalls === 1 ? json({ photographer: PROFILE }) : json({ error: 'internal_error' }, 500)
+        if (url === `${API}/portraits`) return json({ service: PORTRAITS })
+        if (url.startsWith('/api/availability?')) return json({ error: 'validation_failed', fields: ['packageId'] }, 422)
+        return json({ error: 'not_found' }, 404)
+      }),
+    )
+    renderAt('/p/kigali-lens/portraits')
+
+    await screen.findByRole('heading', { level: 1, name: 'Portraits' })
+    await user().click(packageRadio('Standard'))
+
+    await waitFor(() => expect(sent.filter((url) => url === PROFILE_API)).toHaveLength(2))
+    expect(await screen.findByText('Could not load available times.')).toBeInTheDocument()
+    expect(document.querySelector('[data-not-taking-bookings]')).toBeNull()
   })
 })

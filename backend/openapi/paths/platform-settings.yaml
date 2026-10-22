@@ -1,0 +1,89 @@
+# The platform's settings and every photographer's subscription
+# (marketplace-spec.md Phase 5: R5.1, R5.4, R9.3). Every operation requires a
+# platform admin's bearer token; a photographer's or a client's is a 401.
+
+settings:
+  get:
+    operationId: getPlatformSettings
+    tags: [Platform settings]
+    summary: The platform settings
+    description: The checkout hold, the free trial, the plan's monthly and yearly prices, the grace days and the reminder days.
+    security:
+      - platformBearer: []
+    responses:
+      '200':
+        description: The settings.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settings]
+              additionalProperties: false
+              properties:
+                settings: { $ref: ../components/subscriptions.yaml#/schemas/PlatformSettings }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  patch:
+    operationId: updatePlatformSettings
+    tags: [Platform settings]
+    summary: Change the platform settings
+    description: |
+      Saves any subset and answers every value as stored. What a change touches:
+      the hold, the next booking's; the trial, later approvals; the prices, the
+      next payment (one already started keeps its amount); the grace and reminder
+      days, every subscription at once. Each change is logged with who made it.
+    security:
+      - platformBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/subscriptions.yaml#/schemas/PlatformSettingsUpdate }
+    responses:
+      '200':
+        description: The settings as stored.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [settings]
+              additionalProperties: false
+              properties:
+                settings: { $ref: ../components/subscriptions.yaml#/schemas/PlatformSettings }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+
+subscriptions:
+  get:
+    operationId: listPlatformSubscriptions
+    tags: [Platform settings]
+    summary: Every subscription, with its history
+    description: Every photographer's subscription, the soonest to end first, or only those in one status at the clock.
+    security:
+      - platformBearer: []
+    parameters:
+      - name: status
+        in: query
+        required: false
+        schema: { $ref: ../components/common.yaml#/schemas/SubscriptionStatus }
+    responses:
+      '200':
+        description: The subscriptions.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscriptions]
+              additionalProperties: false
+              properties:
+                subscriptions:
+                  type: array
+                  items: { $ref: ../components/subscriptions.yaml#/schemas/PlatformSubscription }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import { readSession } from '@/admin/session'
 import { routes } from '@/routes'
-import { isStudioMe, studioMe } from '@/test/studio-me'
+import { isStudioLayout, studioLayout } from '@/test/studio-me'
 
 /**
  * `/studio/login` (plan.md Task 9, spec A-11; `/admin/login` until Phase 2):
@@ -44,12 +44,12 @@ const LOGIN_OK = {
 
 /** Login answers `respond`; the layout's banner request answers approved; the calendar, once reached, answers empty. */
 function stubLogin(respond: () => Response | Promise<Response>) {
-  return stubFetch((url) => (url === LOGIN_URL ? respond() : isStudioMe(url) ? studioMe() : json({ bookings: [], blocks: [] })))
+  return stubFetch((url) => (url === LOGIN_URL ? respond() : isStudioLayout(url) ? studioLayout(url) : json({ bookings: [], blocks: [] })))
 }
 
 /** The requests the pages made, the layout's banner request left out. */
 function pageCalls(mock: ReturnType<typeof stubFetch>) {
-  return mock.mock.calls.filter(([input]) => !isStudioMe(input))
+  return mock.mock.calls.filter(([input]) => !isStudioLayout(input))
 }
 
 function renderLogin(path = '/studio/login') {

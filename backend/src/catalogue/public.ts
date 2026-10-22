@@ -1,6 +1,6 @@
 import type { Addon, Package, Prisma, PrismaClient, Service } from '@prisma/client';
-import { BOOKABLE_PHOTOGRAPHER } from '../photographers/bookable.js';
-import { getPhotographerSettings } from '../settings/index.js';
+import { bookablePhotographerWhere, isBookable, listedPhotographerWhere } from '../photographers/bookable.js';
+import { getPhotographerSettings, getPlatformSettings } from '../settings/index.js';
 
 /**
  * What the public site may list (plan.md Tasks 10 and 11; brief decision 4):
@@ -15,9 +15,21 @@ import { getPhotographerSettings } from '../settings/index.js';
  * applies to it, so the page can show a live quote.
  *
  * Every catalogue read is addressed by one photographer, whose id the route
- * resolved from a bookable handle. Nothing here joins across photographers: an
+ * resolved from a listed handle. Nothing here joins across photographers: an
  * add-on offered "on every service" is offered on every service of its own
  * photographer, never another's (marketplace-data-model.md §2.7).
+ *
+ * LISTED is not BOOKABLE (marketplace-spec.md R5.5, photographers/bookable.ts):
+ * a photographer whose subscription is `past_due` is still listed, profile and
+ * services included, with `takingBookings: false`; their packages, like every
+ * unbookable photographer's, still answer the quote, the calendar and the
+ * booking form exactly as an inactive package does. An `expired` one is not
+ * listed: their profile is the same 404 as a suspended, pending or unknown
+ * handle. R5.5 says the profile page "says unavailable": that is the page's
+ * wording of the 404, which already cannot tell those cases apart -- R3.4 as
+ * built keeps an out-of-subscription photographer indistinguishable from a
+ * suspended one to the public, and a distinct answer for `expired` would publish
+ * a photographer's billing state.
  */
 
 /** One card of the photographers list. No filters until the Phase 6 directory. */
@@ -25,6 +37,8 @@ export type PublicPhotographerSummary = {
   handle: string;
   displayName: string;
   coverImageUrl: string | null;
+  /** False while the subscription is `past_due` (R5.5): listed, with a "not taking bookings" notice. */
+  takingBookings: boolean;
 };
 
 /**
@@ -89,23 +103,28 @@ export type PublicServiceDetail = PublicService & {
 export const CATALOGUE_ORDER = [{ sortOrder: 'asc' }, { nameEn: 'asc' }, { createdAt: 'asc' }] as const;
 
 /**
- * A package the public can book: active, on an active service, sold by a
- * bookable photographer. One definition for every public use -- a quote, a
- * calendar and a booking must agree on what exists, and a photographer who
- * cannot be booked makes their packages answer exactly like inactive ones.
+ * A package the public can book at `now`: active, on an active service, sold by
+ * a bookable photographer (R5.4). One definition for every public use -- a
+ * quote, a calendar and a booking must agree on what exists, and a photographer
+ * who cannot be booked makes their packages answer exactly like inactive ones.
  */
-export const BOOKABLE_PACKAGE = {
-  isActive: true,
-  service: { isActive: true },
-  photographer: BOOKABLE_PHOTOGRAPHER,
-} satisfies Prisma.PackageWhereInput;
+export function bookablePackageWhere(now: Date): Prisma.PackageWhereInput {
+  return { isActive: true, service: { isActive: true }, photographer: bookablePhotographerWhere(now) };
+}
 
 const ACTIVE_CHILDREN = {
   packages: { where: { isActive: true }, orderBy: [...CATALOGUE_ORDER] },
   addons: { where: { isActive: true }, orderBy: [...CATALOGUE_ORDER] },
 } satisfies Prisma.ServiceInclude;
 
+/** What `takingBookings` is decided from (photographers/bookable.ts `isBookable`). */
+const BOOKABILITY_SELECT = {
+  status: true,
+  subscription: { select: { status: true, currentPeriodEndsAt: true } },
+} satisfies Prisma.PhotographerSelect;
+
 const PROFILE_SELECT = {
+  ...BOOKABILITY_SELECT,
   id: true,
   handle: true,
   displayName: true,
@@ -120,28 +139,44 @@ const PROFILE_SELECT = {
 /** The `photographer_handle_format` CHECK: a handle it could not hold names nobody and is not looked up. */
 const HANDLE_FORMAT = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
 
-/** Every bookable photographer, by name then handle (brief decision 4). */
-export async function listPublicPhotographers(prisma: PrismaClient): Promise<PublicPhotographerSummary[]> {
-  return prisma.photographer.findMany({
-    where: BOOKABLE_PHOTOGRAPHER,
+/**
+ * Every listed photographer at `now`, by name then handle (brief decision 4;
+ * R5.5): the bookable ones and those `past_due`, each saying whether they are
+ * taking bookings.
+ */
+export async function listPublicPhotographers(prisma: PrismaClient, now: Date = new Date()): Promise<PublicPhotographerSummary[]> {
+  const { subscriptionGraceDays } = await getPlatformSettings(prisma);
+  const rows = await prisma.photographer.findMany({
+    where: listedPhotographerWhere(now, subscriptionGraceDays),
     orderBy: [{ displayName: 'asc' }, { handle: 'asc' }],
-    select: { handle: true, displayName: true, coverImageUrl: true },
+    select: { ...BOOKABILITY_SELECT, handle: true, displayName: true, coverImageUrl: true },
   });
+  return rows.map((row) => ({
+    handle: row.handle,
+    displayName: row.displayName,
+    coverImageUrl: row.coverImageUrl,
+    takingBookings: isBookable(row, row.subscription, now),
+  }));
 }
 
 /**
- * A bookable photographer by handle -- their public profile, and their id for
- * the catalogue reads that follow -- or null. Unknown, pending and suspended
- * are all null: the public is never told which.
+ * A listed photographer by handle at `now` -- their public profile, and their
+ * id for the catalogue reads that follow -- or null. Unknown, pending,
+ * suspended and expired are all null: the public is never told which.
  */
 export async function findPublicPhotographer(
   prisma: PrismaClient,
   handle: string,
+  now: Date = new Date(),
 ): Promise<{ id: string; profile: PublicPhotographerProfile } | null> {
   if (!HANDLE_FORMAT.test(handle)) return null;
-  const photographer = await prisma.photographer.findFirst({ where: { handle, ...BOOKABLE_PHOTOGRAPHER }, select: PROFILE_SELECT });
+  const { subscriptionGraceDays } = await getPlatformSettings(prisma);
+  const photographer = await prisma.photographer.findFirst({
+    where: { handle, ...listedPhotographerWhere(now, subscriptionGraceDays) },
+    select: PROFILE_SELECT,
+  });
   if (photographer === null) return null;
-  return { id: photographer.id, profile: toPublicProfile(photographer) };
+  return { id: photographer.id, profile: toPublicProfile(photographer, now) };
 }
 
 /** One photographer's public catalogue. */
@@ -188,7 +223,7 @@ function findSharedAddons(prisma: PrismaClient, photographerId: string): Promise
   return prisma.addon.findMany({ where: { photographerId, isActive: true, serviceId: null }, orderBy: [...CATALOGUE_ORDER] });
 }
 
-function toPublicProfile(photographer: Prisma.PhotographerGetPayload<{ select: typeof PROFILE_SELECT }>): PublicPhotographerProfile {
+function toPublicProfile(photographer: Prisma.PhotographerGetPayload<{ select: typeof PROFILE_SELECT }>, now: Date): PublicPhotographerProfile {
   // The signup transaction creates the settings row with the photographer, so
   // a missing one is a broken invariant, as getPhotographerSettings() treats it.
   if (photographer.setting === null) throw new Error(`photographer ${photographer.id} has no settings row`);
@@ -196,6 +231,7 @@ function toPublicProfile(photographer: Prisma.PhotographerGetPayload<{ select: t
     handle: photographer.handle,
     displayName: photographer.displayName,
     coverImageUrl: photographer.coverImageUrl,
+    takingBookings: isBookable(photographer, photographer.subscription, now),
     bio: photographer.bio,
     contactPhone: photographer.contactPhone,
     whatsappPhone: photographer.whatsappPhone,

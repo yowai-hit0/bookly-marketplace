@@ -19,6 +19,16 @@ let prisma: PrismaClient;
 let raw: ReturnType<typeof connect>;
 let world: PaymentWorld;
 
+/** The platform row seedWorld creates: the schema defaults and the placeholder prices (marketplace-data-model.md §3.2). */
+const PLATFORM_DEFAULTS = {
+  holdMinutes: 30,
+  trialDays: 30,
+  subscriptionMonthlyPriceRwf: 10_000,
+  subscriptionYearlyPriceRwf: 100_000,
+  subscriptionGraceDays: 7,
+  subscriptionReminderDays: [7, 3, 1],
+};
+
 /** The schema defaults a photographer's row is born with (marketplace-data-model.md §3.2, R1.8). */
 const PHOTOGRAPHER_DEFAULTS = {
   bookingFeeRate: 0.4,
@@ -92,12 +102,30 @@ describe('updatePhotographerSettings', () => {
 
 describe('platform settings', () => {
   it('returns the hold and the trial length (brief decision 5)', async () => {
-    await expect(getPlatformSettings(prisma)).resolves.toEqual({ holdMinutes: 30, trialDays: 30 });
+    await expect(getPlatformSettings(prisma)).resolves.toEqual(PLATFORM_DEFAULTS);
   });
 
   it('saves a subset and returns every value as stored', async () => {
-    await expect(updatePlatformSettings({ holdMinutes: 15 }, prisma)).resolves.toEqual({ holdMinutes: 15, trialDays: 30 });
-    await expect(getPlatformSettings(prisma)).resolves.toEqual({ holdMinutes: 15, trialDays: 30 });
+    await expect(updatePlatformSettings({ holdMinutes: 15 }, prisma)).resolves.toEqual({ ...PLATFORM_DEFAULTS, holdMinutes: 15 });
+    await expect(getPlatformSettings(prisma)).resolves.toEqual({ ...PLATFORM_DEFAULTS, holdMinutes: 15 });
+  });
+
+  it('saves the subscription plan: prices, grace and reminder days (Phase 5, R5.1, R5.4)', async () => {
+    const plan = { trialDays: 14, subscriptionMonthlyPriceRwf: 12_000, subscriptionYearlyPriceRwf: 120_000, subscriptionGraceDays: 3, subscriptionReminderDays: [10, 2] };
+    await expect(updatePlatformSettings(plan, prisma)).resolves.toEqual({ ...PLATFORM_DEFAULTS, ...plan });
+    await expect(getPlatformSettings(prisma)).resolves.toEqual({ ...PLATFORM_DEFAULTS, ...plan });
+  });
+
+  it('reads the reminder days largest first, however they were stored, and an empty list as none', async () => {
+    await raw.query(`UPDATE platform_setting SET subscription_reminder_days = '{1,14,3}'`);
+    await expect(getPlatformSettings(prisma)).resolves.toMatchObject({ subscriptionReminderDays: [14, 3, 1] });
+    await updatePlatformSettings({ subscriptionReminderDays: [] }, prisma);
+    await expect(getPlatformSettings(prisma)).resolves.toMatchObject({ subscriptionReminderDays: [] });
+  });
+
+  it('leaves the CHECKs as the backstop: a zero price is refused by the database', async () => {
+    await expect(updatePlatformSettings({ subscriptionMonthlyPriceRwf: 0 }, prisma)).rejects.toThrow();
+    await expect(getPlatformSettings(prisma)).resolves.toEqual(PLATFORM_DEFAULTS);
   });
 
   it('throws when the seed never created the row', async () => {

@@ -1,9 +1,9 @@
-import { CalendarClock, CalendarDays, ClipboardList, type LucideIcon, Package, Settings, Wallet } from 'lucide-react'
+import { CalendarClock, CalendarDays, ClipboardList, type LucideIcon, Package, Repeat, Settings, Wallet } from 'lucide-react'
 
 /**
  * The admin pages, in the order the sidebar lists them
  * (design-system/bookly/pages/admin-shell.md; Earnings added in Phase 4,
- * R4.5). The sidebar and the breadcrumb both read this, so a page's label and
+ * R4.5; Subscription in Phase 5, R5.2). The sidebar and the breadcrumb both read this, so a page's label and
  * icon cannot drift between the two. Labels are `admin:nav.<page>`.
  *
  * `also` names the pages that live under a section without a nav link of
@@ -15,6 +15,7 @@ export const NAV_ITEMS = [
   { page: 'catalogue', icon: Package },
   { page: 'availability', icon: CalendarClock },
   { page: 'earnings', icon: Wallet, also: ['payouts', 'payout-method'] },
+  { page: 'subscription', icon: Repeat },
   { page: 'settings', icon: Settings },
 ] as const satisfies readonly { page: string; icon: LucideIcon; also?: readonly string[] }[]
 

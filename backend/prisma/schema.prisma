@@ -15,9 +15,9 @@
 //      you they went missing; a query against pg_constraint can.
 //
 // Phase 1 (marketplace-spec.md) models the photographer and the per-photographer
-// separation; Phase 4 adds payouts (payout_method, payout, payout_item).
-// Subscriptions and the subscription payment columns are NOT here yet: Phase 5
-// adds them as an incremental migration (marketplace-data-model.md §5).
+// separation; Phase 4 adds payouts (payout_method, payout, payout_item); Phase 5
+// adds subscriptions (subscription, subscription_period) and the subscription
+// columns of payment (marketplace-data-model.md §2.11, §3.7).
 
 generator client {
   provider = "prisma-client-js"
@@ -107,16 +107,28 @@ model OauthFlow {
 }
 
 /// One row, CHECK (id = 1). What belongs to the payment infrastructure rather
-/// than to any photographer (marketplace-data-model.md §2.2). The subscription
-/// plan's prices, grace and reminder days arrive with Phase 5.
+/// than to any photographer (marketplace-data-model.md §2.2), and the one
+/// subscription plan (§3.2; marketplace-spec.md R5.1). A platform admin edits
+/// every value here (`PATCH /api/platform/settings`).
 model PlatformSetting {
-  id          Int      @id @default(1)
+  id                          Int      @id @default(1)
   /// The checkout hold. Must stay inside the reconciler window
   /// (payments/reconcile.ts, 60 minutes) and match how long MoMo prompts last.
-  holdMinutes Int      @default(30) @map("hold_minutes")
+  holdMinutes                 Int      @default(30) @map("hold_minutes")
   /// The free trial a photographer gets at approval (marketplace-spec.md decisions).
-  trialDays   Int      @default(30) @map("trial_days")
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// At least one day (CHECK platform_setting_trial_days_positive): a trial is a
+  /// period, and a period has a positive length.
+  trialDays                   Int      @default(30) @map("trial_days")
+  /// The plan's prices in whole RWF. NO column default (§3.2): the seed writes
+  /// them, as PLACEHOLDERS to set before launch (db/seed.ts). CHECK > 0.
+  subscriptionMonthlyPriceRwf Int      @map("subscription_monthly_price_rwf")
+  subscriptionYearlyPriceRwf  Int      @map("subscription_yearly_price_rwf")
+  /// Days of `past_due` after a period ends, listed but not bookable, before `expired` (R5.4).
+  subscriptionGraceDays       Int      @default(7) @map("subscription_grace_days")
+  /// Reminders go out this many days before a period ends (R5.4). CHECK: at most
+  /// ten, each positive, no nulls.
+  subscriptionReminderDays    Int[]    @default([7, 3, 1]) @map("subscription_reminder_days")
+  updatedAt                   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("platform_setting")
 }
@@ -149,8 +161,8 @@ model PhotographerSetting {
 // --- Photographers -----------------------------------------------------------
 
 /// The tenant. Every studio row hangs off one of these (marketplace-data-model.md
-/// §3.3). Bookable in Phase 1 iff status = 'approved' (photographers/bookable.ts);
-/// Phase 5 adds the subscription check there.
+/// §3.3). Bookable iff status = 'approved' with a live subscription
+/// (photographers/bookable.ts, R5.4).
 model Photographer {
   id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   /// Must be a role = photographer user; enforced in the signup transaction.
@@ -179,6 +191,8 @@ model Photographer {
   user               AppUser                @relation("PhotographerOwner", fields: [userId], references: [id], onDelete: Restrict)
   approvedBy         AppUser?               @relation("PhotographerApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   setting            PhotographerSetting?
+  /// Created at approval with its trial (R5.1); at most one (unique photographer_id).
+  subscription       Subscription?
   districts          PhotographerDistrict[]
   categories         PhotographerCategory[]
   portfolioImages    PortfolioImage[]
@@ -605,13 +619,20 @@ model BookingAddon {
 /// One row per collection attempt. Never edited except by its own state machine;
 /// never deleted. The system never moves money -- no column here triggers a
 /// transfer (data-model_v2.md §5.11). Deliberately no photographer_id: it is
-/// derivable through the booking (marketplace-data-model.md §2.11). The
-/// subscription columns of §2.11 arrive with Phase 5.
+/// derivable through the booking or the subscription (marketplace-data-model.md
+/// §2.11). Exactly one subject: a booking (booking and session fees) or a
+/// subscription (CHECKs payment_subject_exactly_one, payment_subject_matches_kind).
 model Payment {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  bookingId       String    @map("booking_id") @db.Uuid
-  /// booking_fee | session_fee
+  /// Set for booking_fee and session_fee. Null for subscription (Phase 5).
+  bookingId       String?   @map("booking_id") @db.Uuid
+  /// Set for subscription only (Phase 5, R5.2).
+  subscriptionId  String?   @map("subscription_id") @db.Uuid
+  /// booking_fee | session_fee | subscription
   kind            String
+  /// monthly | yearly. Frozen at initiation for kind = subscription, null otherwise
+  /// (CHECK payment_plan_interval_matches_kind).
+  planInterval    String?   @map("plan_interval")
   /// mtn_momo_direct | flutterwave | cash. Frozen at creation so records
   /// survive the cutover (spec §6.18). `cash` is money the photographer
   /// recorded by hand (admin console fixes, item 7, 2026-09-27), and is only
@@ -659,14 +680,79 @@ model Payment {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  booking     Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking      Booking?      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  /// The paid period a succeeded subscription payment added (R5.3).
+  subscriptionPeriod SubscriptionPeriod?
   refundedBy  AppUser?     @relation("PaymentRefundedBy", fields: [refundedByUserId], references: [id], onDelete: Restrict)
   overpaymentRefundedBy AppUser? @relation("PaymentOverpaymentRefundedBy", fields: [overpaymentRefundedByUserId], references: [id], onDelete: Restrict)
   /// Its earning and, when a refund came too late to void that, its reversal (payouts/ledger.ts).
   payoutItems PayoutItem[]
 
   @@index([bookingId, kind, status])
+  /// The one-in-progress check of a subscription payment, and the studio's history (R5.2).
+  @@index([subscriptionId, status])
   @@map("payment")
+}
+
+// --- Subscriptions (Phase 5) ---------------------------------------------------
+
+/// One per photographer, created at APPROVAL with its trial period, in the
+/// approval's transaction (marketplace-spec.md R5.1; marketplace-data-model.md
+/// §3.7; subscriptions/lifecycle.ts). Never auto-charged: the photographer pays
+/// each period by MoMo from the studio (R5.2), and every succeeded payment adds
+/// its period on top of whatever is left (R5.3).
+///
+/// `status` is the job's record (subscriptions/job.ts): trialing | active while
+/// now < current_period_ends_at, past_due until the end plus the grace days,
+/// then expired. Bookability never trusts it alone: it also compares
+/// `current_period_ends_at` with the clock, so a late job cannot keep anyone
+/// bookable (R5.4, photographers/bookable.ts).
+model Subscription {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId      String   @unique @map("photographer_id") @db.Uuid
+  /// trialing | active | past_due | expired. CHECK subscription_status_allowed.
+  status              String   @default("trialing")
+  /// The end of the latest period, paid or trial: kept equal to it by every writer.
+  currentPeriodEndsAt DateTime @map("current_period_ends_at") @db.Timestamptz(6)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  photographer Photographer         @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  periods      SubscriptionPeriod[]
+  payments     Payment[]
+
+  /// The job's scans: what ends soon, and what has ended.
+  @@index([status, currentPeriodEndsAt])
+  @@map("subscription")
+}
+
+/// One stretch of time a subscription covers: the trial (one per subscription,
+/// partial unique subscription_period_one_trial) or a paid month or year. Periods
+/// never overlap (exclusion subscription_period_no_overlap, unless voided); a paid
+/// one names the payment that bought it, once (unique payment_id). The shape per
+/// kind is CHECK subscription_period_shape.
+model SubscriptionPeriod {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subscriptionId String    @map("subscription_id") @db.Uuid
+  /// trial | paid
+  kind           String
+  /// monthly | yearly; null for the trial.
+  planInterval   String?   @map("plan_interval")
+  /// What was paid, whole RWF; 0 for the trial.
+  priceRwf       Int       @map("price_rwf")
+  startsAt       DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt         DateTime  @map("ends_at") @db.Timestamptz(6)
+  paymentId      String?   @unique @map("payment_id") @db.Uuid
+  /// Reserved for a period taken back by hand (§3.7); nothing in the app sets it yet.
+  voidedAt       DateTime? @map("voided_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  payment      Payment?     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId, endsAt])
+  @@map("subscription_period")
 }
 
 // --- Payouts (Phase 4) ---------------------------------------------------------

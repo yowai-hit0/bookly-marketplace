@@ -1,0 +1,244 @@
+# Subscription schemas (marketplace-spec.md Phase 5: R5.1-R5.5): the studio's
+# subscription page (`subscriptions/views.ts`), paying for it
+# (`subscriptions/payments.ts`), and the platform's settings and list.
+
+schemas:
+  SubscriptionPeriod:
+    type: object
+    description: |
+      One stretch of time the subscription covers: the free trial, or a paid month
+      or year. A paid period starts where the time already covered ends, so
+      paying early adds time on top (R5.3).
+    required: [id, kind, planInterval, priceRwf, startsAt, endsAt, paidAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { type: string, enum: [trial, paid] }
+      planInterval:
+        description: Null for the trial.
+        oneOf:
+          - $ref: 'common.yaml#/schemas/PlanInterval'
+          - type: 'null'
+      priceRwf:
+        description: What was paid; 0 for the trial.
+        allOf:
+          - $ref: 'common.yaml#/schemas/Rwf'
+      startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      paidAt:
+        description: When its payment succeeded; null for the trial.
+        oneOf:
+          - $ref: 'common.yaml#/schemas/Instant'
+          - type: 'null'
+
+  SubscriptionPayment:
+    type: object
+    description: |
+      One subscription payment as the photographer may see it. `failure` says
+      why a failed one failed, as the payer may be told it: `declined` (turned
+      down, timed out on the phone, an unknown number) or `unavailable` (the
+      provider could not be reached). The recorded reason stays internal.
+    required: [ourRef, status, planInterval, amountRwf, method, failure, initiatedAt, settledAt]
+    additionalProperties: false
+    properties:
+      ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+      status: { $ref: 'common.yaml#/schemas/PaymentStatus' }
+      planInterval: { $ref: 'common.yaml#/schemas/PlanInterval' }
+      amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      method:
+        oneOf:
+          - $ref: 'common.yaml#/schemas/PaymentMethod'
+          - type: 'null'
+      failure:
+        oneOf:
+          - type: string
+            enum: [declined, unavailable]
+          - type: 'null'
+      initiatedAt: { $ref: 'common.yaml#/schemas/Instant' }
+      settledAt:
+        oneOf:
+          - $ref: 'common.yaml#/schemas/Instant'
+          - type: 'null'
+
+  StudioSubscription:
+    type: object
+    required: [id, status, currentPeriodEndsAt, graceEndsAt, takingBookings, currentPeriod, periods, paymentInProgress]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      status: { $ref: 'common.yaml#/schemas/SubscriptionStatus' }
+      currentPeriodEndsAt:
+        description: The end of the latest period, paid or trial.
+        allOf:
+          - $ref: 'common.yaml#/schemas/Instant'
+      graceEndsAt:
+        description: When a lapsed subscription becomes `expired` and the profile is hidden.
+        allOf:
+          - $ref: 'common.yaml#/schemas/Instant'
+      takingBookings:
+        type: boolean
+        description: Whether clients can book the photographer now (approved, and the period still running).
+      currentPeriod:
+        description: The period now falls in; null once the last one has ended.
+        oneOf:
+          - $ref: '#/schemas/SubscriptionPeriod'
+          - type: 'null'
+      periods:
+        type: array
+        description: Every period, newest first.
+        items: { $ref: '#/schemas/SubscriptionPeriod' }
+      paymentInProgress:
+        description: A payment still waiting on the payer, which blocks starting another; null if none.
+        oneOf:
+          - $ref: '#/schemas/SubscriptionPayment'
+          - type: 'null'
+
+  StudioSubscriptionPage:
+    type: object
+    required: [subscription, prices, methods, graceDays]
+    additionalProperties: false
+    properties:
+      subscription:
+        description: Null before approval (the subscription and its trial start then, R5.1).
+        oneOf:
+          - $ref: '#/schemas/StudioSubscription'
+          - type: 'null'
+      prices:
+        type: object
+        description: The plan's prices, whole RWF, set by the platform.
+        required: [monthly, yearly]
+        additionalProperties: false
+        properties:
+          monthly: { $ref: 'common.yaml#/schemas/Rwf' }
+          yearly: { $ref: 'common.yaml#/schemas/Rwf' }
+      methods:
+        type: array
+        description: The methods on offer, MoMo only while cards are deferred. Empty when no payment provider is configured.
+        items: { $ref: 'common.yaml#/schemas/PaymentMethod' }
+      graceDays:
+        type: integer
+        minimum: 0
+
+  SubscriptionPayRequest:
+    type: object
+    description: |
+      The plan and how to pay. The amount is never the request's: any other key
+      (an `amountRwf`, a `status`) is ignored, and the platform's price for the
+      plan is charged (T5.3).
+    required: [planInterval, method, phone]
+    properties:
+      planInterval: { $ref: 'common.yaml#/schemas/PlanInterval' }
+      method:
+        description: One of `methods` from the subscription page; anything else is a 422.
+        allOf:
+          - $ref: 'common.yaml#/schemas/PaymentMethod'
+      phone:
+        type: string
+        maxLength: 40
+        description: The MoMo number to prompt, local (`0788…`) or international (`+250788…`). An unusable number is a 422.
+        examples: ['+250788123456']
+
+  SubscriptionPaymentStarted:
+    type: object
+    required: [payment]
+    additionalProperties: false
+    properties:
+      payment:
+        type: object
+        required: [ourRef, status, planInterval, amountRwf]
+        additionalProperties: false
+        properties:
+          ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+          status: { const: pending }
+          planInterval: { $ref: 'common.yaml#/schemas/PlanInterval' }
+          amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+
+  SubscriptionPaymentStatus:
+    type: object
+    required: [payment, subscription]
+    additionalProperties: false
+    properties:
+      payment: { $ref: '#/schemas/SubscriptionPayment' }
+      subscription:
+        type: object
+        required: [status, currentPeriodEndsAt, takingBookings]
+        additionalProperties: false
+        properties:
+          status: { $ref: 'common.yaml#/schemas/SubscriptionStatus' }
+          currentPeriodEndsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          takingBookings: { type: boolean }
+
+  PlatformSettings:
+    type: object
+    required: [holdMinutes, trialDays, subscriptionMonthlyPriceRwf, subscriptionYearlyPriceRwf, subscriptionGraceDays, subscriptionReminderDays]
+    additionalProperties: false
+    properties:
+      holdMinutes:
+        type: integer
+        minimum: 1
+        maximum: 60
+        description: The checkout hold. At most 60, the reconciler's window.
+      trialDays:
+        type: integer
+        minimum: 1
+        maximum: 366
+        description: The free trial approval starts. A change applies to later approvals.
+      subscriptionMonthlyPriceRwf:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+      subscriptionYearlyPriceRwf:
+        type: integer
+        minimum: 1
+        maximum: 2147483647
+      subscriptionGraceDays:
+        type: integer
+        minimum: 0
+        maximum: 366
+        description: Days of `past_due` after a period ends, before `expired`.
+      subscriptionReminderDays:
+        type: array
+        maxItems: 10
+        uniqueItems: true
+        description: Days before a period ends that a reminder goes out, largest first. Empty sends none.
+        items: { type: integer, minimum: 1, maximum: 366 }
+
+  PlatformSettingsUpdate:
+    type: object
+    description: Any subset of the settings. An unknown key is a 400; a value outside its bounds a 422 naming it.
+    additionalProperties: false
+    properties:
+      holdMinutes: { type: integer, minimum: 1, maximum: 60 }
+      trialDays: { type: integer, minimum: 1, maximum: 366 }
+      subscriptionMonthlyPriceRwf: { type: integer, minimum: 1, maximum: 2147483647 }
+      subscriptionYearlyPriceRwf: { type: integer, minimum: 1, maximum: 2147483647 }
+      subscriptionGraceDays: { type: integer, minimum: 0, maximum: 366 }
+      subscriptionReminderDays:
+        type: array
+        maxItems: 10
+        uniqueItems: true
+        items: { type: integer, minimum: 1, maximum: 366 }
+
+  PlatformSubscription:
+    type: object
+    required: [id, photographer, status, currentPeriodEndsAt, graceEndsAt, createdAt, periods]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      photographer:
+        type: object
+        required: [id, handle, displayName, status]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          handle: { type: string }
+          displayName: { type: string }
+          status: { type: string, enum: [pending, approved, suspended] }
+      status: { $ref: 'common.yaml#/schemas/SubscriptionStatus' }
+      currentPeriodEndsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      graceEndsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      periods:
+        type: array
+        description: Every period, newest first.
+        items: { $ref: '#/schemas/SubscriptionPeriod' }

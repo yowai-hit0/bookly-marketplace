@@ -19,10 +19,10 @@ import { routes } from '@/routes'
 const API = '/api/photographers'
 
 const PHOTOGRAPHERS: PublicPhotographerSummary[] = [
-  { handle: 'kigali-lens', displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg' },
-  { handle: 'nyamirambo-light', displayName: 'Nyamirambo Light', coverImageUrl: null },
-  { handle: 'umuganda-studio', displayName: 'Umuganda Studio', coverImageUrl: 'javascript:alert(1)' },
-  { handle: 'lake-kivu-frames', displayName: 'Lake Kivu Frames', coverImageUrl: 'http://images.example.com/kivu.jpg' },
+  { handle: 'kigali-lens', displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg', takingBookings: true },
+  { handle: 'nyamirambo-light', displayName: 'Nyamirambo Light', coverImageUrl: null, takingBookings: true },
+  { handle: 'umuganda-studio', displayName: 'Umuganda Studio', coverImageUrl: 'javascript:alert(1)', takingBookings: true },
+  { handle: 'lake-kivu-frames', displayName: 'Lake Kivu Frames', coverImageUrl: 'http://images.example.com/kivu.jpg', takingBookings: true },
 ]
 
 type Route = () => Response | Promise<Response>
@@ -126,5 +126,29 @@ describe('the photographers list', () => {
 
     expect(await main().findByRole('link', { name: 'Kigali Lens' })).toBeInTheDocument()
     expect(sent).toHaveLength(2)
+  })
+})
+
+describe('a photographer not taking bookings (Phase 5, R5.5)', () => {
+  const PAST_DUE: PublicPhotographerSummary = { handle: 'past-due', displayName: 'Past Due Studio', coverImageUrl: null, takingBookings: false }
+
+  it('is still listed, says "Not taking bookings right now", and still opens the profile', async () => {
+    stubApi(() => json({ photographers: [PHOTOGRAPHERS[0], PAST_DUE] }))
+    renderPage()
+
+    const link = await main().findByRole('link', { name: 'Past Due Studio' })
+    expect(link).toHaveAttribute('href', '/p/past-due')
+    const card = link.closest('article') as HTMLElement
+    expect(within(card).getByText('Not taking bookings right now')).toBeInTheDocument()
+  })
+
+  it('says nothing on the cards of those who are', async () => {
+    stubApi(() => json({ photographers: [PHOTOGRAPHERS[0], PAST_DUE] }))
+    renderPage()
+
+    const link = await main().findByRole('link', { name: 'Kigali Lens' })
+    const card = link.closest('article') as HTMLElement
+    expect(within(card).queryByText('Not taking bookings right now')).not.toBeInTheDocument()
+    expect(main().getAllByText('Not taking bookings right now')).toHaveLength(1)
   })
 })

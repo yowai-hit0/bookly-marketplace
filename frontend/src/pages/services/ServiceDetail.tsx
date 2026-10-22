@@ -25,6 +25,7 @@ import { formatMoney } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { container, eyebrow, pageTitle, pageY, panelTitle } from '@/pages/client/classes'
 import { NotFound } from '@/pages/NotFound'
+import { NotTakingBookingsNotice, PhotographerUnavailable } from '@/pages/photographers/notices'
 import { BookingDetailsForm } from './BookingDetailsForm'
 import { BookingHeld } from './BookingHeld'
 import { PriceSummary } from './PriceSummary'
@@ -40,7 +41,14 @@ import { stepNumber } from './step-number'
  *
  * An unknown or deactivated slug is the not-found page: the API answers 404
  * for both, so a retired service does not exist to the public (spec §6.14).
- * So is an unknown handle, or one whose photographer cannot be booked. The
+ * A photographer the API does not serve (an unknown handle, or one not listed)
+ * is the "unavailable" page instead (marketplace spec R5.5): the profile's 404
+ * tells the two apart. A photographer who is listed but not taking bookings
+ * (`takingBookings: false`, a past-due subscription) keeps the packages and
+ * the prices on screen, with a notice in place of the slot picker and the
+ * booking form. If that happens while the page is open, the API refuses the
+ * package (`422 packageId`) on the calendar or the booking: the page reads the
+ * profile again, and shows the same notice when it says so. The
  * photographer's profile is read alongside the service for their name and
  * their cancellation policy, which the summary and the held booking state
  * before anything is paid (R1.8).
@@ -53,6 +61,8 @@ import { stepNumber } from './step-number'
 type Loaded = { key: string } & (
   | { status: 'ok'; photographer: PublicPhotographerProfile; service: PublicServiceDetail }
   | { status: 'missing' }
+  /** The photographer is not served at all: unknown, or not listed. */
+  | { status: 'unavailable' }
   | { status: 'failed' }
 )
 
@@ -69,9 +79,11 @@ export function ServiceDetail() {
       .then(([photographer, service]) => {
         if (controller.signal.aborted) return
         setLoaded(
-          photographer === null || service === null
-            ? { key, status: 'missing' }
-            : { key, status: 'ok', photographer, service },
+          photographer === null
+            ? { key, status: 'unavailable' }
+            : service === null
+              ? { key, status: 'missing' }
+              : { key, status: 'ok', photographer, service },
         )
       })
       .catch(() => !controller.signal.aborted && setLoaded({ key, status: 'failed' }))
@@ -87,6 +99,7 @@ export function ServiceDetail() {
   // loading, not the previous service.
   const current = loaded?.key === key ? loaded : null
 
+  if (current?.status === 'unavailable') return <PhotographerUnavailable />
   if (current?.status === 'missing') return <NotFound />
   if (current?.status === 'ok') {
     return <ServiceView key={current.service.id} handle={handle} photographer={current.photographer} service={current.service} />
@@ -137,6 +150,9 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
   const [submitError, setSubmitError] = useState<'failed' | 'catalogueChanged' | null>(null)
   /** The booking the API created; the page becomes its confirmation. */
   const [held, setHeld] = useState<HeldBooking | null>(null)
+  /** Learned after the page loaded: the API refused the package, and the profile says no bookings now. */
+  const [stopped, setStopped] = useState(false)
+  const takingBookings = !stopped && photographer.takingBookings !== false && service.takingBookings !== false
 
   const chosenPackage = service.packages.find((pkg) => pkg.id === packageId) ?? null
   // Catalogue order, whatever order they were ticked in.
@@ -181,12 +197,30 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
     }
 
     const fields: readonly string[] = result.status === 'slot_taken' ? ['startsAt'] : result.fields
+    if (fields.includes('packageId') && (await recheckPhotographer())) return
     const details = DETAIL_FIELDS.filter((field) => fields.includes(field))
     const catalogueChanged = fields.includes('packageId') || fields.includes('addonIds')
     if (catalogueChanged) setSubmitError('catalogueChanged')
     if (details.length > 0) markInvalid(form, details)
     if (fields.includes('startsAt')) picker.current?.reportTaken(startsAt)
     if (!catalogueChanged && details.length === 0 && !fields.includes('startsAt')) setSubmitError('failed')
+  }
+
+  /**
+   * After a `422 packageId`: is it the photographer, not the package? A profile
+   * that is gone or not taking bookings says so, and the page shows the notice.
+   * A failed read proves nothing, and leaves the page as it is.
+   */
+  async function recheckPhotographer(): Promise<boolean> {
+    try {
+      const fresh = await fetchPhotographer(handle)
+      if (fresh !== null && fresh.takingBookings !== false) return false
+    } catch {
+      return false
+    }
+    setStopped(true)
+    setStartsAt(null)
+    return true
   }
 
   function markInvalid(form: HTMLFormElement, fields: readonly DetailField[]) {
@@ -240,6 +274,8 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
           </p>
         </div>
       </header>
+
+      {!takingBookings && <NotTakingBookingsNotice />}
 
       {service.packages.length === 0 ? (
         <p className="text-subtle-foreground">{t('services:noPackages')}</p>
@@ -322,7 +358,7 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
               )}
             </div>
 
-            {chosenPackage === null ? (
+            {!takingBookings ? null : chosenPackage === null ? (
               <section className="flex flex-col gap-1">
                 <h2 className={cn(panelTitle, stepNumber)}>{t('services:picker.title')}</h2>
                 <p className="text-subtle-foreground text-sm">{t('services:picker.choosePackageFirst')}</p>
@@ -335,6 +371,7 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
                   durationMinutes={chosenPackage.durationMinutes}
                   value={startsAt}
                   onChange={setStartsAt}
+                  onPackageRefused={() => void recheckPhotographer()}
                 />
                 <BookingDetailsForm id={formId} invalid={invalid} onSubmit={(event) => void submit(event)} />
               </>
@@ -349,7 +386,8 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
               bookingFeeRate={service.bookingFeeRate}
               cancellationPolicy={photographer.cancellationPolicy}
             >
-              {chosenPackage !== null &&
+              {takingBookings &&
+                chosenPackage !== null &&
                 (startsAt === null ? (
                   <p className="text-subtle-foreground text-sm">{t('services:booking.chooseTimeFirst')}</p>
                 ) : (
@@ -366,7 +404,7 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
                   </Button>
                 ))}
               {/* Outside the start check: a refusal can clear the start and still need saying. */}
-              {chosenPackage !== null && submitError !== null && (
+              {takingBookings && chosenPackage !== null && submitError !== null && (
                 <Callout variant="console" tone="destructive" icon={CircleAlert} role="alert">
                   <p>{t(`services:booking.${submitError}`)}</p>
                 </Callout>

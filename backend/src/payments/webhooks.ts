@@ -9,6 +9,8 @@ import { OCCUPYING_STATUSES } from '../db/statuses.js';
 import { enqueue } from '../outbox/enqueue.js';
 import { bookingPhotographerRecipient } from '../outbox/recipients.js';
 import { recordEarning, recordRefundDue } from '../payouts/ledger.js';
+import { type SettlingSubscriptionPayment, addPaidPeriod } from '../subscriptions/payments.js';
+import { PLAN_INTERVALS, type PlanInterval } from '../subscriptions/plan.js';
 import { SUPERSEDED_BY_CASH } from './cash.js';
 import {
   type PaymentProvider,
@@ -64,6 +66,12 @@ import {
  * it due -- a prompt approved after the balance was cleared another way -- it
  * is `refund_due` whole, `duplicate_payment`, like a second booking fee. Set
  * once, as the payment settles, so a replay cannot add to it (step 4).
+ *
+ * A subscription payment (Phase 5, R5.3) has no booking: its success adds a
+ * paid period on top of the subscription's current end and queues the receipt
+ * (subscriptions/payments.ts `addPaidPeriod`). Every success does -- a late
+ * one, a duplicate, a revived one -- and none is ever `refund_due`, overpaid or
+ * earned (user decision, Phase 5).
  */
 
 export type WebhookDeps = {
@@ -217,11 +225,16 @@ async function applyWithRetry(
 
 type PaymentRecord = {
   id: string;
-  booking_id: string;
-  /** The booking's photographer: whose calendar lock a success takes. */
-  photographer_id: string;
+  /** The booking of a booking or session fee; null for a subscription payment (CHECK payment_subject_exactly_one). */
+  booking_id: string | null;
+  /** The subscription of a subscription payment; null for a fee. */
+  subscription_id: string | null;
+  /** The booking's photographer: whose calendar lock a fee's success takes. Null with no booking. */
+  photographer_id: string | null;
   provider: string;
   kind: string;
+  /** monthly | yearly for a subscription payment, frozen at initiation. */
+  plan_interval: string | null;
   status: PaymentStatus;
   our_ref: string;
   provider_ref: string | null;
@@ -275,9 +288,33 @@ async function applyEvent(
   // booking into its slot and must measure what the booking has collected
   // (R1.3, Phase 4 overpayment decision). A pending or failed event takes 3
   // alone: it moves no money towards the booking.
+  //
+  // A SUBSCRIPTION's money (Phase 5) has the same shape, with the subscription
+  // row in the booking row's place: it is the subject its payments hang off, as
+  // the booking is for a fee.
+  //
+  //   2'. the subscription row (FOR UPDATE, or an UPDATE of it)
+  //   3.  its payment rows
+  //   4'. its periods (subscription_period inserts; never a payout item)
+  //
+  // An initiation (subscriptions/payments.ts) takes 2'-3; a success here takes
+  // 2'-4'; the job (subscriptions/job.ts) takes 2' alone, then only inserts into
+  // the outbox. Approval (photographers/moderation.ts) holds the photographer
+  // row, then inserts the subscription: the photographer row comes before 2',
+  // and nothing holding a subscription row ever waits for a photographer row.
+  // The two chains never meet: nothing that holds the calendar lock or a
+  // booking row waits for a subscription row (the claim READS the subscription,
+  // unlocked: photographers/bookable.ts says why that is safe), and nothing that
+  // holds a subscription row waits for a booking. No calendar lock: a period
+  // takes no slot, and periods have an exclusion constraint of their own.
   if (event.reportedStatus === 'succeeded') {
-    await lockPhotographerCalendar(tx, matched.photographer_id);
-    await tx.$queryRaw`SELECT id FROM booking WHERE id = ${matched.booking_id}::uuid FOR UPDATE`;
+    if (matched.subscription_id !== null) {
+      await tx.$queryRaw`SELECT id FROM subscription WHERE id = ${matched.subscription_id}::uuid FOR UPDATE`;
+    } else {
+      const subject = feeSubject(matched);
+      await lockPhotographerCalendar(tx, subject.photographerId);
+      await tx.$queryRaw`SELECT id FROM booking WHERE id = ${subject.bookingId}::uuid FOR UPDATE`;
+    }
   }
   const payment = await lockPayment(tx, matched.id);
 
@@ -340,6 +377,23 @@ async function applyEvent(
   if (revived) {
     logs.push({ level: 'warn', event: 'webhook_success_for_locally_failed_payment', provider: providerId, paymentId: payment.id, failureReason: payment.failure_reason, eventRowId });
   }
+  if (payment.kind === 'subscription') {
+    // Its period, on top of what is left (R5.3), and the receipt. No earning and
+    // no refund, whatever came before it (user decision, Phase 5). The
+    // subscription row is already held (the lock order above).
+    const added = await addPaidPeriod(tx, settlingSubscription(payment), reported, settledAt);
+    logs.push({
+      level: 'info',
+      event: 'subscription_period_added',
+      paymentId: payment.id,
+      subscriptionId: payment.subscription_id,
+      startsAt: added.startsAt.toISOString(),
+      endsAt: added.endsAt.toISOString(),
+      eventRowId,
+    });
+    return finish('applied', revived ? 'subscription_period_added_revived' : 'subscription_period_added');
+  }
+  const { bookingId } = feeSubject(payment);
   if (payment.kind !== 'booking_fee') {
     // A session fee (Task 20): recorded, receipted, and the photographer told.
     // The booking row is held (the lock order above), and cash, add-ons and new
@@ -348,7 +402,7 @@ async function applyEvent(
     const overpaidRwf = await overpaymentOf(tx, payment);
     if (overpaidRwf >= payment.amount_rwf) {
       // None of it was due: owed back whole, and it never earns (CHECK payment_overpaid_range).
-      const booking = await tx.booking.findUniqueOrThrow({ where: { id: payment.booking_id } });
+      const booking = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
       await refundDue(tx, logs, booking, payment, reported, settledAt, 'duplicate_payment');
       return finish('applied', 'refund_due_duplicate_payment');
     }
@@ -361,12 +415,12 @@ async function applyEvent(
     // Paid in full after the shoot has begun: the booking completes itself, in
     // this same transaction (item 6, 2026-09-27). A replay never gets here --
     // the payment is settled and step 4 ignores it.
-    if (await completeIfSettled(tx, payment.booking_id, settledAt)) return finish('applied', 'payment_succeeded_booking_completed');
+    if (await completeIfSettled(tx, bookingId, settledAt)) return finish('applied', 'payment_succeeded_booking_completed');
     return finish('applied', 'payment_succeeded');
   }
 
   // The booking row is already held (the lock order above).
-  const booking = await tx.booking.findUniqueOrThrow({ where: { id: payment.booking_id } });
+  const booking = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } });
 
   const otherFee = await tx.payment.count({
     where: { bookingId: booking.id, kind: 'booking_fee', status: 'succeeded', id: { not: payment.id } },
@@ -416,7 +470,7 @@ async function matchPayment(tx: Prisma.TransactionClient, providerId: PaymentPro
     const byOurRef = await tx.$queryRaw<PaymentRecord[]>`
       SELECT ${PAYMENT_RECORD_COLUMNS}
         FROM payment p
-        JOIN booking b ON b.id = p.booking_id
+        LEFT JOIN booking b ON b.id = p.booking_id
        WHERE p.our_ref = ${event.ourRef}::uuid AND p.provider = ${providerId}`;
     if (byOurRef[0] !== undefined) return byOurRef[0];
   }
@@ -424,16 +478,46 @@ async function matchPayment(tx: Prisma.TransactionClient, providerId: PaymentPro
     const byProviderRef = await tx.$queryRaw<PaymentRecord[]>`
       SELECT ${PAYMENT_RECORD_COLUMNS}
         FROM payment p
-        JOIN booking b ON b.id = p.booking_id
+        LEFT JOIN booking b ON b.id = p.booking_id
        WHERE p.provider_ref = ${event.providerRef} AND p.provider = ${providerId}`;
     if (byProviderRef[0] !== undefined) return byProviderRef[0];
   }
   return null;
 }
 
+/** Read with `LEFT JOIN booking b`: a subscription payment has no booking (Phase 5). */
 const PAYMENT_RECORD_COLUMNS = Prisma.sql`
-  p.id::text AS id, p.booking_id::text AS booking_id, b.photographer_id::text AS photographer_id, p.provider, p.kind,
+  p.id::text AS id, p.booking_id::text AS booking_id, p.subscription_id::text AS subscription_id,
+  b.photographer_id::text AS photographer_id, p.provider, p.kind, p.plan_interval,
   p.status, p.our_ref::text AS our_ref, p.provider_ref, p.method, p.amount_rwf, p.failure_reason`;
+
+/**
+ * A fee's booking and photographer. Only a subscription payment has neither:
+ * CHECK payment_subject_exactly_one gives every other kind a booking, and a
+ * booking always has a photographer.
+ */
+function feeSubject(payment: PaymentRecord): { bookingId: string; photographerId: string } {
+  if (payment.booking_id === null || payment.photographer_id === null) {
+    throw new Error(`Payment ${payment.id} (${payment.kind}) has no booking`);
+  }
+  return { bookingId: payment.booking_id, photographerId: payment.photographer_id };
+}
+
+/** A subscription payment as `addPaidPeriod` takes it. CHECKs give it a subscription and a plan. */
+function settlingSubscription(payment: PaymentRecord): SettlingSubscriptionPayment {
+  const { subscription_id: subscriptionId, plan_interval: planInterval } = payment;
+  if (subscriptionId === null || !(PLAN_INTERVALS as readonly (string | null)[]).includes(planInterval)) {
+    throw new Error(`Subscription payment ${payment.id} has no subscription or plan`);
+  }
+  return {
+    id: payment.id,
+    subscriptionId,
+    planInterval: planInterval as PlanInterval,
+    amountRwf: payment.amount_rwf,
+    ourRef: payment.our_ref,
+    providerRef: payment.provider_ref,
+  };
+}
 
 /**
  * Whether a `failed` payment is one a verified success may revive: failed by
@@ -496,7 +580,7 @@ async function lockPayment(tx: Prisma.TransactionClient, paymentId: string): Pro
   const rows = await tx.$queryRaw<PaymentRecord[]>`
     SELECT ${PAYMENT_RECORD_COLUMNS}
       FROM payment p
-      JOIN booking b ON b.id = p.booking_id
+      LEFT JOIN booking b ON b.id = p.booking_id
      WHERE p.id = ${paymentId}::uuid
        FOR UPDATE OF p`;
   const row = rows[0];
@@ -618,7 +702,7 @@ async function confirm(
  */
 async function overpaymentOf(tx: Prisma.TransactionClient, payment: PaymentRecord): Promise<number> {
   const booking = await tx.booking.findUniqueOrThrow({
-    where: { id: payment.booking_id },
+    where: { id: feeSubject(payment).bookingId },
     include: { addons: true, payments: true },
   });
   // Not `succeeded` yet, so not counted; left out all the same, so it can never count twice.
@@ -640,7 +724,7 @@ async function flagOverpayment(
   payment: PaymentRecord,
   overpaidRwf: number,
 ): Promise<void> {
-  const booking = await tx.booking.findUniqueOrThrow({ where: { id: payment.booking_id } });
+  const booking = await tx.booking.findUniqueOrThrow({ where: { id: feeSubject(payment).bookingId } });
 
   logs.push({ level: 'error', event: 'booking_overpaid', paymentId: payment.id, bookingId: booking.id, overpaidRwf });
   await enqueue(tx, {
@@ -725,7 +809,7 @@ async function receipt(
   paidAt: Date,
 ): Promise<void> {
   const booking = await tx.booking.findUniqueOrThrow({
-    where: { id: payment.booking_id },
+    where: { id: feeSubject(payment).bookingId },
     include: { addons: true, payments: true },
   });
   const totals = bookingTotals(booking, booking.addons, booking.payments);

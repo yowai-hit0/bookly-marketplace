@@ -50,6 +50,7 @@ function renderAt(path: string) {
           { path: 'earnings', element: page('Earnings') },
           { path: 'payouts/:id', element: <FakeBookingPage /> },
           { path: 'payout-method', element: page('Payout method') },
+          { path: 'subscription', element: page('Subscription') },
           { path: 'settings', element: page('Settings') },
         ],
       },
@@ -80,6 +81,7 @@ describe('the admin breadcrumb', () => {
     ['/studio/catalogue', 'Catalogue'],
     ['/studio/availability', 'Availability'],
     ['/studio/earnings', 'Earnings'],
+    ['/studio/subscription', 'Subscription'],
     ['/studio/settings', 'Settings'],
   ])('on %s reads Admin > %s, with the section as the current page', (path, section) => {
     renderAt(path)

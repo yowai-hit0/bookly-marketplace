@@ -6,7 +6,7 @@ import '@/i18n'
 import type { BookingListRow } from '@/admin/bookings'
 import { readSession, saveSession } from '@/admin/session'
 import { routes } from '@/routes'
-import { isStudioMe, studioMe } from '@/test/studio-me'
+import { isStudioLayout, studioLayout } from '@/test/studio-me'
 
 /**
  * The bookings list (plan.md Task 19; spec §3.6), rendered through the real
@@ -90,7 +90,7 @@ function json(body: unknown, status = 200): Response {
 function stubFetch(handler: Handler = () => json(PAGE)) {
   const mock = vi.fn((input: string | URL | Request, _init?: RequestInit) =>
     // The layout's banner request is answered here, so `handler` sees only the page's own.
-    Promise.resolve().then(() => (isStudioMe(input) ? studioMe() : handler(String(input)))),
+    Promise.resolve().then(() => (isStudioLayout(input) ? studioLayout(input) : handler(String(input)))),
   )
   vi.stubGlobal('fetch', mock)
   return mock

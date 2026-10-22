@@ -7,7 +7,7 @@ import type { AdminBooking, AdminPayment } from '@/admin/bookings'
 import type { AdminAddon, CatalogueData, CatalogueService } from '@/admin/catalogue'
 import { readSession, saveSession } from '@/admin/session'
 import { routes } from '@/routes'
-import { isStudioMe, studioMe } from '@/test/studio-me'
+import { isStudioLayout, studioLayout } from '@/test/studio-me'
 
 /**
  * One booking and everything the photographer does to it (plan.md Task 19;
@@ -213,7 +213,7 @@ function stubApi(
   const sent: Sent[] = []
   const mock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     // The layout's banner request is answered, and left out of what the page sent.
-    if (isStudioMe(input)) return studioMe()
+    if (isStudioLayout(input)) return studioLayout(input)
     const call: Sent = {
       method: init.method ?? 'GET',
       url: String(input),

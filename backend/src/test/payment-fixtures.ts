@@ -45,6 +45,21 @@ export const MINUTE_MS = 60_000;
 export const DAY_MS = 1440 * MINUTE_MS;
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/**
+ * The platform settings row every world starts with: the schema defaults, and
+ * the seed's placeholder prices, which have no column default
+ * (marketplace-data-model.md §3.2).
+ */
+export const TEST_PLATFORM_SETTING = { id: 1, subscriptionMonthlyPriceRwf: 10_000, subscriptionYearlyPriceRwf: 100_000 } as const;
+
+/**
+ * Where a fixture photographer's subscription runs to: far past every clock a
+ * suite injects (2026 to 2027), so "approved" keeps meaning "bookable" in the
+ * suites that are not about subscriptions (R5.4). The subscription suites set
+ * their own ends.
+ */
+export const FIXTURE_SUBSCRIPTION_ENDS_AT = new Date('2100-01-01T00:00:00Z');
+
 export const CLIENT = {
   name: 'Aline Uwase-Private',
   email: 'aline.private@example.com',
@@ -88,7 +103,7 @@ export type WorldOptions = {
  * client and, by default, a platform admin.
  */
 export async function seedWorld(prisma: PrismaClient, options: WorldOptions = {}): Promise<PaymentWorld> {
-  await prisma.platformSetting.create({ data: { id: 1 } });
+  await prisma.platformSetting.create({ data: TEST_PLATFORM_SETTING });
   if (options.platformAdmin ?? options.admin ?? true) {
     await prisma.appUser.create({
       data: { email: PLATFORM_ADMIN_EMAIL, role: 'platform_admin', passwordHash: 'not-a-real-hash', emailVerifiedAt: new Date('2026-09-01T06:00:00Z') },
@@ -121,7 +136,9 @@ export async function seedSecondPhotographer(
 /**
  * A `photographer` login, its approved photographer and the photographer's
  * settings row at the schema defaults (fee 40%, lead 120, buffer 30, expiry 90,
- * cancel any time, fee not refundable) -- what approval leaves behind.
+ * cancel any time, fee not refundable) -- what approval leaves behind. An
+ * approved one also gets what approval creates since Phase 5: a subscription
+ * and its trial, running to FIXTURE_SUBSCRIPTION_ENDS_AT (R5.1).
  */
 export async function createPhotographer(
   prisma: PrismaClient,
@@ -139,7 +156,29 @@ export async function createPhotographer(
       setting: { create: {} },
     },
   });
+  if (status === 'approved') await grantSubscription(prisma, photographer.id);
   return { photographerId: photographer.id, photographerUserId: user.id };
+}
+
+/**
+ * A subscription with its trial, for a photographer made approved by hand (R5.1):
+ * `trialing`, its trial from 2 September 2026 (the fixture approval) to `endsAt`.
+ * A test that approves a photographer through moderation gets one from there.
+ */
+export async function grantSubscription(
+  prisma: PrismaClient,
+  photographerId: string,
+  { endsAt = FIXTURE_SUBSCRIPTION_ENDS_AT, status = 'trialing', startsAt = new Date('2026-09-02T06:00:00Z') }: { endsAt?: Date; status?: string; startsAt?: Date } = {},
+): Promise<string> {
+  const subscription = await prisma.subscription.create({
+    data: {
+      photographerId,
+      status,
+      currentPeriodEndsAt: endsAt,
+      periods: { create: { kind: 'trial', priceRwf: 0, startsAt, endsAt } },
+    },
+  });
+  return subscription.id;
 }
 
 /** One service, one package and two add-ons (one the service's own, one shared), owned by `photographerId`. */

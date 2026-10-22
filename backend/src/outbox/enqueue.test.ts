@@ -285,9 +285,10 @@ describe('the vocabularies and the CHECK constraints', () => {
     expect([...SENDABLE_EMAIL_TEMPLATES, ...RESERVED_EMAIL_TEMPLATES].sort()).toEqual([...EMAIL_TEMPLATES].sort());
     expect(SENDABLE_EMAIL_TEMPLATES.filter((template) => (RESERVED_EMAIL_TEMPLATES as readonly string[]).includes(template))).toEqual([]);
     expect(EMAIL_TEMPLATES).toHaveLength(24);
-    // Phase 4 makes payout_sent sendable (R4.4); the subscription names stay reserved for Phase 5.
-    expect(SENDABLE_EMAIL_TEMPLATES).toHaveLength(21);
-    expect(RESERVED_EMAIL_TEMPLATES).toEqual(['subscription_reminder', 'subscription_receipt', 'subscription_expired']);
+    // Phase 4 makes payout_sent sendable (R4.4), and Phase 5 the three subscription names (R5.3, R5.4): nothing is reserved now.
+    expect(SENDABLE_EMAIL_TEMPLATES).toHaveLength(24);
+    expect(RESERVED_EMAIL_TEMPLATES).toEqual([]);
+    expect(SENDABLE_EMAIL_TEMPLATES).toEqual(expect.arrayContaining(['subscription_reminder', 'subscription_receipt', 'subscription_expired']));
   });
 
   it('has retired admin_alert and admin_new_booking (marketplace-data-model.md §2.14)', () => {

@@ -1,6 +1,6 @@
 import type { Addon, Package, PrismaClient, Service } from '@prisma/client';
 import { type PhotographerSettings, getPhotographerSettings } from '../settings/index.js';
-import { BOOKABLE_PACKAGE, CATALOGUE_ORDER, type PublicAddon, effectiveBookingFeeRate, toPublicAddon } from './public.js';
+import { CATALOGUE_ORDER, type PublicAddon, bookablePackageWhere, effectiveBookingFeeRate, toPublicAddon } from './public.js';
 import { type Quote, quoteBasket } from './quote.js';
 
 /**
@@ -53,12 +53,17 @@ export type ResolvedBasket = {
   quote: Quote;
 };
 
+/**
+ * `now` decides bookability (R5.4): a photographer whose subscription period has
+ * ended prices nothing, whether or not the job has caught up.
+ */
 export async function resolveBasket(
   prisma: PrismaClient,
   selection: BasketSelection,
+  now: Date = new Date(),
 ): Promise<ResolvedBasket | { ok: false; fields: ('packageId' | 'addonIds')[] }> {
   const pkg = await prisma.package.findFirst({
-    where: { id: selection.packageId, ...BOOKABLE_PACKAGE },
+    where: { id: selection.packageId, ...bookablePackageWhere(now) },
     include: { service: true },
   });
   if (pkg === null) return { ok: false, fields: ['packageId'] };
@@ -98,8 +103,8 @@ export async function resolveBasket(
   return { ok: true, package: pkg, addons, settings, bookingFeeRate, quote };
 }
 
-export async function priceBasket(prisma: PrismaClient, selection: BasketSelection): Promise<BasketResult> {
-  const basket = await resolveBasket(prisma, selection);
+export async function priceBasket(prisma: PrismaClient, selection: BasketSelection, now: Date = new Date()): Promise<BasketResult> {
+  const basket = await resolveBasket(prisma, selection, now);
   if (!basket.ok) return basket;
 
   const { package: pkg, addons, bookingFeeRate, quote } = basket;

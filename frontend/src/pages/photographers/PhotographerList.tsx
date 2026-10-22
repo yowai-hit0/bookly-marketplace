@@ -9,6 +9,7 @@ import { safeHttpsUrl } from '@/lib/safe-url'
 import { cn } from '@/lib/utils'
 import { container, eyebrow, lead, pageTitle, pageY } from '@/pages/client/classes'
 import { ServiceGridSkeleton } from '@/pages/services/ServiceList'
+import { NotTakingBookingsLine } from './notices'
 
 /**
  * The photographers who can be booked (marketplace brief decision 9), as
@@ -19,6 +20,10 @@ import { ServiceGridSkeleton } from '@/pages/services/ServiceList'
  *
  * A cover is a pasted link, so it reaches an `src` only through
  * `safeHttpsUrl`; anything else shows the quiet camera block instead.
+ *
+ * A photographer whose subscription is past due is still listed, with
+ * `takingBookings: false` (marketplace spec R5.5): the card says "Not taking
+ * bookings right now" and still opens the profile, where nothing is bookable.
  */
 
 type Loaded = { status: 'ok'; photographers: PublicPhotographerSummary[] } | { status: 'failed' }
@@ -144,6 +149,7 @@ export function PhotographerCard({
             {photographer.displayName}
           </Link>
         </Heading>
+        {photographer.takingBookings === false && <NotTakingBookingsLine />}
         <div className="mt-auto flex items-center justify-end gap-3 border-t pt-3.5">
           <span aria-hidden="true" className="text-console-link flex items-center gap-1.5 text-[0.9375rem] font-medium">
             {t('photographers:viewServices')}

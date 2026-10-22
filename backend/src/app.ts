@@ -90,6 +90,8 @@ export function createApp(options: AppOptions = {}): Express {
   const payments = rateLimit(limiters.paymentsPerIp, now);
   app.post('/api/checkout/:reference/:token/payments', payments);
   app.post('/api/booking/:token/payments', payments);
+  // A photographer paying for the subscription prompts a phone the same way (R5.2).
+  app.post('/api/studio/subscription/payments', payments);
   app.post('/api/booking/:token/email', rateLimit(limiters.emailChangePerIp, now));
   for (const area of AUTH_AREAS) {
     const byIp = areaIpKey(area);
@@ -109,7 +111,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api', healthRouter);
   if (options.publicApi) {
     const { prisma } = options.publicApi;
-    app.use('/api', publicCatalogueRouter(prisma));
+    app.use('/api', publicCatalogueRouter(prisma, now));
     app.use('/api/availability', availabilityRouter(prisma, now));
     app.use('/api/bookings', bookingsRouter(prisma, now, options.publicApi.payments?.secret));
     if (options.publicApi.payments) {
@@ -143,7 +145,17 @@ export function createApp(options: AppOptions = {}): Express {
     // (payments/initiate.ts). Nothing on offer: the request route is absent.
     const routing = options.publicApi?.payments?.routing;
     const providerId = routing === undefined ? undefined : requestProvider(routing)?.id;
-    app.use('/api/studio', studioRouter({ ...options.auth, ...(providerId === undefined ? {} : { paymentProviderId: providerId }) }));
+    const timeoutMs = options.publicApi?.payments?.providerTimeoutMs;
+    app.use(
+      '/api/studio',
+      studioRouter({
+        ...options.auth,
+        ...(providerId === undefined ? {} : { paymentProviderId: providerId }),
+        // The photographer pays for the subscription through the same routing as clients (R5.2).
+        ...(routing === undefined ? {} : { paymentRouting: routing }),
+        ...(timeoutMs === undefined ? {} : { providerTimeoutMs: timeoutMs }),
+      }),
+    );
     app.use('/api/platform', platformRouter(options.auth));
     app.use('/api/account', accountRouter({ ...options.auth, ...(options.google === undefined ? {} : { google: options.google }) }));
   }

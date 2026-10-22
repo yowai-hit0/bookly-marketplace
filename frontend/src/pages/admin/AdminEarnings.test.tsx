@@ -8,7 +8,7 @@ import { readSession, saveSession } from '@/auth/session'
 import { routes } from '@/routes'
 import { type Sent, json, stubApi } from '@/test/fetch'
 import { BANK_METHOD, earnings, payoutItem, studioPayout, studioPayoutDetail } from '@/test/payout-fixtures'
-import { STUDIO_ME_URL, studioMe } from '@/test/studio-me'
+import { isStudioLayout, studioLayout } from '@/test/studio-me'
 
 /**
  * `/studio/earnings` (marketplace spec R4.5), through the real routes with
@@ -22,7 +22,7 @@ const SESSION = { token: 'studio.jwt', expiresAt: '2099-01-01T00:00:00.000Z' }
 /** The studio API: `/api/studio/me` for the layout, the earnings from `answer`, one payout from `payout`. */
 function api(answer: (call: Sent) => Response | Promise<Response> = () => json(earnings())) {
   return stubApi((call) => {
-    if (call.url === STUDIO_ME_URL) return studioMe()
+    if (isStudioLayout(call.url)) return studioLayout(call.url)
     if (call.url === '/api/studio/earnings') return answer(call)
     if (call.url.startsWith('/api/studio/payouts/')) return json({ payout: studioPayoutDetail() })
     return undefined
@@ -31,7 +31,7 @@ function api(answer: (call: Sent) => Response | Promise<Response> = () => json(e
 
 /** What the page asked, without the layout's own request. */
 function pageCalls(sent: Sent[]) {
-  return sent.filter((call) => call.url !== STUDIO_ME_URL)
+  return sent.filter((call) => !isStudioLayout(call.url))
 }
 
 function renderAt(path = '/studio/earnings') {
