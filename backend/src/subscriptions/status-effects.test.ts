@@ -204,7 +204,7 @@ describe.each([
   });
 
   it('is hidden: not listed, and the profile, services and service are the same 404 as a suspended photographer', async () => {
-    expect((await request(app).get(PHOTOGRAPHERS)).body).toEqual({ photographers: [] });
+    expect((await request(app).get(PHOTOGRAPHERS)).body.photographers).toEqual([]);
     const answers = await Promise.all([PROFILE, `${PROFILE}/services`, `${PROFILE}/services/portraits`].map((path) => request(app).get(path)));
     for (const res of answers) expect([res.status, res.body]).toEqual([404, { error: 'not_found' }]);
 

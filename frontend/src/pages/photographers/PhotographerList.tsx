@@ -1,162 +1,399 @@
-import { ArrowRight, Camera, CircleAlert, Info, Users } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import type { TFunction } from 'i18next'
+import { ArrowLeft, ArrowRight, CircleAlert, Info, MapPin } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
-import { type PublicPhotographerSummary, fetchPhotographers, photographerPath } from '@/catalogue/api'
+import { Link, useSearchParams } from 'react-router'
+import {
+  type DirectoryPage,
+  type DirectoryQuery,
+  directorySearch,
+  fetchCategories,
+  fetchDistricts,
+  searchDirectory,
+} from '@/catalogue/api'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { safeHttpsUrl } from '@/lib/safe-url'
+import { useDocumentMeta } from '@/lib/document-meta'
+import { formatDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { container, eyebrow, lead, pageTitle, pageY } from '@/pages/client/classes'
-import { ServiceGridSkeleton } from '@/pages/services/ServiceList'
-import { NotTakingBookingsLine } from './notices'
+import { type FilterLists, FilterBar, FilterChips, FilterSheet } from './DirectoryFilters'
+import { PhotographerCard, PhotographerGridSkeleton } from './PhotographerCard'
+import {
+  type FieldErrors,
+  activeFilters,
+  fieldErrorKeys,
+  isCalendarDate,
+  onPage,
+  pageNumber,
+  readQuery,
+  withFilters,
+  writeQuery,
+} from './directory-query'
 
 /**
- * The photographers who can be booked (marketplace brief decision 9), as
- * `GET /api/photographers` lists them: a name and a cover each, linking to that
- * photographer's services. Deliberately minimal -- Phase 6 builds the real
- * directory with its filters -- but drawn with the service list's own grid,
- * card and states, so it is one product.
+ * The directory (`design-system/bookly/pages/directory.md`; marketplace spec
+ * R6.1, R6.3): every photographer the API lists, 24 a page, filtered by
+ * category, district, price range and a date they are free.
  *
- * A cover is a pasted link, so it reaches an `src` only through
- * `safeHttpsUrl`; anything else shows the quiet camera block instead.
- *
- * A photographer whose subscription is past due is still listed, with
- * `takingBookings: false` (marketplace spec R5.5): the card says "Not taking
- * bookings right now" and still opens the profile, where nothing is bookable.
+ * The URL is the state, so a filtered page can be shared and Back undoes a
+ * change: each filter change is a new history entry, and the page asks the
+ * API for exactly what the URL says (known keys, no empty value). A `422`
+ * names the filters it refused, and each gets its sentence by its field; a
+ * `400` means the link itself cannot be read. Past-due photographers are
+ * listed last by the API with a "Not taking bookings" badge, and left out
+ * once a date is chosen.
  */
 
-type Loaded = { status: 'ok'; photographers: PublicPhotographerSummary[] } | { status: 'failed' }
+type Loaded = { search: string } & (
+  | { status: 'ok'; page: DirectoryPage }
+  | { status: 'invalid'; fields: string[] }
+  | { status: 'badRequest' }
+  | { status: 'failed' }
+)
 
-/** Placeholder cards while the list loads: one row at the widest breakpoint. */
-const SKELETON_COUNT = 3
+/** Placeholder cards while a page loads: two rows at the widest breakpoint. */
+const SKELETON_COUNT = 6
 
 export function PhotographerList() {
   const { t } = useTranslation()
+  const [params, setParams] = useSearchParams()
+  const query = useMemo(() => readQuery(params), [params])
+  const search = directorySearch(query)
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const [lists, setLists] = useState<FilterLists | null>(null)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const resultsHeading = useRef<HTMLHeadingElement>(null)
+  /** Set when a pagination link is followed: the new page's results take focus. */
+  const focusResults = useRef(false)
+
+  // The filter lists, once. A failure leaves each select with its "any" option.
+  useEffect(() => {
+    const controller = new AbortController()
+    Promise.all([fetchCategories(controller.signal), fetchDistricts(controller.signal)])
+      .then(([categories, provinces]) => !controller.signal.aborted && setLists({ categories, provinces }))
+      .catch(() => !controller.signal.aborted && setLists({ categories: [], provinces: [] }))
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchPhotographers(controller.signal)
-      .then((photographers) => !controller.signal.aborted && setLoaded({ status: 'ok', photographers }))
-      .catch(() => !controller.signal.aborted && setLoaded({ status: 'failed' }))
+    searchDirectory(query, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return
+        setLoaded(result.status === 'ok' ? { search, status: 'ok', page: result.page } : result.status === 'invalid' ? { search, status: 'invalid', fields: result.fields } : { search, status: 'badRequest' })
+      })
+      .catch(() => !controller.signal.aborted && setLoaded({ search, status: 'failed' }))
     return () => controller.abort()
-  }, [attempt])
+  }, [query, search, attempt])
+
+  // A load for another query is stale: show loading, not the last results.
+  const current = loaded?.search === search ? loaded : null
+
+  const focusResultsHeading = useCallback(() => {
+    const heading = resultsHeading.current
+    if (heading === null) return
+    heading.scrollIntoView?.({ block: 'start' })
+    heading.focus({ preventScroll: true })
+  }, [])
+
+  useEffect(() => {
+    if (current === null || !focusResults.current) return
+    focusResults.current = false
+    focusResultsHeading()
+  }, [current, focusResultsHeading])
+
+  const commit = useCallback((next: DirectoryQuery) => setParams(writeQuery(next)), [setParams])
 
   function retry() {
     setLoaded(null)
     setAttempt((n) => n + 1)
   }
 
+  const errors: FieldErrors = current?.status === 'invalid' ? fieldErrorKeys(current.fields, query) : {}
+  const page = pageNumber(query)
+
+  useDocumentMeta(directoryMeta(t, query, lists))
+
   return (
     <main className={cn(container, pageY, 'flex flex-col gap-8')}>
       <header className="flex flex-col gap-3">
+        {/* Not the heading's own word again: where they are. */}
         <p className={eyebrow}>
-          <Users aria-hidden="true" />
-          {t('photographers:title')}
+          <MapPin aria-hidden="true" />
+          {t('landing:market.eyebrow')}
         </p>
         <h1 className={pageTitle}>{t('photographers:title')}</h1>
-        <p className={lead}>{t('photographers:intro')}</p>
+        <p className={cn(lead, 'max-w-2xl')}>{t('directory:intro')}</p>
       </header>
 
-      {loaded === null && (
-        <div aria-busy="true">
-          {/* The wait is announced once, in words; the cards are decoration. */}
-          <p className="sr-only" role="status">
-            {t('photographers:loading')}
+      <div className="flex flex-col gap-4">
+        <FilterBar query={query} lists={lists} errors={errors} onCommit={commit} />
+        <FilterSheet query={query} lists={lists} errors={errors} onCommit={commit} open={sheetOpen} onOpenChange={setSheetOpen} />
+        <FilterChips query={query} lists={lists} errors={errors} onCommit={commit} fallbackFocus={focusResultsHeading} />
+      </div>
+
+      <section aria-labelledby="directory-results" className="flex scroll-mt-6 flex-col gap-6">
+        <div className="flex flex-col gap-1">
+          <h2 id="directory-results" ref={resultsHeading} tabIndex={-1} className="sr-only">
+            {t('directory:results')}
+          </h2>
+          {/* The count, in words, announced when it changes; the cards are not.
+              With nothing found the callout below says so on screen, so the
+              count is for screen readers only. */}
+          <p
+            role="status"
+            aria-live="polite"
+            className={cn(
+              'text-subtle-foreground text-[0.9375rem]',
+              current?.status === 'ok' && current.page.photographers.length === 0 && 'sr-only',
+            )}
+          >
+            {current === null ? t('photographers:loading') : current.status === 'ok' ? countLine(t, current.page, query) : ''}
           </p>
-          <ServiceGridSkeleton count={SKELETON_COUNT} />
         </div>
-      )}
 
-      {loaded?.status === 'failed' && (
-        <Callout
-          variant="console"
-          tone="destructive"
-          icon={CircleAlert}
-          role="alert"
-          action={
-            <Button variant="outline" size="sm" onClick={retry}>
-              {t('photographers:retry')}
-            </Button>
-          }
-        >
-          <p>{t('photographers:loadFailed')}</p>
-        </Callout>
-      )}
+        {current === null && (
+          <div aria-busy="true">
+            <PhotographerGridSkeleton count={SKELETON_COUNT} />
+          </div>
+        )}
 
-      {loaded?.status === 'ok' &&
-        (loaded.photographers.length === 0 ? (
-          <Callout variant="console" tone="info" icon={Info}>
-            <p>{t('photographers:empty')}</p>
+        {current?.status === 'failed' && (
+          <Callout
+            variant="console"
+            tone="destructive"
+            icon={CircleAlert}
+            role="alert"
+            action={
+              <Button variant="outline" size="sm" onClick={retry}>
+                {t('photographers:retry')}
+              </Button>
+            }
+          >
+            <p>{t('photographers:loadFailed')}</p>
           </Callout>
-        ) : (
-          <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {loaded.photographers.map((photographer, index) => (
-              <li key={photographer.handle}>
-                <PhotographerCard photographer={photographer} priority={index === 0} />
-              </li>
-            ))}
-          </ul>
-        ))}
+        )}
+
+        {current?.status === 'badRequest' && (
+          <Callout
+            variant="console"
+            tone="destructive"
+            icon={CircleAlert}
+            role="alert"
+            action={
+              <Button variant="outline" size="sm" onClick={() => commit({})}>
+                {t('directory:filters.clearAll')}
+              </Button>
+            }
+          >
+            <p>{t('directory:invalid.badLink')}</p>
+          </Callout>
+        )}
+
+        {current?.status === 'invalid' && (
+          <InvalidFilters query={query} errors={errors} onClear={() => commit({})} onEdit={() => setSheetOpen(true)} />
+        )}
+
+        {current?.status === 'ok' &&
+          (current.page.photographers.length === 0 ? (
+            <EmptyResults query={query} page={page} onCommit={commit} />
+          ) : (
+            <>
+              <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {current.page.photographers.map((photographer, index) => (
+                  <li key={photographer.handle}>
+                    <PhotographerCard photographer={photographer} priority={index === 0} />
+                  </li>
+                ))}
+              </ul>
+              <Pagination
+                query={query}
+                result={current.page}
+                onFollow={() => {
+                  focusResults.current = true
+                }}
+              />
+            </>
+          ))}
+      </section>
     </main>
   )
 }
 
+/** "12 photographers", or under a date (no total) "Showing 24 … free on …" / "Showing 25–48, free on …". */
+function countLine(t: TFunction, result: DirectoryPage, query: DirectoryQuery): string {
+  const count = result.photographers.length
+  if (result.total !== undefined) return t('directory:count.total', { count: result.total })
+  // Nothing under a date: "0 photographers", not "Showing 0 … free on …".
+  if (count === 0) return t('directory:count.total', { count: 0 })
+  const date = isCalendarDate(query.date) ? formatDate(query.date) : (query.date ?? '')
+  if (result.page === 1 && !result.hasMore) return t('directory:count.showing', { count, date })
+  const from = (result.page - 1) * result.pageSize + 1
+  return t('directory:count.range', { from, to: from + count - 1, date })
+}
+
+/** The page's title follows its filters once their names are known (R6.6). */
+function directoryMeta(t: TFunction, query: DirectoryQuery, lists: FilterLists | null) {
+  const category = lists?.categories.find((entry) => entry.slug === query.category)?.name
+  const district = lists?.provinces.flatMap((province) => province.districts).find((entry) => entry.code === query.district)?.name
+  const title =
+    category !== undefined && district !== undefined
+      ? t('meta:directory.both', { category, district })
+      : category !== undefined
+        ? t('meta:directory.category', { category })
+        : district !== undefined
+          ? t('meta:directory.district', { district })
+          : t('meta:directory.title')
+  return { title: t('meta:titleSuffix', { title }), description: t('meta:directory.description') }
+}
+
 /**
- * One photographer: the cover, the name as a link stretched over the card, and
- * where it leads. The service card's frame and lift (client-front.md 8.2),
- * exported so the landing page shows the same card. `headingLevel` is 3 under
- * a section's `h2` (Home) and 2 under the list's `h1`.
+ * The 422: the fields carry their own sentences from `lg`; below it they are
+ * in the closed sheet, so the callout repeats each one and opens the sheet.
  */
-export function PhotographerCard({
-  photographer,
-  priority,
-  headingLevel = 2,
+function InvalidFilters({
+  query,
+  errors,
+  onClear,
+  onEdit,
 }: {
-  photographer: PublicPhotographerSummary
-  priority: boolean
-  headingLevel?: 2 | 3
+  query: DirectoryQuery
+  errors: FieldErrors
+  onClear: () => void
+  onEdit: () => void
 }) {
   const { t } = useTranslation()
-  const cover = safeHttpsUrl(photographer.coverImageUrl)
-  const Heading = headingLevel === 3 ? 'h3' : 'h2'
+  const pageOnly = Object.keys(errors).length === 1 && errors.page !== undefined
+  if (pageOnly) {
+    return (
+      <Callout variant="console" tone="destructive" icon={CircleAlert} role="alert">
+        <p>{t('directory:invalid.page')}</p>
+        <p>
+          <Link to={{ search: writeQuery(onPage(query, 1)).toString() }} className="text-console-link hover:text-console-link-hover underline underline-offset-4">
+            {t('directory:empty.firstPage')}
+          </Link>
+        </p>
+      </Callout>
+    )
+  }
+  const sentences = (['category', 'district', 'price', 'min', 'max', 'date', 'page'] as const)
+    .map((field) => errors[field])
+    .filter((key): key is string => key !== undefined)
+  return (
+    <Callout
+      variant="console"
+      tone="destructive"
+      icon={CircleAlert}
+      role="alert"
+      action={
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" className="lg:hidden" onClick={onEdit}>
+            {t('directory:invalid.editFilters')}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onClear}>
+            {t('directory:filters.clearAll')}
+          </Button>
+        </div>
+      }
+    >
+      <p>{t('directory:invalid.summary')}</p>
+      <ul className="list-disc pl-5 lg:hidden">
+        {[...new Set(sentences)].map((key) => (
+          <li key={key}>{t(key)}</li>
+        ))}
+      </ul>
+    </Callout>
+  )
+}
+
+/** Nothing on this page: say why, and offer the change most likely to help. */
+function EmptyResults({ query, page, onCommit }: { query: DirectoryQuery; page: number; onCommit: (next: DirectoryQuery) => void }) {
+  const { t } = useTranslation()
+  if (page > 1) {
+    return (
+      <Callout variant="console" tone="info" icon={Info}>
+        <p>{t('directory:empty.pastEnd')}</p>
+        <p>
+          <Link
+            to={{ search: writeQuery(onPage(query, 1)).toString() }}
+            className="text-console-link hover:text-console-link-hover underline underline-offset-4"
+          >
+            {t('directory:empty.firstPage')}
+          </Link>
+        </p>
+      </Callout>
+    )
+  }
+  const active = activeFilters(query)
+  if (active.length === 0) {
+    return (
+      <Callout variant="console" tone="info" icon={Info}>
+        <p>{t('photographers:empty')}</p>
+      </Callout>
+    )
+  }
+  return (
+    <div className="flex flex-col gap-4">
+      <Callout variant="console" tone="info" icon={Info}>
+        <p>{t('directory:empty.filtered')}</p>
+      </Callout>
+      <div className="flex flex-wrap gap-2">
+        {query.date !== undefined && (
+          <Button variant="outline" onClick={() => onCommit(withFilters(query, { date: null }))}>
+            {t('directory:empty.removeDate')}
+          </Button>
+        )}
+        {(query.min !== undefined || query.max !== undefined) && (
+          <Button variant="outline" onClick={() => onCommit(withFilters(query, { min: null, max: null }))}>
+            {t('directory:empty.removePrice')}
+          </Button>
+        )}
+        <Button variant="outline" onClick={() => onCommit({})}>
+          {t('directory:filters.clearAll')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** Previous / Page N (of M) / Next, as links: shareable, and Back returns to the page before. */
+function Pagination({ query, result, onFollow }: { query: DirectoryQuery; result: DirectoryPage; onFollow: () => void }) {
+  const { t } = useTranslation()
+  const page = result.page
+  const pages = result.total === undefined ? null : Math.max(1, Math.ceil(result.total / result.pageSize))
+  if (page === 1 && !result.hasMore) return null
+  const href = (target: number) => {
+    const search = writeQuery(onPage(query, target)).toString()
+    return { search: search === '' ? '' : `?${search}` }
+  }
 
   return (
-    <article className="group/card bg-background relative flex h-full flex-col overflow-hidden rounded-xs border has-[a:focus-visible]:border-ring has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-ring has-[a:hover]:border-ring motion-safe:transition-[border-color,translate] motion-safe:duration-250 motion-safe:ease-[cubic-bezier(0.2,0.7,0.2,1)] motion-safe:has-[a:focus-visible]:-translate-y-1.5 motion-safe:has-[a:hover]:-translate-y-1.5">
-      {cover !== null ? (
-        <img
-          src={cover}
-          alt=""
-          className="bg-muted aspect-4/3 w-full object-cover"
-          fetchPriority={priority ? 'high' : 'auto'}
-          loading={priority ? 'eager' : 'lazy'}
-        />
-      ) : (
-        // No usable cover: a quiet block with a camera, never a placeholder label.
-        <div aria-hidden="true" className="bg-muted text-muted-foreground flex aspect-4/3 w-full items-center justify-center">
-          <Camera className="size-8" />
-        </div>
-      )}
-      <div className="flex flex-1 flex-col gap-3.5 p-6">
-        <Heading className="text-[1.375rem] leading-tight font-medium tracking-[-0.01em] text-balance">
-          <Link
-            to={photographerPath(photographer.handle)}
-            data-focus-ring="parent"
-            className="outline-none after:absolute after:inset-0"
-          >
-            {photographer.displayName}
+    <nav aria-label={t('directory:pages.label')} className="flex items-center justify-between gap-3 border-t pt-6">
+      {page > 1 ? (
+        <Button asChild variant="outline">
+          <Link to={href(page - 1)} rel="prev" onClick={onFollow}>
+            <ArrowLeft aria-hidden="true" />
+            {t('directory:pages.previous')}
           </Link>
-        </Heading>
-        {photographer.takingBookings === false && <NotTakingBookingsLine />}
-        <div className="mt-auto flex items-center justify-end gap-3 border-t pt-3.5">
-          <span aria-hidden="true" className="text-console-link flex items-center gap-1.5 text-[0.9375rem] font-medium">
-            {t('photographers:viewServices')}
-            <ArrowRight className="size-4 motion-safe:transition-transform motion-safe:duration-250 motion-safe:group-has-[a:hover]/card:translate-x-1.25 motion-safe:group-has-[a:focus-visible]/card:translate-x-1.25" />
-          </span>
-        </div>
-      </div>
-    </article>
+        </Button>
+      ) : (
+        <span />
+      )}
+      <p className="text-subtle-foreground font-mono text-sm tabular-nums">
+        {pages === null ? t('directory:pages.current', { page }) : t('directory:pages.currentOf', { page, pages })}
+      </p>
+      {result.hasMore ? (
+        <Button asChild variant="outline">
+          <Link to={href(page + 1)} rel="next" onClick={onFollow}>
+            {t('directory:pages.next')}
+            <ArrowRight aria-hidden="true" />
+          </Link>
+        </Button>
+      ) : (
+        <span />
+      )}
+    </nav>
   )
 }

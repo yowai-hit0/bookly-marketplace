@@ -19,6 +19,23 @@ npm run dev        # Vite on http://localhost:5173, proxying /api to the backend
 production it is the backend's deployed origin. It is the only `VITE_*` variable
 and is safe to ship in the bundle — no secret belongs in frontend configuration.
 
+## Sitemap and robots.txt (marketplace spec R6.6)
+
+The sitemap is built by the API at its **root**, `GET <API_ORIGIN>/sitemap.xml`
+(not under `/api`). The web host serves it as its own `/sitemap.xml` through a
+rewrite in `vercel.json`, listed **before** the SPA catch-all, and
+`public/robots.txt` names `<WEB_ORIGIN>/sitemap.xml`.
+
+Both files hold **placeholders** that must be replaced before launch:
+
+| File | Placeholder | Replace with |
+|---|---|---|
+| `vercel.json` (the `/sitemap.xml` rewrite) | `https://api.bookly.example` | the backend's deployed origin (the `VITE_API_BASE_URL` origin) |
+| `public/robots.txt` (`Sitemap:` line) | `https://bookly.example` | the web app's origin, the backend's `WEB_ORIGIN` |
+
+Per-route `<title>`, description and Open Graph tags are set by
+`src/lib/document-meta.ts`; `index.html` carries the defaults.
+
 ## Scripts
 
 | Script | What it does |

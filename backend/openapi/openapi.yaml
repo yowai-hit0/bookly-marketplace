@@ -91,6 +91,12 @@ paths:
     $ref: paths/public.yaml#/health
   /api/photographers:
     $ref: paths/public.yaml#/photographers
+  /api/categories:
+    $ref: paths/public.yaml#/categories
+  /api/districts:
+    $ref: paths/public.yaml#/districts
+  /sitemap.xml:
+    $ref: paths/public.yaml#/sitemap
   /api/photographers/{handle}:
     $ref: paths/public.yaml#/photographer
   /api/photographers/{handle}/services:

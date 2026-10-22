@@ -5,7 +5,6 @@ import { accountName, useAccount } from '@/auth/account'
 import { bookingPath } from '@/catalogue/booking-access'
 import { Button } from '@/components/ui/button'
 import { SkipLink } from '@/components/ui/skip-link'
-import { PHOTOGRAPHER_CONTACT, contactLinks } from '@/lib/contact'
 import { useStoredBookingToken } from '@/lib/stored-booking'
 import { type ThemePreference, useClientTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -172,16 +171,16 @@ function AccountLink({ className }: { className?: string }) {
 const footerLabel = 'font-mono text-xs font-medium tracking-[0.1em] uppercase text-foreground'
 
 /**
- * Three columns from `md`: the wordmark, the note and the photographer's
- * contact details (only those that exist, `lib/contact.ts`); BOOK; ABOUT.
- * No Privacy notice link: no privacy page exists yet. No buttons, no `dl`.
+ * Three columns from `md`: the wordmark and the marketplace's one line; BOOK;
+ * ABOUT (with "List your studio" for photographers). No contact block: on a
+ * marketplace the footer belongs to no one photographer, and each one's
+ * details are on their own pages (Phase 6, R6.4). No Privacy notice link: no
+ * privacy page exists yet. No buttons, no `dl`.
  */
 function ClientFooter() {
   const { t } = useTranslation()
   const storedToken = useStoredBookingToken()
   const myBooking = storedToken === null ? '/my-booking' : bookingPath(storedToken)
-  const contact = contactLinks()
-  const name = PHOTOGRAPHER_CONTACT.name
 
   return (
     <footer className="bg-background mt-auto border-t">
@@ -190,25 +189,8 @@ function ClientFooter() {
           <span className="flex items-center gap-2.5 text-lg font-semibold tracking-[-0.02em]">
             <Wordmark size="sm" />
           </span>
-          {/* No year, no rights reserved: there is no name to assert them for. */}
-          <p className="text-subtle-foreground text-[0.9375rem] text-pretty">{t('shell:footer.note')}</p>
-          {(name !== null || contact.length > 0) && (
-            <div className="text-subtle-foreground flex flex-col gap-1 text-[0.9375rem]">
-              {name !== null && <p className="text-foreground">{name}</p>}
-              {contact.length > 0 && (
-                <ul aria-label={t('shell:contact.label')} className="flex flex-col">
-                  {contact.map((entry) => (
-                    <li key={entry.kind} className="flex flex-wrap items-center gap-x-2">
-                      <span>{t(`shell:contact.${entry.kind}`)}</span>
-                      <a href={entry.href} className={cn(quietLink, 'text-foreground')}>
-                        {entry.value}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
+          {/* No year, no rights reserved: there is no company name to assert them for. */}
+          <p className="text-subtle-foreground text-[0.9375rem] text-pretty">{t('shell:footer.marketplaceNote')}</p>
         </div>
 
         <nav aria-label={t('shell:footer.label')} className="grid grid-cols-2 gap-10 md:contents">
@@ -238,6 +220,11 @@ function ClientFooter() {
               <li>
                 <Link to="/" className={quietLink}>
                   {t('shell:footer.home')}
+                </Link>
+              </li>
+              <li>
+                <Link to="/studio/signup" className={quietLink}>
+                  {t('shell:footer.listStudio')}
                 </Link>
               </li>
               {/* Only where the top bar has no room for them (below `sm`). */}

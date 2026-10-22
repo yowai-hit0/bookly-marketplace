@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { RouterProvider, createMemoryRouter } from 'react-router'
+import { MemoryRouter, RouterProvider, createMemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import '@/i18n'
 import { NotFound } from './NotFound'
@@ -45,5 +45,21 @@ describe('NotFound', () => {
 
     expect(router.state.location.pathname).toBe('/photographers')
     expect(screen.getByText('photographers list')).toBeInTheDocument()
+  })
+
+  it('titles itself and keeps out of search results while shown, then gives the defaults back (R6.6)', () => {
+    const { unmount } = render(
+      <MemoryRouter>
+        <NotFound />
+      </MemoryRouter>,
+    )
+
+    expect(document.title).toBe('Page not found · Bookly')
+    expect(document.head.querySelector('meta[name="robots"]')).toHaveAttribute('content', 'noindex')
+
+    unmount()
+
+    expect(document.title).toBe('Bookly: find and book photographers across Rwanda')
+    expect(document.head.querySelector('meta[name="robots"]')).toBeNull()
   })
 })

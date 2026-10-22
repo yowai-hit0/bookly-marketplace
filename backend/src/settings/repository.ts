@@ -32,6 +32,16 @@ export function readPhotographerSettingRow(prisma: Db, photographerId: string): 
   return prisma.photographerSetting.findUniqueOrThrow({ where: { photographerId } });
 }
 
+/**
+ * Several photographers' rows in one read, for the directory's date filter
+ * (marketplace-spec.md R6.1), which runs the engine over a page of
+ * photographers at once. Answers only the rows that exist; the caller applies
+ * the missing-row rule.
+ */
+export function readPhotographerSettingRows(prisma: Db, photographerIds: readonly string[]): Promise<PhotographerSettingRow[]> {
+  return prisma.photographerSetting.findMany({ where: { photographerId: { in: [...photographerIds] } } });
+}
+
 /** The studio settings screen's save (spec P-30). Same missing-row rule as the read. */
 export function updatePhotographerSettingRow(
   prisma: Db,

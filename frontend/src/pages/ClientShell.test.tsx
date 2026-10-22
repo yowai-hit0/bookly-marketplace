@@ -130,6 +130,22 @@ describe('the client shell', () => {
     expect(within(footer).getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/')
   })
 
+  it('carries marketplace branding in the footer, and no studio’s contact details (Phase 6, R6.4)', () => {
+    renderShell()
+
+    const footer = within(screen.getByRole('contentinfo'))
+    expect(footer.getByText('Bookly: find and book photographers across Rwanda.')).toBeInTheDocument()
+    expect(footer.queryByRole('list', { name: 'Contact' })).not.toBeInTheDocument()
+    expect(screen.getByRole('contentinfo')).not.toHaveTextContent(/demo studio name|\+250 700 000 000|hello@example\.com|Phone|WhatsApp|Email/i)
+    expect(screen.getByRole('contentinfo').querySelector('a[href^="tel:"], a[href^="mailto:"], a[href*="wa.me"]')).toBeNull()
+  })
+
+  it('invites photographers to list their studio from the footer', () => {
+    renderShell()
+
+    expect(within(screen.getByRole('contentinfo')).getByRole('link', { name: 'List your studio' })).toHaveAttribute('href', '/studio/signup')
+  })
+
   it('keeps the words the payment and price specs assert are absent', () => {
     renderShell()
 

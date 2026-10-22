@@ -170,6 +170,33 @@ describe('responses match the spec', () => {
     await expectMatchesSpec(await request(server).get('/api/payment-methods'), 'getPaymentMethods', 200);
   });
 
+  it('the Phase 6 directory, its filter bar and the profile page (marketplace-spec.md R6.1, R6.2)', async () => {
+    await seedWorkingHours(prisma);
+    const category = await prisma.category.create({ data: { slug: 'wedding', nameEn: 'Wedding' } });
+    await prisma.photographerCategory.create({ data: { photographerId: world.photographerId, categoryId: category.id } });
+    await prisma.photographerDistrict.create({ data: { photographerId: world.photographerId, districtCode: 'gasabo' } });
+    await prisma.portfolioImage.create({ data: { photographerId: world.photographerId, url: 'https://images.example.com/1.jpg', caption: 'One' } });
+    await prisma.photographer.update({ where: { id: world.photographerId }, data: { bio: '<script>alert(1)</script>', coverImageUrl: 'https://images.example.com/cover.jpg' } });
+    const server = app();
+
+    const filtered = await request(server).get('/api/photographers').query({ category: 'wedding', district: 'gasabo', min: 0, max: 100_000, page: 1 });
+    await expectMatchesSpec(filtered, 'listPhotographers', 200);
+    expect((filtered.body as { photographers: unknown[]; total: number }).total).toBe(1);
+    const dated = await request(server).get('/api/photographers').query({ date: '2026-10-07' });
+    await expectMatchesSpec(dated, 'listPhotographers', 200);
+    expect((dated.body as { photographers: unknown[] }).photographers).toHaveLength(1);
+    await expectMatchesSpec(await request(server).get('/api/photographers').query({ sort: 'price' }), 'listPhotographers', 400);
+    await expectMatchesSpec(await request(server).get('/api/photographers').query({ min: 5, max: 1 }), 'listPhotographers', 422);
+    await expectMatchesSpec(await request(server).get('/api/photographers').query({ date: '2026-09-01' }), 'listPhotographers', 422);
+    await expectMatchesSpec(await request(server).get('/api/categories'), 'listCategories', 200);
+    await expectMatchesSpec(await request(server).get('/api/districts'), 'listDistricts', 200);
+    await expectMatchesSpec(await request(server).get(`/api/photographers/${PHOTOGRAPHER_HANDLE}`), 'getPhotographer', 200);
+    await expectMatchesSpec(await request(server).get('/api/photographers/nobody-here'), 'getPhotographer', 404);
+
+    const sitemap = await request(server).get('/sitemap.xml');
+    expect([sitemap.status, sitemap.headers['content-type']]).toEqual([200, 'application/xml; charset=utf-8']);
+  });
+
   it('a booking created through the API', async () => {
     await seedWorkingHours(prisma);
     const server = app();

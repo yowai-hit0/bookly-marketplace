@@ -136,7 +136,7 @@ Two people use Bookly. Clients book on a phone or a laptop, with no account, usu
 
 Visual rejections recorded in the design system (`design-system/bookly/MASTER.md` section 2; the first three are also enforced by Impeccable's design hook): no gradient text, no glow shadows, no coloured left-edge stripes, no modals, no 3D, parallax or scroll-driven effects, no emoji as icons. The client now ships **both a light and a dark theme**, following `prefers-color-scheme` live by default with a per-device System/Light/Dark override in the header; this replaces the earlier "light only" state, which is obsolete.
 
-The palette, the Geist pairing and the violet accent are the admin's own shipped tokens, carried over to the client; light success, muted-on-chip and other fixes are the same measured corrections recorded in `design-system/bookly/admin-console.md` and reused here rather than re-derived. Contact details shown in the footer and the summary are **placeholders** (`frontend/src/lib/contact.ts`: "Studio name", `+250 700 000 000`, `hello@example.com`) to be replaced with the photographer's real details before launch — a deliberate, recorded exception to "nothing invented."
+The palette, the Geist pairing and the violet accent are the admin's own shipped tokens, carried over to the client; light success, muted-on-chip and other fixes are the same measured corrections recorded in `design-system/bookly/admin-console.md` and reused here rather than re-derived. **Since Phase 6 (2026-10-22, marketplace spec R6.4) there are no placeholder contact details.** The footer carries marketplace branding only, and a photographer's phone, WhatsApp and email appear only on their own profile and service pages, from their public profile (`pages/photographer-profile.md`).
 
 **Key Characteristics:**
 - Flat white (light) or near-black (dark) canvas, 2px corners, 1px hairlines, no shadows anywhere on the client.
@@ -252,7 +252,7 @@ The admin's `StatGrid` look, re-implemented for the client (not imported from th
 A 64px icon tile (or 40px bare icon on some status views) above the page title and body, then the booking facts. Tone: violet for waiting/information, danger for failure, muted for neutral, success only for an API-confirmed outcome. The waiting state's spinner is the one `animate-spin`, `infinite` motion on the client; it becomes a still `Clock` under reduced motion. The confirmed check draws once (`draw`, 600ms, one-time).
 
 ### Contact block (footer, summary "Questions?")
-Renders only the fields set in `frontend/src/lib/contact.ts` (phone `tel:`, WhatsApp `wa.me`, email `mailto:`); with every field `null` neither renders at all. **The shipped values are placeholders** ("Studio name", `+250 700 000 000`, `hello@example.com`) to be replaced with the photographer's real contact details before launch — a recorded, deliberate exception to "nothing invented," not a design-system rule for other surfaces.
+Since Phase 6 (R6.4) this is a photographer's own channels, from their public profile, on their profile's Contact panel and the service page's "Your photographer" panel (`pages/photographers/PhotographerContact.tsx`, links built by `lib/contact.ts`): phone `tel:`, WhatsApp `wa.me` (a national Rwandan number gains 250; a new tab with `rel="noopener noreferrer"`), email `mailto:`. Only the channels that are set render; with none, no panel. The footer and the price summary no longer carry contact details.
 
 ### Shell — header and footer
 Public pages carry a shared header (wordmark, Services, How booking works, My booking, Admin login, the theme button, Book now) and a three-column footer (wordmark + contact block; Book; About), as siblings of `main`. Below `sm`, "My booking" collapses to its icon only (44px square, its words kept as the accessible name). **There is no Privacy link in the footer**: no privacy page exists in this build, so none is linked.
@@ -286,7 +286,7 @@ Kept, behind `prefers-reduced-motion: no-preference` only: `fade-up` on hero/pag
 - **Don't** use the weak `--console-border-strong` edge on a field, checkbox or day/slot cell that must read at 3:1 unlabelled; use `--input`.
 - **Don't** put muted text on the chip surface in light theme (4.40:1, below AA); keep it on canvas or the flat surface.
 - **Don't** add a Privacy footer link until a privacy page exists (it is specified, not built).
-- **Don't** treat the contact details in `lib/contact.ts` as final; they are placeholders and must be replaced before launch.
+- **Don't** put contact details in the footer or the price summary, or any placeholder anywhere: a photographer's own channels live on their pages only (Phase 6, R6.4).
 - **Don't** hard-code a colour, radius or font in a component; use the tokens in `index.css`.
 
 ## Admin console

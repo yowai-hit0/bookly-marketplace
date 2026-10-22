@@ -7,6 +7,8 @@
 > **Applied 2026-09-20 (Phase 3 section 1)** to the stub. What was chosen beyond this file is in `MASTER.md` section 11.
 > **Overridden 2026-09-27 by `design-system/bookly/client-front.md`** (the client front redesign, light and dark): the hero with its decorative calendar mock-up and service chips, section eyebrows, "How booking works" as a numbered strip, "Good to know" fact rows and the "Already booked?" band that absorbs the closing section (client-front.md §8.1). "No illustration" is lifted for the data-true mock-up only; entrance fade-ups are allowed on the hero.
 
+> **Overridden 2026-10-22 by the marketplace (Phase 6, R6.3, R6.4).** Bookly is now many photographers across Rwanda, so the single-studio framing goes. The section "Marketplace landing (Phase 6)" below wins over everything above it for this page; where it is silent, the older text and `client-front.md` §8.1 still hold.
+
 ## What this page is now
 
 The public entry point. Before this, `/` was an API health check (`home:apiStatus`, `home:recheck`) with no link to anything, and the page clients actually used was `/services`. The health stub is gone from the page; **its `home:*` keys stay in `en.json`** — existing strings are never edited or removed, and nothing else reads them.
@@ -82,3 +84,48 @@ The page has effectively one state. The services preview has three (loading, som
 - No newsletter signup, chat widget, cookie banner, or "as seen in" row.
 - No scroll-jacking, parallax, count-up animation or entrance animation on every section.
 - Do not restore the API status check; do not delete the `home:*` keys it used.
+
+## Marketplace landing (Phase 6, 2026-10-22)
+
+The brand stays **Bookly**; the tagline is "Find and book photographers across Rwanda". Everything is still fetched or true of the code: no photographer, price or category is written into the page.
+
+### Order
+
+Hero → Who you can book (featured strip) → How booking works → Good to know → For photographers (the inverted band) → Already booked? (a quiet panel) → footer.
+
+### 1. Hero
+
+- Dot-grid section, two columns from `lg` (text | the decorative calendar mock-up, unchanged, hidden below `sm`).
+- Eyebrow chip (`MapPin`): "Photographers across Rwanda" (new key). `h1` the tagline (new key), lead (new key): compare by what they shoot, where they work and what they charge; pick a free time; hold it with a booking fee paid by MoMo.
+- **Quick search**, a bordered panel on the canvas (`p-4 md:p-5`): a `form` with two labelled native selects, **Category** ("Any category" + the active categories) and **District** ("Anywhere in Rwanda" + the 30 districts grouped by province with `optgroup`), and the **brand** button "Find photographers" (the page's one violet action, 52px). Side by side from `md` (`[1fr_1fr_auto]`), stacked on phones with the button full width. Submitting goes to `/photographers` with only the chosen values (`?category=wedding&district=gasabo`; nothing chosen is the bare path). The lists come from `GET /api/categories` and `GET /api/districts`; while they load, or if they fail, each select holds only its "any" option and the form still works.
+- Under it: the two success-ticked facts ("Only free times are shown", "Pay with MTN MoMo") and the aside line, unchanged.
+- The Phase 5 hero chips (one per photographer) are removed: the featured strip and the search replace them.
+
+### 2. Who you can book
+
+Eyebrow "01 — Photographers", `h2` "Who you can book", "Browse photographers →" right-aligned from `md`. The first three photographers of the directory's first page (`GET /api/photographers`), in the directory's `PhotographerCard` (`h3`): cover, name, districts, categories, "from" price, the "Not taking bookings" badge. Loading: three skeleton cards and an `sr-only` status. Empty or failed: the section goes, quietly (unchanged rule).
+
+### 3. How booking works (`#how`)
+
+The same numbered strip, with marketplace steps (new keys): **Find a photographer** (filter by what, where, budget and date) → **Choose a service and a time** (every package and price listed, only free times shown) → **Pay the booking fee by MoMo** (it holds the date; the rest after the shoot) → **Get your link** (`landing:how.step4`, unchanged). The `h2` keeps `tabIndex=-1` and the header's `/#how` focus behaviour.
+
+### 4. Good to know
+
+Four fact rows in the 2×2 hairline grid: **Cancellation terms, up front** (`landing:trust.policy`, each photographer's own terms, shown before booking and before paying), **Pay by MTN MoMo** (new), **The price is the price** (`landing:trust.price`), **One private link, yours** (`landing:trust.link`).
+
+### 5. For photographers (the inverted band)
+
+Eyebrow "For photographers", `h2` "List your studio on Bookly", one line on what it gives them (their services, prices and hours; clients book free times and pay the booking fee by MoMo; one calendar). CTAs: **List your studio** (band fill) → `/studio/signup`, and outline **Studio sign in** → `/studio/login`. Static rings as before. No pricing, commission or subscription claims: those live on the studio's own pages.
+
+### 6. Already booked?
+
+A hairline panel inside the container, `p-6 md:p-8`, text left and the outline **Find my booking** → `/my-booking` right from `md`: eyebrow, `h2` (`landing:booked.title`, 24px/500), `landing:booked.body`.
+
+### Meta (R6.6)
+
+`<title>` "Bookly: find and book photographers across Rwanda"; a description to match; `og:type=website`.
+
+### Do not (marketplace)
+
+- No single-studio wording ("Photographer · Kigali", "the photographer"), no placeholder studio name or contact.
+- No counts ("120 photographers"), ratings or testimonials: none are real.

@@ -26,7 +26,7 @@ Derived here (recorded, not asked):
 Asked and answered at the checkpoint (2026-09-27):
 
 12. **The live copy stays.** The board's headlines are not adopted; Home uses the existing `landing:*` strings.
-13. **Contact details ship as placeholders.** `lib/contact.ts` holds dummy values ("Studio name", `+250 700 000 000`, `hello@example.com`), shown in the footer and the summary's "Questions?" line, to be replaced with the photographer's real details before launch. This departs from the brief's "nothing invented", at the user's request.
+13. **Contact details ship as placeholders.** *Superseded 2026-10-22 (Phase 6, R6.4): the placeholders are gone; see §5.8.* `lib/contact.ts` holds dummy values ("Studio name", `+250 700 000 000`, `hello@example.com`), shown in the footer and the summary's "Questions?" line, to be replaced with the photographer's real details before launch. This departs from the brief's "nothing invented", at the user's request.
 14. **"My booking" is an icon below `sm`** so the theme button fits the 375px bar (its words stay its accessible name; the footer carries it in words).
 15. **The booking page's `h1` stays "Your booking"** (`client-booking.spec.ts` pins it and reads the reference once): a mono "My booking" eyebrow, the `h1`, the status badge beside it; the reference stays in the facts, in mono.
 16. **The held page shows "Held until" and the existing time**, mono 28-32px, and no countdown: none exists, and a ticking timer would be new logic.
@@ -230,7 +230,7 @@ The admin's `StatGrid` look, re-implemented for the client (never imported from 
 
 ### 5.8 Contact details
 
-`frontend/src/lib/contact.ts` exports `PHOTOGRAPHER_CONTACT: { name, phone, whatsapp, email }`; it ships with placeholder values (decision 13). The footer's contact block and the summary's "Questions?" line render only the fields that are set (phone `tel:`, WhatsApp `https://wa.me/<digits>`, email `mailto:`), with labels from new `en.json` keys and never a value in `en.json`. With every field `null`, neither renders at all.
+*Superseded 2026-10-22 (Phase 6, R6.4):* `PHOTOGRAPHER_CONTACT` is removed. `lib/contact.ts` now builds links from a photographer's profile (`contactPhone`, `whatsappPhone`, `email`), shown only on their profile and their service page (`pages/photographer-profile.md`, `pages/service-detail.md`); the footer and the summary carry none. What follows is the earlier record. `frontend/src/lib/contact.ts` exported `PHOTOGRAPHER_CONTACT: { name, phone, whatsapp, email }`; it ships with placeholder values (decision 13). The footer's contact block and the summary's "Questions?" line render only the fields that are set (phone `tel:`, WhatsApp `https://wa.me/<digits>`, email `mailto:`), with labels from new `en.json` keys and never a value in `en.json`. With every field `null`, neither renders at all.
 
 ## 6. Motion
 

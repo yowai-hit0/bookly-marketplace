@@ -29,6 +29,8 @@ import { Prisma, type Photographer, type Subscription } from '@prisma/client';
  *
  *   bookablePhotographerWhere(now)   Prisma, the app's clock: the public reads
  *   isBookable(...)                  in memory, the app's clock
+ *   bookableSqlAt / listedSqlAt      SQL, the app's clock: the directory and the
+ *                                    sitemap (R6.1, R6.6), written in SQL
  *   BOOKABLE_SQL / lockBookablePhotographer   SQL on the DATABASE clock: the slot
  *                                    claim (R1.3) and the booking-fee initiation
  *                                    (R3.4), which already measure the hold there
@@ -92,6 +94,31 @@ export const BOOKABLE_SQL = Prisma.sql`(
   AND s.id IS NOT NULL
   AND s.status = ANY(${[...BOOKABLE_SUBSCRIPTION_STATUSES]}::text[])
   AND s.current_period_ends_at > now())`;
+
+/**
+ * BOOKABLE as a SQL expression over `ph` and `s` on the APP's clock `now`, for
+ * the public reads that are written in SQL (the directory, R6.1; the sitemap,
+ * R6.6). The same rule as `bookablePhotographerWhere(now)`: the public reads
+ * all measure on the injected clock, so the directory and the profile it links
+ * to can never disagree about `takingBookings`. `s` may be LEFT JOINed: a
+ * missing subscription makes it false, never null.
+ */
+export function bookableSqlAt(now: Date): Prisma.Sql {
+  return Prisma.sql`(
+  ph.status = 'approved'
+  AND s.id IS NOT NULL
+  AND s.status = ANY(${[...BOOKABLE_SUBSCRIPTION_STATUSES]}::text[])
+  AND s.current_period_ends_at > ${now}::timestamptz)`;
+}
+
+/** LISTED (R5.5) as SQL over `ph` and `s` on the app's clock: `listedPhotographerWhere(now, graceDays)`. */
+export function listedSqlAt(now: Date, graceDays: number): Prisma.Sql {
+  return Prisma.sql`(
+  ph.status = 'approved'
+  AND s.id IS NOT NULL
+  AND s.status = ANY(${[...LISTED_SUBSCRIPTION_STATUSES]}::text[])
+  AND s.current_period_ends_at > ${new Date(now.getTime() - graceDays * DAY_MS)}::timestamptz)`;
+}
 
 /**
  * The rule read inside a transaction that is about to write into the

@@ -68,3 +68,7 @@ The checkout and booking pages get the shell too. They are reached from an email
 - No search, no account menu, no cart, no breadcrumb: none exist.
 - No newsletter form, no social links, no logo image — there is no logo.
 - No new `main`, no sticky anything, no scroll-triggered header changes.
+
+## Marketplace footer (Phase 6, 2026-10-22, R6.4)
+
+The placeholder contact block (`lib/contact.ts` `PHOTOGRAPHER_CONTACT`: "demo studio name", `+250 700 000 000`, `hello@example.com`) is removed: on a marketplace the footer belongs to no one photographer, and the contact details shown anywhere are a photographer's own, on their profile and service pages. The first column is now the wordmark and one neutral line, "Bookly: find and book photographers across Rwanda." (new key). The ABOUT column gains **List your studio** → `/studio/signup` (new key). Everything else above (siblings, no `dl`, no buttons, no radios, the links' names) holds.

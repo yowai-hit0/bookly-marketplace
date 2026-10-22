@@ -27,6 +27,7 @@ import { MyBookingPage } from '@/pages/booking/MyBookingPage'
 import { CheckoutPage } from '@/pages/checkout/CheckoutPage'
 import { PaymentProgressPage } from '@/pages/checkout/PaymentProgressPage'
 import { PhotographerList } from '@/pages/photographers/PhotographerList'
+import { PhotographerProfile } from '@/pages/photographers/PhotographerProfile'
 import { PlatformPayoutDetail } from '@/pages/platform/PlatformPayoutDetail'
 import { PlatformPayouts } from '@/pages/platform/PlatformPayouts'
 import { PlatformPhotographers } from '@/pages/platform/PlatformPhotographers'
@@ -34,7 +35,6 @@ import { PlatformRefunds } from '@/pages/platform/PlatformRefunds'
 import { PlatformSettings } from '@/pages/platform/PlatformSettings'
 import { PlatformSubscriptions } from '@/pages/platform/PlatformSubscriptions'
 import { ServiceDetail } from '@/pages/services/ServiceDetail'
-import { ServiceList } from '@/pages/services/ServiceList'
 
 /**
  * Plain paths, no locale prefix (plan.md Task 2, spec §7, R-2). A French
@@ -52,10 +52,10 @@ export const routes: RouteObject[] = [
     element: <ClientShell />,
     children: [
       { path: '/', element: <Home /> },
-      // The public catalogue is per photographer (marketplace brief decision 9):
-      // the photographers, then one photographer's services, then one service.
+      // The public marketplace (Phase 6, R6.3): the directory with its
+      // URL-synced filters, one photographer's profile, then one service.
       { path: '/photographers', element: <PhotographerList /> },
-      { path: '/p/:handle', element: <ServiceList /> },
+      { path: '/p/:handle', element: <PhotographerProfile /> },
       { path: '/p/:handle/:slug', element: <ServiceDetail /> },
       // The single-photographer catalogue's old address. The list moved, so it
       // redirects; a service has no address without its photographer, so

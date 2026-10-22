@@ -4,6 +4,7 @@ import {
   type PhotographerSettingRow,
   type PlatformSettingRow,
   readPhotographerSettingRow,
+  readPhotographerSettingRows,
   readPlatformSettingRow,
   updatePhotographerSettingRow,
   updatePlatformSettingRow,
@@ -64,6 +65,23 @@ export { ACCESS_TOKEN_LIFETIME_DAYS, SLOT_GRANULARITY_MINUTES } from './constant
  */
 export async function getPhotographerSettings(photographerId: string, prisma: Db = defaultPrisma): Promise<PhotographerSettings> {
   return toPhotographerSettings(await readPhotographerSettingRow(prisma, photographerId));
+}
+
+/**
+ * Several photographers' operating values in one read, keyed by photographer id
+ * (the directory's date filter, marketplace-spec.md R6.1). The same missing-row
+ * rule as `getPhotographerSettings()`: an id without a row throws.
+ */
+export async function getPhotographerSettingsFor(
+  photographerIds: readonly string[],
+  prisma: Db = defaultPrisma,
+): Promise<Map<string, PhotographerSettings>> {
+  if (photographerIds.length === 0) return new Map();
+  const rows = await readPhotographerSettingRows(prisma, photographerIds);
+  const settings = new Map(rows.map((row) => [row.photographerId, toPhotographerSettings(row)]));
+  const missing = photographerIds.find((id) => !settings.has(id));
+  if (missing !== undefined) throw new Error(`photographer ${missing} has no settings row`);
+  return settings;
 }
 
 /**

@@ -7,6 +7,8 @@
 > **Applied 2026-09-20 (Phase 3 section 2)** to all five files. The choices made beyond this file (the shared `BackLink` and `Callout`, the selectable-card and step-numeral recipes) are in `MASTER.md` section 11.
 > **Overridden 2026-09-27 by `design-system/bookly/client-front.md`** (the client front redesign, light and dark): the board's selectable cards with tick and pop, a month grid with pips, a today mark and a legend, 52px time rows, callout messages, 48px fields in two columns from `md`, and the console-look summary (client-front.md §8.3). The "no today marker" rule is lifted (a derived date, no new logic). The one-page structure, DOM order and every rule under "Do not" still hold.
 
+> **Amended 2026-10-22 by the marketplace (Phase 6, R6.3, R6.4, R6.5).** The page lives at `/p/:handle/:slug`. See "Under a photographer (Phase 6)" at the end; it wins where it differs.
+
 ## The funnel on one page
 
 The generator's "Funnel (3-Step Conversion)" maps onto this page, but as three progressive groups on one route, not three pages:
@@ -69,3 +71,12 @@ loading; load failed (alert + retry); missing slug (renders `NotFound`); no pack
 
 - No modal, wizard or stepper text, no new copy, no motion beyond 150-300ms state transitions.
 - Do not move the price summary above the form on mobile (changes reading order).
+
+## Under a photographer (Phase 6, 2026-10-22)
+
+- **Route** `/p/:handle/:slug`; the booking flow (packages, add-ons, slot picker, form, summary, held page) is unchanged, and so is its tab order: the skip link, then **All services** (the back link, now to the photographer's profile), then the first package. Three e2e specs pin that order.
+- **Whose service:** the mono eyebrow above the `h1` names the photographer (unchanged, not a link, so the tab order holds).
+- **Your photographer panel**, new, in the right column under the price summary (below `lg`: after it, last on the page): a hairline panel, `p-5`, eyebrow "Your photographer", the display name as a link to `/p/:handle` ("View profile" is its visible verb line), then the profile's contact channels that are set (`PhotographerContact`: phone, WhatsApp in a new tab with `rel="noopener noreferrer"`, email). It comes after Confirm in the tab order, so nothing leading away sits before the payment notice.
+- **The price summary loses its "Questions?" line.** It showed the placeholder `PHOTOGRAPHER_CONTACT` (R6.4 removes it); the panel above carries the photographer's real channels instead, and nothing when none are set.
+- **Cover image:** only through `safeHttpsUrl`, `referrerpolicy="no-referrer"`. A non-https URL shows no cover.
+- **Meta (R6.6):** "Portraits by Kigali Lens · Bookly"; the description is the service's own (first 155 characters), else "Choose a package and a free time to book Portraits with Kigali Lens."

@@ -54,7 +54,16 @@ const PROFILE = {
   contactPhone: null,
   whatsappPhone: null,
   email: null,
+  takingBookings: true,
   cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+  districts: [{ code: 'gasabo', name: 'Gasabo' }],
+  categories: [{ slug: 'portrait', name: 'Portrait' }],
+  portfolio: [],
+  // The profile lists the active services with their "from" prices (Phase 6, R6.2).
+  services: [
+    { slug: 'portraits', nameEn: 'Portraits', descriptionEn: 'Studio portraits.', coverImageUrl: null, fromPriceRwf: 25_000 },
+    { slug: 'weddings', nameEn: 'Weddings', descriptionEn: null, coverImageUrl: null, fromPriceRwf: 40_000 },
+  ],
 }
 
 type Sent = { method: string; path: string; authorization: string | null }
@@ -135,9 +144,9 @@ test('lists the active services and opens one from the keyboard', async ({ page 
   await expect(page.getByRole('heading', { level: 1, name: 'Portraits' })).toBeVisible()
   // Anonymous: nothing sent a credential. (StrictMode in the dev server runs
   // each effect twice, so each GET may arrive twice; the paths are what count.)
+  // The profile alone lists the services since Phase 6 (R6.2): no list request.
   expect([...new Set(sent.map(({ method, path }) => `${method} ${path}`))]).toEqual([
     'GET /api/photographers/kigali-lens',
-    'GET /api/photographers/kigali-lens/services',
     'GET /api/photographers/kigali-lens/services/portraits',
   ])
   expect(sent.every(({ authorization }) => authorization === null)).toBe(true)

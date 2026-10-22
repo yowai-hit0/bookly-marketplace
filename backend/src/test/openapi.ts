@@ -93,6 +93,8 @@ function specPathToExpress(path: string): string {
  */
 const MOUNTS: Record<string, string | readonly string[]> = {
   healthRouter: '/api',
+  // Phase 6: at the API's root, where the web host rewrites its /sitemap.xml (R6.6).
+  sitemapRouter: '',
   publicCatalogueRouter: '/api',
   availabilityRouter: '/api/availability',
   bookingsRouter: '/api/bookings',

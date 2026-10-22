@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { useDocumentMeta } from '@/lib/document-meta'
 import { cn } from '@/lib/utils'
 import { container, pageY, statusTitle } from '@/pages/client/classes'
 
@@ -31,20 +32,15 @@ export function NotTakingBookingsNotice({ className }: { className?: string }) {
   )
 }
 
-/** The one line on a photographer's card in a list. */
-export function NotTakingBookingsLine() {
-  const { t } = useTranslation()
-  return (
-    <p className="text-subtle-foreground flex items-center gap-2 text-sm" data-not-taking-bookings="">
-      <CalendarOff aria-hidden="true" className="size-4 shrink-0" />
-      {t('photographers:notTakingBookings')}
-    </p>
-  )
-}
-
 /** In place of a profile or a service whose photographer the API does not serve. */
 export function PhotographerUnavailable() {
   const { t } = useTranslation()
+  // Out of search results: the page says nothing about who it was (R6.6).
+  useDocumentMeta({
+    title: t('meta:titleSuffix', { title: t('meta:unavailable.title') }),
+    description: t('photographers:unavailable.body'),
+    noindex: true,
+  })
   return (
     <main className={cn(container, pageY, 'flex min-h-112 flex-col items-center justify-center text-center')} data-photographer-unavailable="">
       <UserX aria-hidden="true" strokeWidth={1.5} className="text-muted-foreground size-10" />

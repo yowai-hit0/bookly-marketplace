@@ -819,26 +819,43 @@ function expectNotFound(res: Response, label = ''): void {
 }
 
 describe('GET /api/photographers', () => {
-  it('lists the bookable photographers by name: handle, display name and cover only', async () => {
+  // The directory's filters, order and pagination are proven in public-directory.test.ts (R6.1).
+  it('lists the listed photographers who have something to book, as directory cards', async () => {
     await prisma.photographer.update({ where: { id: photographerId }, data: { coverImageUrl: 'https://images.example.com/kigali.jpg', bio: 'Hidden here.' } });
-    await seedOtherPhotographer({ handle: 'amahoro-studio', displayName: 'Amahoro Studio' });
+    await seedCatalogue();
+    const amahoro = await seedOtherPhotographer({ handle: 'amahoro-studio', displayName: 'Amahoro Studio' });
+    await prisma.package.update({ where: { id: amahoro.standard.id }, data: { priceRwf: 40_000 } });
     await seedOtherPhotographer({ handle: 'pending-one', displayName: 'A Pending One', status: 'pending' });
     await seedOtherPhotographer({ handle: 'suspended-one', displayName: 'A Suspended One', status: 'suspended' });
 
     const body = bodyOf<unknown>(await request(app).get(PHOTOGRAPHERS), 200);
 
+    // Same "from" price, so by name.
     expect(body).toStrictEqual({
       photographers: [
-        { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null, takingBookings: true },
-        { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg', takingBookings: true },
+        { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null, fromPriceRwf: 40_000, districts: [], categories: [], takingBookings: true },
+        {
+          handle: PHOTOGRAPHER_HANDLE,
+          displayName: 'Kigali Lens',
+          coverImageUrl: 'https://images.example.com/kigali.jpg',
+          fromPriceRwf: 40_000,
+          districts: [],
+          categories: [],
+          takingBookings: true,
+        },
       ],
+      page: 1,
+      pageSize: 24,
+      hasMore: false,
+      total: 2,
     });
   });
 
   it('lists nobody when nobody can be booked', async () => {
+    await seedCatalogue();
     await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'suspended', suspendedAt: new Date('2026-10-01T06:00:00Z') } });
 
-    expect(bodyOf<unknown>(await request(app).get(PHOTOGRAPHERS), 200)).toStrictEqual({ photographers: [] });
+    expect(bodyOf<unknown>(await request(app).get(PHOTOGRAPHERS), 200)).toStrictEqual({ photographers: [], page: 1, pageSize: 24, hasMore: false, total: 0 });
   });
 });
 
@@ -868,6 +885,11 @@ describe('GET /api/photographers/:handle', () => {
         coverImageUrl: 'https://images.example.com/kigali.jpg',
         takingBookings: true,
         cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
+        // The profile page's lists (R6.2), proven in public-profile.test.ts.
+        districts: [],
+        categories: [],
+        portfolio: [],
+        services: [],
       },
     });
     expect(res.text).not.toContain(PHOTOGRAPHER_EMAIL);

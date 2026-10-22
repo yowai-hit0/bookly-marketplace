@@ -190,18 +190,18 @@ describe('the non-refundable notice', () => {
       </PriceSummary>,
     )
 
-    // The child is the first focusable element: nothing interactive sits above
-    // the notice that could lead past it. The "Questions?" contact links come
-    // after it, at the very end of the panel (client-front.md §8.3; the
-    // photographer's placeholder contact details render there, updated
-    // 2026-09-27 for the restyle that added `<ContactLine />`).
+    // The child is the only focusable element: nothing interactive sits above
+    // the notice that could lead past it. The placeholder "Questions?" contact
+    // links are gone (Phase 6, R6.4): the service page shows the
+    // photographer's own channels beside the summary instead.
     const focusable = summary().querySelectorAll('a[href], button, input, select, textarea, [tabindex]')
-    expect(Array.from(focusable).map((element) => element.textContent)).toEqual([
-      'Pay booking fee',
-      '+250 700 000 000',
-      '+250 700 000 000',
-      'hello@example.com',
-    ])
+    expect(Array.from(focusable).map((element) => element.textContent)).toEqual(['Pay booking fee'])
+  })
+
+  it('shows no placeholder contact details (R6.4)', () => {
+    render(<PriceSummary cancellationPolicy={POLICY} pkg={STANDARD} addons={[]} bookingFeeRate={0.4} />)
+
+    expect(summary()).not.toHaveTextContent(/Questions\?|\+250 700 000 000|hello@example\.com/)
   })
 })
 

@@ -20,41 +20,162 @@ photographers:
   get:
     operationId: listPhotographers
     tags: [Catalogue & availability]
-    summary: List the listed photographers
+    summary: The directory
     description: |
-      Every listed photographer, by display name: those who can be booked, and
-      those whose subscription is `past_due` (`takingBookings: false`,
-      marketplace-spec.md R5.5). Pending, suspended and `expired` photographers
-      are not listed. No filters yet: the directory's category, district, price
-      and date filters come later. Anonymous.
+      The public directory (marketplace-spec.md R6.1), 24 a page. Listed are
+      approved photographers whose subscription is `trialing`, `active` or
+      `past_due` (inside the grace), with at least one active package on an
+      active service. Pending, suspended and `expired` photographers never
+      appear. A `past_due` photographer is listed with `takingBookings: false`,
+      after every bookable one, and is left out whenever `date` is given.
+
+      **Date.** Kept are the photographers with at least one bookable start
+      that Kigali day for their shortest active package, exactly as
+      `GET /api/availability` would offer it: working hours (a dated override
+      wins), blocks, bookings and live holds, buffer and lead time. Accepted
+      from today (Kigali) to 365 days ahead.
+
+      Every parameter is optional and may appear once. An unknown parameter is
+      a 400. `Cache-Control: no-store`. Anonymous.
+    security: []
+    parameters:
+      - name: category
+        in: query
+        description: An active category's slug (`GET /api/categories`).
+        schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 64, examples: [wedding] }
+      - name: district
+        in: query
+        description: A district code (`GET /api/districts`).
+        schema: { type: string, pattern: '^[a-z]+(-[a-z]+)*$', maxLength: 32, examples: [gasabo] }
+      - name: min
+        in: query
+        description: Lowest `fromPriceRwf`, inclusive, whole RWF.
+        schema: { type: integer, minimum: 0, maximum: 2147483647 }
+      - name: max
+        in: query
+        description: Highest `fromPriceRwf`, inclusive, whole RWF. Must not be below `min`.
+        schema: { type: integer, minimum: 0, maximum: 2147483647 }
+      - name: date
+        in: query
+        description: A Kigali date, `YYYY-MM-DD`, from today to 365 days ahead.
+        schema: { $ref: ../components/common.yaml#/schemas/KigaliDate }
+      - name: page
+        in: query
+        description: 1-based; defaults to 1. A page past the end is an empty 200.
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 1 }
+    responses:
+      '200':
+        description: One page of the directory.
+        content:
+          application/json:
+            schema: { $ref: ../components/catalogue.yaml#/schemas/DirectoryPage }
+      '400':
+        description: |
+          Not the shape of a request: an unknown or repeated parameter, an
+          empty value, a slug or code of the wrong form, a number that is not
+          whole digits, a malformed date.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: invalid_request }
+      '422':
+        description: |
+          Well-formed, but breaks a rule; `fields` names each: `category` (no
+          active category has that slug), `district` (no such district),
+          `min`/`max` (negative, past the int4 range, or `min > max`, which names
+          both), `date` (before today in Kigali, more than 365 days ahead, or a
+          year the engine cannot compute), `page` (below 1 or above 1000).
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+categories:
+  get:
+    operationId: listCategories
+    tags: [Catalogue & availability]
+    summary: The active categories
+    description: For the directory's filter bar (R6.1). Active categories only, in the platform's order. Anonymous.
     security: []
     responses:
       '200':
-        description: The listed photographers.
+        description: The active categories.
         content:
           application/json:
             schema:
               type: object
-              required: [photographers]
+              required: [categories]
               additionalProperties: false
               properties:
-                photographers:
+                categories:
                   type: array
-                  items: { $ref: ../components/catalogue.yaml#/schemas/PublicPhotographerSummary }
+                  items: { $ref: ../components/catalogue.yaml#/schemas/PublicCategory }
+
+districts:
+  get:
+    operationId: listDistricts
+    tags: [Catalogue & availability]
+    summary: "Rwanda's 30 districts, by province"
+    description: For the directory's filter bar (R6.1). The five provinces in a fixed order (Kigali City first), each with its districts. Anonymous.
+    security: []
+    responses:
+      '200':
+        description: The districts, grouped by province.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provinces]
+              additionalProperties: false
+              properties:
+                provinces:
+                  type: array
+                  items: { $ref: ../components/catalogue.yaml#/schemas/ProvinceDistricts }
+
+sitemap:
+  get:
+    operationId: getSitemap
+    tags: [Catalogue & availability]
+    summary: The web app's sitemap
+    description: |
+      An XML sitemap (sitemaps.org 0.9) of the web app's crawlable pages
+      (marketplace-spec.md R6.6): `{WEB_ORIGIN}/`, `{WEB_ORIGIN}/photographers`
+      and `{WEB_ORIGIN}/p/{handle}` for every **bookable** photographer, each
+      profile with `lastmod` from its last update. Past-due, pending,
+      suspended and expired photographers are not listed. At most 50,000
+      URLs. Served at the API's root, not under `/api`: the web host rewrites
+      its own `/sitemap.xml` here. `Cache-Control: public, max-age=3600`.
+      Anonymous.
+    security: []
+    responses:
+      '200':
+        description: The sitemap.
+        content:
+          application/xml:
+            schema: { type: string }
+            example: |
+              <?xml version="1.0" encoding="UTF-8"?>
+              <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+                <url><loc>https://bookly.example/</loc></url>
+                <url><loc>https://bookly.example/photographers</loc></url>
+                <url><loc>https://bookly.example/p/kigali-lens</loc><lastmod>2026-10-20T08:00:00.000Z</lastmod></url>
+              </urlset>
 
 photographer:
   get:
     operationId: getPhotographer
     tags: [Catalogue & availability]
-    summary: One photographer's public profile
+    summary: One photographer's profile page
     description: |
-      The profile behind `/p/{handle}`. Never the photographer's login email,
-      status or operating settings: `email` is the public contact address they
-      chose, or null. An unknown handle and the handle of a photographer who is
-      not listed -- pending, suspended, or with an `expired` subscription -- are
-      the same 404; the profile page words it as "unavailable" (R5.5). A
-      `past_due` photographer's profile is served with `takingBookings: false`.
-      Anonymous.
+      The profile page behind `/p/{handle}` (marketplace-spec.md R6.2): the
+      profile, districts, categories, up to 24 portfolio images, the active
+      services each with its "from" price, the cancellation policy and the
+      contact details. Never the photographer's login email, status or
+      operating settings: `email` is the public contact address they chose, or
+      null. Text is verbatim: render it as plain text (R6.5). An unknown handle
+      and the handle of a photographer who is not listed -- pending, suspended,
+      or with an `expired` subscription -- are the same 404; the profile page
+      words it as "unavailable" (R5.5). A `past_due` photographer's profile is
+      served with `takingBookings: false`. Anonymous.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/Handle
@@ -68,7 +189,7 @@ photographer:
               required: [photographer]
               additionalProperties: false
               properties:
-                photographer: { $ref: ../components/catalogue.yaml#/schemas/PublicPhotographerProfile }
+                photographer: { $ref: ../components/catalogue.yaml#/schemas/PublicPhotographerDetail }
       '404':
         $ref: ../components/common.yaml#/responses/NotFound
 

@@ -5,7 +5,7 @@ import { createPrismaClient } from '../db/client.js';
 import { updatePhotographerSettings } from '../settings/index.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { PHOTOGRAPHER_EMAIL, PHOTOGRAPHER_HANDLE, createPhotographer } from '../test/payment-fixtures.js';
-import { type FindAvailabilityOptions, findAvailability } from './query.js';
+import { type FindAvailabilityOptions, findAvailability, findDayStartsFor } from './query.js';
 
 /**
  * `findAvailability`, the database side of availability, against real
@@ -436,5 +436,88 @@ describe('another photographer’s calendar', () => {
 
     expect((await startTimes(WEDNESDAY, { now }))[0]).toBe('12:00');
     expect((await startTimes(WEDNESDAY, { now, photographerId: otherId }))[0]).toBe('10:00');
+  });
+});
+
+// --- Many photographers' single day (the directory's date filter, R6.1) ----------------
+
+describe('findDayStartsFor', () => {
+  let otherId: string;
+  let thirdId: string;
+
+  beforeEach(async () => {
+    ({ photographerId: otherId } = await createPhotographer(prisma, { email: 'other@bookly.example', handle: 'hills-and-light', displayName: 'Hills & Light' }));
+    ({ photographerId: thirdId } = await createPhotographer(prisma, { email: 'third@bookly.example', handle: 'amahoro-studio', displayName: 'Amahoro' }));
+    await weekdayHours(otherId);
+  });
+
+  /** findAvailability's starts for one photographer and date, the reference the batch must equal. */
+  async function reference(owner: string, date: string, packageDurationMinutes: number, now = NOW): Promise<string[]> {
+    const [day] = await findAvailability(prisma, { photographerId: owner, from: date, to: date, packageDurationMinutes, now });
+    return day?.starts ?? [];
+  }
+
+  it('equals findAvailability photographer by photographer, each with their own rows, settings and package length', async () => {
+    // This photographer: a booking, a block and a dated override on Thursday.
+    await insertBooking(on(WEDNESDAY, '09:00', '10:00', '10:30'));
+    await prisma.availabilityBlock.create({ data: { photographerId, startsAt: kigali(WEDNESDAY, '15:00'), endsAt: kigali(WEDNESDAY, '17:00') } });
+    await prisma.workingHours.create({ data: { photographerId, effectiveDate: new Date(`${THURSDAY}T00:00:00Z`), opensMinute: 600, closesMinute: 720 } });
+    // The other: a long buffer, no lead time, a booking at noon that this photographer's rows never see.
+    await updatePhotographerSettings(otherId, { minLeadTimeMinutes: 0, bufferMinutes: 120 }, prisma);
+    await insertBooking(on(WEDNESDAY, '12:00', '13:00', '15:00'), otherId);
+    // The third works Saturdays only, round the clock, with a block crossing into Sunday.
+    await openAllDay(SATURDAY, thirdId);
+    await prisma.availabilityBlock.create({ data: { photographerId: thirdId, startsAt: kigali(SATURDAY, '20:00'), endsAt: kigali(SUNDAY, '04:00') } });
+
+    for (const date of [MONDAY, WEDNESDAY, THURSDAY, SATURDAY, SUNDAY]) {
+      for (const now of [NOW, kigali(WEDNESDAY, '11:20')]) {
+        const request = [
+          { photographerId, packageDurationMinutes: 60 },
+          { photographerId: otherId, packageDurationMinutes: 90 },
+          { photographerId: thirdId, packageDurationMinutes: 240 },
+        ];
+        const batch = await findDayStartsFor(prisma, { date, now, photographers: request });
+        for (const entry of request) {
+          const label = `${entry.photographerId} on ${date} at ${now.toISOString()}`;
+          expect((batch.get(entry.photographerId) ?? []).map((start) => start.toISOString()), label).toEqual(
+            await reference(entry.photographerId, date, entry.packageDurationMinutes, now),
+          );
+        }
+      }
+    }
+  });
+
+  it("collides a late candidate with a booking inside the photographer's own buffer, loaded up to the longest buffer of the batch", async () => {
+    // Open until midnight, and booked at 00:10 the next day: a 23:00 candidate's own 30-minute buffer runs into it.
+    await openAllDay(WEDNESDAY);
+    await updatePhotographerSettings(otherId, { bufferMinutes: 240 }, prisma);
+    await insertBooking({ startsAt: kigali(THURSDAY, '00:10'), endsAt: kigali(THURSDAY, '01:00'), bufferEndsAt: kigali(THURSDAY, '01:30') });
+
+    const batch = await findDayStartsFor(prisma, {
+      date: WEDNESDAY,
+      now: NOW,
+      photographers: [
+        { photographerId, packageDurationMinutes: 60 },
+        { photographerId: otherId, packageDurationMinutes: 60 },
+      ],
+    });
+
+    expect((batch.get(photographerId) ?? []).map((start) => start.toISOString())).toEqual(await reference(photographerId, WEDNESDAY, 60));
+    // 22:30 reserves to 00:00 (no collision), 23:00 to 00:30 (collides with the 00:10 booking).
+    expect((batch.get(photographerId) ?? []).map((start) => kigaliTime(start.toISOString())).slice(-2)).toEqual(['22:00', '22:30']);
+  });
+
+  it('answers an empty map for no photographers, and an empty list for a photographer with no hours', async () => {
+    await expect(findDayStartsFor(prisma, { date: WEDNESDAY, now: NOW, photographers: [] })).resolves.toEqual(new Map());
+
+    const batch = await findDayStartsFor(prisma, { date: WEDNESDAY, now: NOW, photographers: [{ photographerId: thirdId, packageDurationMinutes: 60 }] });
+    expect(batch.get(thirdId)).toEqual([]);
+  });
+
+  it('refuses a malformed date and a photographer id without a settings row', async () => {
+    await expect(findDayStartsFor(prisma, { date: '2026-02-30', now: NOW, photographers: [{ photographerId, packageDurationMinutes: 60 }] })).rejects.toThrow(RangeError);
+    await expect(
+      findDayStartsFor(prisma, { date: WEDNESDAY, now: NOW, photographers: [{ photographerId: '00000000-0000-4000-8000-000000000000', packageDurationMinutes: 60 }] }),
+    ).rejects.toThrow(/no settings row/);
   });
 });

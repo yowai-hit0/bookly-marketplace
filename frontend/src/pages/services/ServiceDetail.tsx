@@ -1,8 +1,8 @@
-import { Camera, Check, CircleAlert, Clock } from 'lucide-react'
+import { ArrowRight, Camera, Check, CircleAlert, Clock, UserRound } from 'lucide-react'
 import type { TFunction } from 'i18next'
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 import {
   type PublicPhotographerProfile,
   type PublicServiceDetail,
@@ -21,11 +21,14 @@ import { BackLink } from '@/components/ui/back-link'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { SelectableCard } from '@/components/ui/selectable-card'
+import { excerpt, useDocumentMeta } from '@/lib/document-meta'
 import { formatMoney } from '@/lib/format'
+import { safeHttpsUrl } from '@/lib/safe-url'
 import { cn } from '@/lib/utils'
-import { container, eyebrow, pageTitle, pageY, panelTitle } from '@/pages/client/classes'
+import { container, eyebrow, pageTitle, pageY, panel, panelTitle } from '@/pages/client/classes'
 import { NotFound } from '@/pages/NotFound'
 import { NotTakingBookingsNotice, PhotographerUnavailable } from '@/pages/photographers/notices'
+import { ContactList } from '@/pages/photographers/PhotographerContact'
 import { BookingDetailsForm } from './BookingDetailsForm'
 import { BookingHeld } from './BookingHeld'
 import { PriceSummary } from './PriceSummary'
@@ -154,6 +157,15 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
   const [stopped, setStopped] = useState(false)
   const takingBookings = !stopped && photographer.takingBookings !== false && service.takingBookings !== false
 
+  const cover = safeHttpsUrl(service.coverImageUrl)
+  useDocumentMeta({
+    title: t('meta:titleSuffix', { title: t('meta:service.title', { service: service.nameEn, name: photographer.displayName }) }),
+    description: service.descriptionEn?.trim()
+      ? excerpt(service.descriptionEn)
+      : t('meta:service.description', { service: service.nameEn, name: photographer.displayName }),
+    image: cover ?? photographer.coverImageUrl,
+  })
+
   const chosenPackage = service.packages.find((pkg) => pkg.id === packageId) ?? null
   // Catalogue order, whatever order they were ticked in.
   const chosenAddons = service.addons.filter((addon) => addonIds.has(addon.id))
@@ -250,10 +262,11 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
     <main className={cn(container, pageY, 'flex flex-col gap-8')}>
       <AllServicesLink handle={handle} />
       <header className="flex flex-col gap-4">
-        {service.coverImageUrl !== null && (
+        {cover !== null && (
           <img
-            src={service.coverImageUrl}
+            src={cover}
             alt=""
+            referrerPolicy="no-referrer"
             className="bg-muted aspect-21/9 w-full rounded-xs object-cover"
             fetchPriority="high"
           />
@@ -264,9 +277,9 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
             <Camera aria-hidden="true" />
             {photographer.displayName}
           </p>
-          <h1 className={pageTitle}>{service.nameEn}</h1>
+          <h1 className={cn(pageTitle, 'wrap-anywhere')}>{service.nameEn}</h1>
           {service.descriptionEn !== null && (
-            <p className="text-subtle-foreground max-w-2xl whitespace-pre-line">{service.descriptionEn}</p>
+            <p className="text-subtle-foreground max-w-2xl whitespace-pre-line wrap-anywhere">{service.descriptionEn}</p>
           )}
           <p className={eyebrow}>
             <Clock aria-hidden="true" />
@@ -278,7 +291,10 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
       {!takingBookings && <NotTakingBookingsNotice />}
 
       {service.packages.length === 0 ? (
-        <p className="text-subtle-foreground">{t('services:noPackages')}</p>
+        <div className="flex flex-col gap-6">
+          <p className="text-subtle-foreground">{t('services:noPackages')}</p>
+          <YourPhotographer handle={handle} photographer={photographer} className="max-w-sm" />
+        </div>
       ) : (
         <div className="grid gap-10 lg:grid-cols-[1fr_22.5rem] lg:items-start">
           {/* The counter numbers the three groups: choose, pick a time, your details (step-number.ts). */}
@@ -379,7 +395,7 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
           </div>
 
           {/* Below lg it is the last thing on the page, the closing step, so it is spaced like the steps above it. */}
-          <div className="max-lg:mt-2 lg:sticky lg:top-6">
+          <div className="flex flex-col gap-4 max-lg:mt-2 lg:sticky lg:top-6">
             <PriceSummary
               pkg={chosenPackage}
               addons={chosenAddons}
@@ -410,10 +426,49 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
                 </Callout>
               )}
             </PriceSummary>
+            <YourPhotographer handle={handle} photographer={photographer} />
           </div>
         </div>
       )}
     </main>
+  )
+}
+
+/**
+ * Whose service this is, and how to reach them (Phase 6, R6.4): the name as
+ * a link to their profile, then the contact channels set on it -- never a
+ * placeholder. After the price summary, so it follows Confirm in the tab
+ * order and nothing leading away comes before the payment notice.
+ */
+function YourPhotographer({
+  handle,
+  photographer,
+  className,
+}: {
+  handle: string
+  photographer: PublicPhotographerProfile
+  className?: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <section aria-labelledby="your-photographer" className={cn(panel, 'flex flex-col gap-3 p-5', className)} data-your-photographer="">
+      <h2 id="your-photographer" className={eyebrow}>
+        <UserRound aria-hidden="true" />
+        {t('profile:yourPhotographer')}
+      </h2>
+      <Link
+        to={photographerPath(handle)}
+        className="group/profile hover:text-console-link inline-flex min-h-6 items-center gap-2 self-start rounded-xs text-lg font-medium wrap-anywhere pointer-coarse:min-h-11 motion-safe:transition-colors"
+      >
+        {photographer.displayName}
+        <span className="sr-only">, {t('profile:viewProfile')}</span>
+        <ArrowRight
+          aria-hidden="true"
+          className="text-console-link size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-250 motion-safe:group-hover/profile:translate-x-1"
+        />
+      </Link>
+      <ContactList contact={photographer} />
+    </section>
   )
 }
 

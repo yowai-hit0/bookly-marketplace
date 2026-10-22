@@ -171,6 +171,62 @@ describe('seedDatabase: demo data', () => {
     await expect(prisma.photographerDistrict.count({ where: { districtCode: 'gasabo' } })).resolves.toBe(3);
   });
 
+  it('gives each a directory profile (Phase 6): bio, cover, WhatsApp, 4-8 https portfolio images in order, and differing "from" prices', async () => {
+    await seedDatabase(prisma, env);
+
+    const photographers = await prisma.photographer.findMany({ include: { portfolioImages: { orderBy: { sortOrder: 'asc' } } }, orderBy: { handle: 'asc' } });
+    for (const photographer of photographers) {
+      expect(photographer.bio?.length ?? 0, photographer.handle).toBeGreaterThan(60);
+      expect(photographer.coverImageUrl, photographer.handle).toMatch(/^https:\/\/images\.unsplash\.com\/photo-[0-9a-f]+-[0-9a-f]+\?/);
+      expect(photographer.whatsappPhone, photographer.handle).toMatch(/^\+2507\d{8}$/);
+      expect(photographer.portfolioImages.length, photographer.handle).toBeGreaterThanOrEqual(4);
+      expect(photographer.portfolioImages.length, photographer.handle).toBeLessThanOrEqual(8);
+      expect(photographer.portfolioImages.map((image) => image.sortOrder)).toEqual(photographer.portfolioImages.map((_, index) => index));
+      for (const image of photographer.portfolioImages) expect(image.url).toMatch(/^https:\/\/images\.unsplash\.com\//);
+    }
+    // No image repeats, across all three.
+    const urls = photographers.flatMap((photographer) => photographer.portfolioImages.map((image) => image.url));
+    expect(new Set(urls).size).toBe(urls.length);
+
+    // The "from" prices differ; the price ranges overlap.
+    const prices = await prisma.package.groupBy({ by: ['photographerId'], where: { isActive: true }, _min: { priceRwf: true }, _max: { priceRwf: true } });
+    expect(new Set(prices.map((row) => row._min.priceRwf)).size).toBe(3);
+    const highestFrom = Math.max(...prices.map((row) => row._min.priceRwf ?? 0));
+    expect(prices.every((row) => (row._max.priceRwf ?? 0) >= highestFrom)).toBe(true);
+  });
+
+  it('enriches a demo photographer seeded before Phase 6, filling only what is empty, once', async () => {
+    await seedDatabase(prisma, env);
+    const demo = DEMO_PHOTOGRAPHERS[1];
+    const handle = demo?.handle ?? '';
+    // As a Phase 1-5 seed left it: no cover, no portfolio; and a WhatsApp number the owner has since set.
+    await prisma.photographer.update({ where: { handle }, data: { coverImageUrl: null, whatsappPhone: '+250788999999' } });
+    await prisma.portfolioImage.deleteMany({ where: { photographer: { handle } } });
+
+    const again = await seedDatabase(prisma, env);
+    const enriched = await prisma.photographer.findUniqueOrThrow({ where: { handle }, include: { portfolioImages: true } });
+
+    expect(again.demo).toMatchObject({ photographersCreated: 0, profilesEnriched: 1 });
+    expect(enriched.coverImageUrl).toBe(demo?.coverImageUrl);
+    expect(enriched.whatsappPhone).toBe('+250788999999');
+    expect(enriched.portfolioImages).toHaveLength(demo?.portfolio.length ?? -1);
+    // A third run finds nothing to fill.
+    expect((await seedDatabase(prisma, env)).demo).toMatchObject({ profilesEnriched: 0 });
+    await expect(prisma.portfolioImage.count({ where: { photographer: { handle } } })).resolves.toBe(demo?.portfolio.length);
+  });
+
+  it("never enriches a photographer of someone else's making at a demo handle", async () => {
+    const handle = DEMO_PHOTOGRAPHERS[0]?.handle ?? '';
+    const user = await prisma.appUser.create({ data: { email: 'real@example.com', role: 'photographer', passwordHash: 'x' } });
+    await prisma.photographer.create({ data: { userId: user.id, handle, displayName: 'Someone real', setting: { create: {} } } });
+
+    const summary = await seedDatabase(prisma, env);
+
+    expect(summary.demo).toMatchObject({ profilesEnriched: 0 });
+    await expect(prisma.photographer.findUniqueOrThrow({ where: { handle } })).resolves.toMatchObject({ coverImageUrl: null, whatsappPhone: null });
+    await expect(prisma.portfolioImage.count({ where: { photographer: { handle } } })).resolves.toBe(0);
+  });
+
   it('keeps the first photographer\'s catalogue as the single-photographer demo had it', async () => {
     await seedDatabase(prisma, env);
 

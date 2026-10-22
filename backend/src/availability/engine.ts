@@ -196,7 +196,7 @@ export function kigaliMinuteToUtc(date: KigaliDate, minutesFromMidnight: number)
 }
 
 /** 0 = Sunday ... 6 = Saturday, for the Kigali calendar date. */
-function kigaliWeekday(date: KigaliDate): number {
+export function kigaliWeekday(date: KigaliDate): number {
   const { year, month, day } = splitDate(date);
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
 }

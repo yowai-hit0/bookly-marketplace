@@ -752,6 +752,18 @@ The exact "has at least one slot" check then runs the existing engine (`availabi
 
 Indexes serving it: `photographer_status_idx`, the subscription status index, the category and district join-table indexes, `package_directory_price_idx`, the working-hours uniques, `availability_block_range_idx`, and `booking_no_overlap`'s GiST index.
 
+**As built (Phase 6, refinements; `catalogue/directory.ts`):**
+- The price lateral computes `min(price_rwf)` **and** `min(duration_minutes)` over active packages of active services, so the date stage knows each candidate's shortest package. `JOIN LATERAL ... ON from_price_rwf IS NOT NULL` drops a photographer with nothing to book.
+- `ORDER BY` puts bookable photographers first (past-due ones are listed after them), then `from_price_rwf`, then `lower(display_name) COLLATE "C"`, then `id`, a total order.
+- The date pre-filter is a lateral join to the one working-hours row that applies (the dated row for the date wins over the weekday's), and three conditions:
+  - the row is open
+  - `ceil(opens_minute / 30) * 30 + shortest <= closes_minute` (the engine's slot grid)
+  - `NOT EXISTS` a block whose `tstzrange` contains the whole window (`@>`, served by `availability_block_range_idx`)
+
+  It also requires BOOKABLE: past-due photographers are not offered on a date.
+- With a date, `LIMIT/OFFSET` reads the candidates in chunks of 48 from the start, and the engine runs on each chunk until one survivor past the requested page is found. Without one, a `count(*)` over the same `FROM ... WHERE` gives `total`.
+- No new index: at 200 photographers every step is an index scan and the query executes in about 1 ms (Phase 6 as built in `marketplace-spec.md`).
+
 ### 3.13 Reviews (later, not modelled)
 A future `review` table would hang off `booking`:
 - `booking_id` unique, allowed only for `completed` bookings

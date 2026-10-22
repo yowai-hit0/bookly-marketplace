@@ -6,7 +6,6 @@ import { formatMoney } from '@/lib/format'
 import { feePercent, quoteBasket } from '@/lib/quote'
 import { cn } from '@/lib/utils'
 import { data, eyebrow } from '@/pages/client/classes'
-import { ContactLine } from '@/pages/client/ContactLine'
 
 /**
  * The running total a visitor watches while choosing (spec §3.1 steps 3 and
@@ -24,8 +23,9 @@ import { ContactLine } from '@/pages/client/ContactLine'
  * a client may cancel, as their profile says (R1.8), never a fixed
  * "non-refundable". `children` is where a later step toward payment plugs in,
  * and it renders after the notice, so no control leading to payment can be
- * reached before it. The
- * `dl > div > dt + dd` markup below is exactly what `services.spec.ts` reads
+ * reached before it. How to reach the photographer is no longer here: the
+ * service page shows their own contact channels beside it (Phase 6, R6.4).
+ * The `dl > div > dt + dd` markup below is exactly what `services.spec.ts` reads
  * by `dt` text: only classes change here, never a row.
  */
 
@@ -92,7 +92,6 @@ export function PriceSummary({ pkg, addons, bookingFeeRate, cancellationPolicy, 
 
       <p className="text-subtle-foreground text-[0.8125rem] leading-relaxed">{policySentence(t, cancellationPolicy)}</p>
       {children}
-      <ContactLine />
     </section>
   )
 }

@@ -1,0 +1,18 @@
+# Bookly's crawl rules (marketplace spec R6.6).
+#
+# PLACEHOLDER: https://bookly.example is the web app's origin (the backend's
+# WEB_ORIGIN). Replace it with the real origin before launch; a static file
+# cannot read it. The web host rewrites /sitemap.xml to the API (vercel.json).
+#
+# Private pages are reached by a token in the link or a session: keep them out.
+User-agent: *
+Disallow: /checkout/
+Disallow: /booking/
+Disallow: /email-confirm/
+Disallow: /my-booking
+Disallow: /account
+Disallow: /studio
+Disallow: /platform
+Disallow: /admin
+
+Sitemap: https://bookly.example/sitemap.xml

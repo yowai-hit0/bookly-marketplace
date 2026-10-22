@@ -24,3 +24,7 @@ Add a text link to `/services` using the **existing** string `services:allServic
 ## Do not
 
 - No new copy, no illustration that carries meaning, no nav.
+
+## Meta (Phase 6, 2026-10-22, R6.6)
+
+`<title>` "Page not found · Bookly" and `<meta name="robots" content="noindex">` while it is shown; both are restored when the visitor leaves.

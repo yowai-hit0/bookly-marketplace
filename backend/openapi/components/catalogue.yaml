@@ -2,16 +2,89 @@
 # photographer edits in the studio (`routes/studio-catalogue.ts`).
 
 schemas:
-  PublicPhotographerSummary:
+  DirectoryPhotographer:
     type: object
-    description: One listed photographer, as the photographers list shows them.
-    required: [handle, displayName, coverImageUrl, takingBookings]
+    description: |
+      One card of the directory (marketplace-spec.md R6.1). An allowlist: no id,
+      status, login, bio or settings.
+    required: [handle, displayName, coverImageUrl, fromPriceRwf, districts, categories, takingBookings]
     additionalProperties: false
     properties:
       handle: { type: string, examples: [kigali-lens] }
       displayName: { type: string }
-      coverImageUrl: { type: [string, 'null'], format: uri }
+      coverImageUrl: { type: [string, 'null'], format: uri, description: 'An `https://` URL the photographer pasted.' }
+      fromPriceRwf:
+        description: The cheapest **active** package of an **active** service. A photographer with none is not listed.
+        allOf:
+          - $ref: 'common.yaml#/schemas/Rwf'
+      districts:
+        type: array
+        description: Where they work, in the districts' fixed order (Kigali's first).
+        items: { $ref: '#/schemas/PublicDistrict' }
+      categories:
+        type: array
+        description: What they shoot, active categories only, in the platform's order.
+        items: { $ref: '#/schemas/PublicCategory' }
       takingBookings: { $ref: '#/schemas/TakingBookings' }
+
+  DirectoryPage:
+    type: object
+    description: |
+      One page of the directory: 24 cards at most, bookable photographers
+      first, then by `fromPriceRwf`, then by name (case-insensitive), then a
+      stable tiebreak, so pages never overlap or skip.
+
+      `total` is the exact number of matches across all pages, and is answered
+      **only without `date`**: under the date filter the availability engine
+      decides who stays, and it runs on the candidates up to the requested
+      page only, so no honest total exists. `hasMore` is always exact: without
+      a date `page * 24 < total`; with one, true only when a survivor beyond
+      this page was actually found.
+    required: [photographers, page, pageSize, hasMore]
+    additionalProperties: false
+    properties:
+      photographers:
+        type: array
+        maxItems: 24
+        items: { $ref: '#/schemas/DirectoryPhotographer' }
+      page: { type: integer, minimum: 1 }
+      pageSize: { const: 24 }
+      hasMore: { type: boolean }
+      total:
+        type: integer
+        minimum: 0
+        description: Every match across all pages. Absent when `date` is given.
+
+  PublicDistrict:
+    type: object
+    required: [code, name]
+    additionalProperties: false
+    properties:
+      code: { type: string, examples: [gasabo] }
+      name: { type: string, examples: [Gasabo] }
+
+  PublicCategory:
+    type: object
+    required: [slug, name]
+    additionalProperties: false
+    properties:
+      slug: { type: string, examples: [wedding] }
+      name: { type: string, examples: [Wedding] }
+
+  ProvinceDistricts:
+    type: object
+    description: One of Rwanda's five provinces with its districts.
+    required: [code, name, districts]
+    additionalProperties: false
+    properties:
+      code: { type: string, enum: [kigali, eastern, northern, southern, western] }
+      name:
+        type: string
+        description: The province's English name, for display. A translated page may label it by `code` instead.
+        examples: [Kigali City]
+      districts:
+        type: array
+        items: { $ref: '#/schemas/PublicDistrict' }
 
   TakingBookings:
     type: boolean
@@ -22,25 +95,74 @@ schemas:
       answer the quote, the calendar and the booking form as an inactive package
       does. An `expired` photographer is not listed at all.
 
-  PublicPhotographerProfile:
+  PublicPhotographerDetail:
     type: object
     description: |
-      A photographer's public profile. An allowlist: no status, no login email,
-      no operating settings. `email` is the contact address the photographer
-      chose to publish, or null -- never their login. `cancellationPolicy` is
-      the one setting on it: the terms a new booking would be made under.
-    required: [handle, displayName, bio, contactPhone, whatsappPhone, email, coverImageUrl, takingBookings, cancellationPolicy]
+      A photographer's profile page (marketplace-spec.md R6.2). An allowlist:
+      no id, no status, no login email, no operating settings. `email` is the
+      contact address the photographer chose to publish, or null -- never
+      their login; each contact field is null when not set.
+      `cancellationPolicy` is the one setting on it: the terms a new booking
+      would be made under.
+
+      **Every text field is returned verbatim** (`bio` included, markup and
+      all) and must be rendered as plain text, never as HTML or markdown
+      (R6.5, T6.4). Image URLs are `https://` only; render them with
+      `referrerpolicy="no-referrer"`.
+    required:
+      [handle, displayName, bio, contactPhone, whatsappPhone, email, coverImageUrl, takingBookings, cancellationPolicy, districts, categories, portfolio, services]
     additionalProperties: false
     properties:
       handle: { type: string, examples: [kigali-lens] }
       displayName: { type: string }
       takingBookings: { $ref: '#/schemas/TakingBookings' }
-      bio: { type: [string, 'null'] }
+      bio:
+        type: [string, 'null']
+        maxLength: 2000
+        description: Plain text, verbatim. Line breaks are the photographer's own.
       contactPhone: { type: [string, 'null'] }
       whatsappPhone: { type: [string, 'null'] }
       email: { type: [string, 'null'], format: email }
       coverImageUrl: { type: [string, 'null'], format: uri }
       cancellationPolicy: { $ref: '#/schemas/PublicCancellationPolicy' }
+      districts:
+        type: array
+        items: { $ref: '#/schemas/PublicDistrict' }
+      categories:
+        type: array
+        description: Active categories only.
+        items: { $ref: '#/schemas/PublicCategory' }
+      portfolio:
+        type: array
+        maxItems: 24
+        description: At most 24, in the photographer's order.
+        items: { $ref: '#/schemas/PortfolioImage' }
+      services:
+        type: array
+        description: The active services in catalogue order. Each one's packages and add-ons are at `/api/photographers/{handle}/services/{slug}`.
+        items: { $ref: '#/schemas/PublicServiceSummary' }
+
+  PortfolioImage:
+    type: object
+    required: [url, caption]
+    additionalProperties: false
+    properties:
+      url: { type: string, format: uri, pattern: '^https://' }
+      caption: { type: [string, 'null'], maxLength: 200 }
+
+  PublicServiceSummary:
+    type: object
+    required: [slug, nameEn, descriptionEn, coverImageUrl, fromPriceRwf]
+    additionalProperties: false
+    properties:
+      slug: { type: string, examples: [portraits] }
+      nameEn: { type: string }
+      descriptionEn: { type: [string, 'null'] }
+      coverImageUrl: { type: [string, 'null'], format: uri }
+      fromPriceRwf:
+        type: [integer, 'null']
+        minimum: 0
+        description: The cheapest active package, whole RWF; null while the service has no active package.
 
   PublicCancellationPolicy:
     type: object

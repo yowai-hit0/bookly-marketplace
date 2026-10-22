@@ -1,45 +1,59 @@
 import {
   ArrowRight,
   CalendarCheck,
-  CalendarDays,
   Check,
   Hourglass,
   Info,
   Link2,
   MapPin,
+  Search,
+  Smartphone,
+  Store,
   Tag,
   type LucideIcon,
 } from 'lucide-react'
-import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useLocation } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { kigaliDateOf } from '@/admin/calendar-dates'
-import { type PublicPhotographerSummary, fetchPhotographers, photographerPath } from '@/catalogue/api'
+import {
+  type ProvinceDistricts,
+  type PublicCategory,
+  type PublicPhotographerSummary,
+  directorySearch,
+  fetchCategories,
+  fetchDistricts,
+  fetchPhotographers,
+} from '@/catalogue/api'
 import { kigaliMonthOf, monthGrid } from '@/catalogue/availability'
 import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useDocumentMeta } from '@/lib/document-meta'
 import { formatDate, formatMonth } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { container, eyebrow, sectionTitle, sectionY } from '@/pages/client/classes'
-import { PhotographerCard } from '@/pages/photographers/PhotographerList'
-import { ServiceGridSkeleton } from '@/pages/services/ServiceList'
+import { container, eyebrow, panel, sectionTitle, sectionY } from '@/pages/client/classes'
+import { SelectField, fieldLabel } from '@/pages/client/SelectField'
+import { PhotographerCard, PhotographerGridSkeleton } from '@/pages/photographers/PhotographerCard'
 
 /**
- * The public entry point (`design-system/bookly/pages/home.md`, restyled by
- * `client-front.md` section 8.1).
+ * The marketplace's front page (`design-system/bookly/pages/home.md`,
+ * "Marketplace landing (Phase 6)"; restyled by `client-front.md` section 8.1).
+ * Bookly: find and book photographers across Rwanda.
  *
- * Nothing here is invented. There is no logo, portfolio, testimonial or review
- * to show, so none appears. The photographers are the API's, fetched with the
- * same call `/photographers` makes (marketplace brief decision 9), and every
- * claim is a rule the code enforces. Whether the booking fee is refunded is
- * each photographer's own policy now (R1.8), so the page promises only that
- * the terms are shown before booking and again before paying. The hero's
- * calendar is decoration built from today's date, so it never shows a stale
- * date.
+ * Nothing here is invented. There is no logo, testimonial or review to show,
+ * so none appears. The photographers are the directory's first page, fetched
+ * with the same call `/photographers` makes; the quick search's categories
+ * and districts are the API's; and every claim is a rule the code enforces.
+ * Whether the booking fee is refunded is each photographer's own policy
+ * (R1.8), so the page promises only that the terms are shown before booking
+ * and again before paying. The hero's calendar is decoration built from
+ * today's date, so it never shows a stale date.
  */
 
-/** How many photographers the preview shows before sending people to the full list. */
+/** How many photographers the featured strip shows before sending people to the directory. */
 const PREVIEW_COUNT = 3
+
+/** How booking works, for a client of the marketplace: the first three are new, the link is as it was. */
+const STEPS = ['landing:steps.step1', 'landing:steps.step2', 'landing:steps.step3', 'landing:how.step4'] as const
 
 /** The hero's entrance, 80ms apart (client-front.md section 6). */
 function stagger(step: number): CSSProperties {
@@ -64,6 +78,8 @@ export function Home() {
       .catch(() => !controller.signal.aborted && setPhotographers([]))
     return () => controller.abort()
   }, [])
+
+  useDocumentMeta({ title: t('meta:home.title'), description: t('meta:home.description') })
 
   const loading = photographers === null
   const preview = photographers?.slice(0, PREVIEW_COUNT) ?? []
@@ -93,7 +109,7 @@ export function Home() {
               style={stagger(0)}
             >
               <MapPin aria-hidden="true" />
-              {t('landing:hero.eyebrow')}
+              {t('landing:market.eyebrow')}
             </p>
             <h1
               className={cn(
@@ -102,47 +118,15 @@ export function Home() {
               )}
               style={stagger(1)}
             >
-              {t('landing:hero.title')}
+              {t('landing:market.title')}
             </h1>
             <p className={cn('text-subtle-foreground max-w-xl text-lg leading-relaxed', fadeUp)} style={stagger(2)}>
-              {t('landing:hero.body')}
+              {t('landing:market.body')}
             </p>
 
-            {(loading || (photographers?.length ?? 0) > 0) && (
-              <div className={cn('flex w-full flex-col gap-2.5', fadeUp)} style={stagger(3)}>
-                <p className="text-muted-foreground font-mono text-xs font-medium tracking-[0.1em] uppercase">
-                  {t('landing:hero.photographers')}
-                </p>
-                {loading ? (
-                  <div aria-hidden="true" className="flex flex-wrap gap-2">
-                    {[28, 36, 24].map((width) => (
-                      <Skeleton key={width} className="h-11" style={{ width: `${width * 0.25}rem` }} />
-                    ))}
-                  </div>
-                ) : (
-                  <ul className="flex flex-wrap gap-2">
-                    {photographers.map((photographer) => (
-                      <li key={photographer.handle}>
-                        <Link
-                          to={photographerPath(photographer.handle)}
-                          className="bg-background hover:border-ring hover:text-console-link inline-flex min-h-11 items-center rounded-xs border px-4 text-[0.9375rem] motion-safe:transition-colors motion-safe:duration-150"
-                        >
-                          {photographer.displayName}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            <QuickSearch className={fadeUp} style={stagger(3)} />
 
-            <div className={cn('flex flex-col items-start gap-5', fadeUp)} style={stagger(4)}>
-              <Button asChild variant="brand" size="lg">
-                <Link to="/photographers">
-                  <CalendarDays aria-hidden="true" className="size-4.5" />
-                  {t('landing:hero.cta')}
-                </Link>
-              </Button>
+            <div className={cn('flex flex-col items-start gap-3', fadeUp)} style={stagger(4)}>
               <ul className="text-subtle-foreground flex flex-wrap gap-x-7 gap-y-2 text-sm">
                 {(['factFree', 'factMomo'] as const).map((fact) => (
                   <li key={fact} className="flex items-center gap-2">
@@ -159,7 +143,7 @@ export function Home() {
         </div>
       </section>
 
-      {/* Photographers -------------------------------------------------- */}
+      {/* Who you can book: the directory's first page ------------------- */}
       {hasPreview && (
         <section id="photographers" className={cn(container, sectionY, 'flex flex-col gap-10')}>
           <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
@@ -186,7 +170,7 @@ export function Home() {
               <p className="sr-only" role="status">
                 {t('photographers:loading')}
               </p>
-              <ServiceGridSkeleton count={PREVIEW_COUNT} />
+              <PhotographerGridSkeleton count={PREVIEW_COUNT} />
             </div>
           ) : (
             <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -215,17 +199,17 @@ export function Home() {
           {/* A hairline strip: 1px gaps over the hairline colour draw the dividers
               at every column count. */}
           <ol className="bg-border grid gap-px border md:grid-cols-2 lg:grid-cols-4">
-            {([1, 2, 3, 4] as const).map((step) => (
+            {STEPS.map((step, index) => (
               <li key={step} className="group/step bg-background flex flex-col gap-4.5 p-7 lg:px-8 lg:py-9">
                 {/* The list already carries the order for a screen reader. */}
                 <span
                   aria-hidden="true"
                   className="group-hover/step:border-ring group-hover/step:text-console-link flex size-12 items-center justify-center rounded-xs border font-mono text-lg motion-safe:transition-colors motion-safe:duration-200"
                 >
-                  {String(step).padStart(2, '0')}
+                  {String(index + 1).padStart(2, '0')}
                 </span>
-                <h3 className="text-xl font-medium tracking-[-0.01em]">{t(`landing:how.step${step}.title`)}</h3>
-                <p className="text-subtle-foreground text-[0.9375rem] leading-relaxed">{t(`landing:how.step${step}.body`)}</p>
+                <h3 className="text-xl font-medium tracking-[-0.01em]">{t(`${step}.title`)}</h3>
+                <p className="text-subtle-foreground text-[0.9375rem] leading-relaxed">{t(`${step}.body`)}</p>
               </li>
             ))}
           </ol>
@@ -242,17 +226,17 @@ export function Home() {
           <h2 className={sectionTitle}>{t('landing:trust.title')}</h2>
         </div>
         <ul className="bg-border grid gap-px border md:grid-cols-2">
-          <Fact icon={Tag} name="price" />
-          <Fact icon={CalendarCheck} name="hold" />
           {/* Each photographer sets their own cancellation terms (R1.8), so the
               promise is that they are shown, said at the same weight as the others. */}
-          <Fact icon={Info} name="policy" />
-          <Fact icon={Link2} name="link" />
+          <Fact icon={Info} name="landing:trust.policy" />
+          <Fact icon={Smartphone} name="landing:momo" />
+          <Fact icon={Tag} name="landing:trust.price" />
+          <Fact icon={Link2} name="landing:trust.link" />
         </ul>
       </section>
 
-      {/* Already booked? (the old closing section, merged) --------------- */}
-      <section className={cn(container, 'pb-12 md:pb-16 lg:pb-26')}>
+      {/* For photographers: the inverted band --------------------------- */}
+      <section className={cn(container, 'pb-8 md:pb-10')}>
         <div className="bg-band text-band-foreground relative flex flex-col gap-8 overflow-hidden rounded-xs px-6 py-10 md:px-12 md:py-14 lg:flex-row lg:items-center lg:justify-between lg:gap-12 lg:px-18 lg:py-16 dark:border">
           <svg
             aria-hidden="true"
@@ -266,38 +250,135 @@ export function Home() {
           </svg>
           <div className="relative flex max-w-2xl flex-col gap-4">
             <p className={cn(eyebrow, 'text-band-accent')}>
-              <CalendarCheck aria-hidden="true" />
-              {t('landing:booked.eyebrow')}
+              <Store aria-hidden="true" />
+              {t('landing:studio.eyebrow')}
             </p>
             <h2 className="text-[1.875rem] leading-[1.1] font-semibold tracking-[-0.03em] text-balance md:text-[2.5rem]">
-              {t('landing:booked.title')}
+              {t('landing:studio.title')}
             </h2>
-            <p className="text-band-muted text-[1.0625rem] leading-relaxed">{t('landing:booked.body')}</p>
-            <p className="text-band-foreground text-[1.0625rem]">{t('landing:closing.title')}</p>
+            <p className="text-band-muted text-[1.0625rem] leading-relaxed">{t('landing:studio.body')}</p>
           </div>
           <div className="relative flex flex-col gap-3 sm:flex-row lg:shrink-0">
+            <Button asChild size="lg" className="bg-band-foreground text-band hover:bg-band-foreground/85">
+              <Link to="/studio/signup">
+                {t('landing:studio.cta')}
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
             <Button
               asChild
               variant="outline"
               size="lg"
               className="border-band-edge text-band-foreground hover:bg-band-edge/40 hover:text-band-foreground dark:hover:bg-band-edge/40 bg-transparent"
             >
-              <Link to="/my-booking">{t('landing:booked.cta')}</Link>
-            </Button>
-            <Button asChild size="lg" className="bg-band-foreground text-band hover:bg-band-foreground/85">
-              <Link to="/photographers">
-                {t('landing:closing.cta')}
-                <ArrowRight aria-hidden="true" />
-              </Link>
+              <Link to="/studio/login">{t('landing:studio.signIn')}</Link>
             </Button>
           </div>
+        </div>
+      </section>
+
+      {/* Already booked? A quiet panel: the band above is the photographers'. */}
+      <section className={cn(container, 'pb-12 md:pb-16 lg:pb-26')}>
+        <div className={cn(panel, 'flex flex-col gap-6 p-6 md:flex-row md:items-center md:justify-between md:gap-10 md:p-8')}>
+          <div className="flex max-w-2xl flex-col gap-2.5">
+            <p className={eyebrow}>
+              <CalendarCheck aria-hidden="true" />
+              {t('landing:booked.eyebrow')}
+            </p>
+            <h2 className="text-2xl font-medium tracking-[-0.02em] text-balance">{t('landing:booked.title')}</h2>
+            <p className="text-subtle-foreground text-[0.9375rem] leading-relaxed">{t('landing:booked.body')}</p>
+          </div>
+          <Button asChild variant="outline" size="lg" className="self-start md:shrink-0 md:self-auto">
+            <Link to="/my-booking">{t('landing:booked.cta')}</Link>
+          </Button>
         </div>
       </section>
     </main>
   )
 }
 
-/** One fact in "Good to know": an icon tile paired with words, never alone. */
+/**
+ * The hero's quick search: a category and a district, then "Find
+ * photographers" into the directory with only what was chosen (an empty value
+ * is never sent: the API answers it with 400). The lists are the API's; while
+ * they load, or if they fail, each select holds only its "any" option and the
+ * form still goes to the whole directory.
+ */
+function QuickSearch({ className, style }: { className?: string; style?: CSSProperties }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const id = useId()
+  const [categories, setCategories] = useState<PublicCategory[]>([])
+  const [provinces, setProvinces] = useState<ProvinceDistricts[]>([])
+  const [category, setCategory] = useState('')
+  const [district, setDistrict] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchCategories(controller.signal)
+      .then((list) => !controller.signal.aborted && setCategories(list))
+      .catch(() => {})
+    fetchDistricts(controller.signal)
+      .then((list) => !controller.signal.aborted && setProvinces(list))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    void navigate(`/photographers${directorySearch({ category, district })}`)
+  }
+
+  return (
+    <form
+      role="search"
+      aria-label={t('landing:market.search.label')}
+      onSubmit={submit}
+      className={cn(panel, 'grid w-full gap-4 p-4 sm:grid-cols-2 md:p-5', className)}
+      style={style}
+    >
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor={`${id}category`} className={fieldLabel}>
+          {t('landing:market.search.category')}
+        </label>
+        <SelectField id={`${id}category`} value={category} onChange={(event) => setCategory(event.target.value)}>
+          <option value="">{t('landing:market.search.anyCategory')}</option>
+          {categories.map((entry) => (
+            <option key={entry.slug} value={entry.slug}>
+              {entry.name}
+            </option>
+          ))}
+        </SelectField>
+      </div>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor={`${id}district`} className={fieldLabel}>
+          {t('landing:market.search.district')}
+        </label>
+        <SelectField id={`${id}district`} value={district} onChange={(event) => setDistrict(event.target.value)}>
+          <option value="">{t('landing:market.search.anyDistrict')}</option>
+          {provinces.map((province) => (
+            <optgroup key={province.code} label={province.name}>
+              {province.districts.map((entry) => (
+                <option key={entry.code} value={entry.code}>
+                  {entry.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </SelectField>
+      </div>
+      {/* The page's one violet action (client-front.md 5.1): its own row, so the
+          selects keep room for their words; full width on a phone, hugging its
+          label from `sm` (MASTER.md section 11). */}
+      <Button type="submit" variant="brand" size="lg" className="w-full sm:col-span-2 sm:w-auto sm:justify-self-start">
+        <Search aria-hidden="true" className="size-4.5" />
+        {t('landing:market.search.submit')}
+      </Button>
+    </form>
+  )
+}
+
+/** One fact in "Good to know": an icon tile paired with words, never alone. `name` is its key prefix. */
 function Fact({ icon: Icon, name }: { icon: LucideIcon; name: string }) {
   const { t } = useTranslation()
   return (
@@ -309,8 +390,8 @@ function Fact({ icon: Icon, name }: { icon: LucideIcon; name: string }) {
         <Icon />
       </span>
       <div className="flex flex-col gap-2">
-        <h3 className="text-xl font-medium tracking-[-0.01em]">{t(`landing:trust.${name}.title`)}</h3>
-        <p className="text-subtle-foreground text-[0.9375rem] leading-relaxed">{t(`landing:trust.${name}.body`)}</p>
+        <h3 className="text-xl font-medium tracking-[-0.01em]">{t(`${name}.title`)}</h3>
+        <p className="text-subtle-foreground text-[0.9375rem] leading-relaxed">{t(`${name}.body`)}</p>
       </div>
     </li>
   )

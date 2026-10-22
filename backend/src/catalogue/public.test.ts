@@ -10,7 +10,6 @@ import {
   findPublicPhotographer,
   findPublicService,
   listPublicCatalogue,
-  listPublicPhotographers,
 } from './public.js';
 
 /**
@@ -28,9 +27,10 @@ import {
  *
  * Every catalogue is one photographer's (brief decision 4): another
  * photographer's services, packages and add-ons -- the ones they offer on every
- * service included -- never appear in it. The photographers list and profile
- * show bookable photographers only, through an allowlist that leaves out their
- * status, their login and their settings.
+ * service included -- never appear in it. The profile shows listed
+ * photographers only, through an allowlist that leaves out their status, their
+ * login and their settings. The directory's own list is catalogue/directory.ts,
+ * proven in routes/public-directory.test.ts.
  */
 
 let prisma: PrismaClient;
@@ -554,26 +554,6 @@ describe('one photographer’s catalogue', () => {
     await prisma.service.updateMany({ where: { slug: 'portraits', photographerId: { not: photographerId } }, data: { slug: 'theirs-only' } });
 
     await expect(findPublicService(prisma, photographerId, 'theirs-only')).resolves.toBeNull();
-  });
-});
-
-describe('listPublicPhotographers', () => {
-  it('lists the bookable photographers by name, as handle, display name and cover only', async () => {
-    await prisma.photographer.update({ where: { id: photographerId }, data: { coverImageUrl: 'https://images.example.com/kigali.jpg' } });
-    await otherPhotographer({ handle: 'amahoro-studio', displayName: 'Amahoro Studio' });
-    await otherPhotographer({ handle: 'pending-one', displayName: 'A Pending One', status: 'pending' });
-    await otherPhotographer({ handle: 'suspended-one', displayName: 'A Suspended One', status: 'suspended' });
-
-    await expect(listPublicPhotographers(prisma)).resolves.toStrictEqual([
-      { handle: 'amahoro-studio', displayName: 'Amahoro Studio', coverImageUrl: null, takingBookings: true },
-      { handle: PHOTOGRAPHER_HANDLE, displayName: 'Kigali Lens', coverImageUrl: 'https://images.example.com/kigali.jpg', takingBookings: true },
-    ]);
-  });
-
-  it('lists nobody when nobody is approved', async () => {
-    await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'pending', approvedAt: null } });
-
-    await expect(listPublicPhotographers(prisma)).resolves.toEqual([]);
   });
 });
 

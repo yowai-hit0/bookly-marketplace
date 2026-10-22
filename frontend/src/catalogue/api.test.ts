@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CATEGORIES, PROVINCES, directoryPage, profile, summary } from '@/test/marketplace-fixtures'
 import {
   CatalogueLoadError,
   type PublicPhotographerProfile,
   type PublicServiceDetail,
+  directorySearch,
+  fetchCategories,
+  fetchDistricts,
   fetchPhotographer,
   fetchPhotographers,
+  searchDirectory,
   fetchService,
   fetchServices,
   photographerPath,
@@ -30,17 +35,7 @@ const PORTRAITS: PublicServiceDetail = {
   takingBookings: true,
 }
 
-const KIGALI_LENS: PublicPhotographerProfile = {
-  handle: 'kigali-lens',
-  displayName: 'Kigali Lens',
-  coverImageUrl: null,
-  bio: null,
-  contactPhone: null,
-  whatsappPhone: null,
-  email: null,
-  takingBookings: true,
-  cancellationPolicy: { cutoffHours: 24, bookingFeeRefundable: true },
-}
+const KIGALI_LENS: PublicPhotographerProfile = profile({ coverImageUrl: null, bio: null, contactPhone: null, whatsappPhone: null, email: null })
 
 type FetchArgs = [input: string | URL | Request, init?: RequestInit]
 
@@ -76,11 +71,11 @@ afterEach(() => {
 
 describe('fetchPhotographers', () => {
   it('GETs /api/photographers anonymously and returns the list', async () => {
-    const summary = { handle: 'kigali-lens', displayName: 'Kigali Lens', coverImageUrl: null }
-    const mock = stubFetch(() => json({ photographers: [summary] }))
+    const card = summary()
+    const mock = stubFetch(() => json(directoryPage([card])))
     const controller = new AbortController()
 
-    await expect(fetchPhotographers(controller.signal)).resolves.toEqual([summary])
+    await expect(fetchPhotographers(controller.signal)).resolves.toEqual([card])
 
     const { url, init, headers } = sentRequest(mock)
     expect(url).toBe('/api/photographers')
@@ -97,6 +92,110 @@ describe('fetchPhotographers', () => {
 
     expect(error).toBeInstanceOf(CatalogueLoadError)
     expect((error as Error).message).toBe(`http_${status}`)
+  })
+})
+
+describe('directorySearch (R6.1: an empty value is a 400, so none is ever sent)', () => {
+  it('is empty with no filter', () => {
+    expect(directorySearch({})).toBe('')
+  })
+
+  it('sends the known keys in a fixed order', () => {
+    expect(directorySearch({ page: '2', date: '2026-11-07', max: '80000', min: '20000', district: 'gasabo', category: 'wedding' })).toBe(
+      '?category=wedding&district=gasabo&min=20000&max=80000&date=2026-11-07&page=2',
+    )
+  })
+
+  it('leaves out empty and blank values', () => {
+    expect(directorySearch({ category: '', district: '  ', min: '0', max: '' })).toBe('?min=0')
+  })
+
+  it('leaves out a key it does not know', () => {
+    expect(directorySearch({ category: 'wedding', sort: 'price' } as never)).toBe('?category=wedding')
+  })
+
+  it('encodes values', () => {
+    expect(directorySearch({ category: 'a&b=c' })).toBe('?category=a%26b%3Dc')
+  })
+})
+
+describe('searchDirectory', () => {
+  it('GETs /api/photographers with the query, anonymously, and returns the page', async () => {
+    const page = directoryPage([summary()], { hasMore: true, total: 30 })
+    const mock = stubFetch(() => json(page))
+
+    await expect(searchDirectory({ category: 'wedding', district: 'gasabo' })).resolves.toEqual({ status: 'ok', page })
+
+    const { url, headers } = sentRequest(mock)
+    expect(url).toBe('/api/photographers?category=wedding&district=gasabo')
+    expect(headers.has('Authorization')).toBe(false)
+  })
+
+  it('returns a page without a total as it came (a date was filtered on)', async () => {
+    const page = directoryPage([summary()])
+    delete page.total
+    stubFetch(() => json(page))
+
+    const result = await searchDirectory({ date: '2026-11-07' })
+
+    expect(result.status === 'ok' && result.page.total).toBeUndefined()
+  })
+
+  it('names the refused fields on a 422', async () => {
+    stubFetch(() => json({ error: 'validation_failed', fields: ['min', 'max'] }, 422))
+
+    await expect(searchDirectory({ min: '9', max: '1' })).resolves.toEqual({ status: 'invalid', fields: ['min', 'max'] })
+  })
+
+  it('keeps only string field names from a 422, and copes with a body that is not JSON', async () => {
+    stubFetch(() => json({ error: 'validation_failed', fields: ['date', 7, null] }, 422))
+    await expect(searchDirectory({ date: '1999-01-01' })).resolves.toEqual({ status: 'invalid', fields: ['date'] })
+
+    stubFetch(() => new Response('nope', { status: 422 }))
+    await expect(searchDirectory({ date: '1999-01-01' })).resolves.toEqual({ status: 'invalid', fields: [] })
+  })
+
+  it('says the request could not be read on a 400', async () => {
+    stubFetch(() => json({ error: 'invalid_request' }, 400))
+
+    await expect(searchDirectory({ min: 'abc' })).resolves.toEqual({ status: 'badRequest' })
+  })
+
+  it.each([404, 500, 503])('throws a CatalogueLoadError on a %s', async (status) => {
+    stubFetch(() => json({ error: 'nope' }, status))
+
+    await expect(searchDirectory({})).rejects.toBeInstanceOf(CatalogueLoadError)
+  })
+
+  it('lets a network failure through as a rejection', async () => {
+    stubFetch(() => Promise.reject(new TypeError('Failed to fetch')))
+
+    await expect(searchDirectory({})).rejects.toBeInstanceOf(TypeError)
+  })
+})
+
+describe('the filter lists', () => {
+  it('GETs /api/categories and returns them in order', async () => {
+    const mock = stubFetch(() => json({ categories: CATEGORIES }))
+
+    await expect(fetchCategories()).resolves.toEqual(CATEGORIES)
+    expect(sentRequest(mock).url).toBe('/api/categories')
+  })
+
+  it('GETs /api/districts and returns the provinces with their districts', async () => {
+    const mock = stubFetch(() => json({ provinces: PROVINCES }))
+
+    await expect(fetchDistricts()).resolves.toEqual(PROVINCES)
+    expect(sentRequest(mock).url).toBe('/api/districts')
+  })
+
+  it.each([
+    ['categories', fetchCategories],
+    ['districts', fetchDistricts],
+  ] as const)('throws a CatalogueLoadError when the %s cannot be loaded', async (_name, load) => {
+    stubFetch(() => json({ error: 'internal_error' }, 500))
+
+    await expect(load()).rejects.toBeInstanceOf(CatalogueLoadError)
   })
 })
 

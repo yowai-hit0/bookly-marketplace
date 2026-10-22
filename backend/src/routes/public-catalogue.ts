@@ -2,20 +2,33 @@ import type { PrismaClient } from '@prisma/client';
 import { Router } from 'express';
 import { z } from 'zod';
 import { priceBasket } from '../catalogue/basket.js';
-import { findPublicPhotographer, findPublicService, listPublicCatalogue, listPublicPhotographers } from '../catalogue/public.js';
-import { addonIds, parseOrReject } from './validation.js';
+import {
+  DIRECTORY_MAX_PAGE,
+  directoryDateWindow,
+  listActiveCategories,
+  listDistrictsByProvince,
+  searchDirectory,
+  unknownDirectoryFilters,
+} from '../catalogue/directory.js';
+import { findPublicPhotographer, findPublicPhotographerDetail, findPublicService, listPublicCatalogue } from '../catalogue/public.js';
+import { INT4_MAX, addonIds, kigaliDate, parseOrReject } from './validation.js';
 
 /**
  * Public browsing and pricing (plan.md Task 11; spec §3.1 steps 1-3 and 7,
  * P-01; brief decision 4). Anonymous by design: every visitor may browse and
  * price.
  *
- *   GET  /photographers                          the listed photographers: handle,
- *                                                display name, cover, takingBookings
- *   GET  /photographers/:handle                  one photographer's public profile,
- *                                                with the cancellation policy a
- *                                                new booking would be made under
- *                                                and takingBookings
+ *   GET  /photographers?category&district&min&max&date&page
+ *                                                the directory (marketplace-spec.md
+ *                                                R6.1; catalogue/directory.ts)
+ *   GET  /categories, GET /districts             the directory's filter bar: active
+ *                                                categories, the 30 districts by province
+ *   GET  /photographers/:handle                  one photographer's profile page
+ *                                                (R6.2): profile, districts,
+ *                                                categories, portfolio, services with
+ *                                                their "from" price, the cancellation
+ *                                                policy a new booking would be made
+ *                                                under, and takingBookings
  *   GET  /photographers/:handle/services         their active services with their
  *                                                active packages and add-ons
  *   GET  /photographers/:handle/services/:slug   one active service, plus the
@@ -50,20 +63,82 @@ const quoteBody = z.object({
   addonIds,
 });
 
+/**
+ * A whole number in a query string. Not digits at all (`abc`, `1.5`, `1e3`, an
+ * empty value) is malformed, a 400; digits out of range (`-1`, past int4 or the
+ * bound) are a rule, a 422 -- the 400-versus-422 rule of routes/validation.ts.
+ */
+function queryInt(min: number, max: number) {
+  return z
+    .string()
+    .regex(/^-?\d{1,12}$/)
+    .transform(Number)
+    .pipe(z.number().int().min(min).max(max));
+}
+
+/**
+ * The directory's query (R6.1). Every key optional, each at most once (a
+ * repeated key arrives as an array: a 400), and nothing else: an unknown key is
+ * a 400, so a misspelt filter is never silently ignored. A slug or code that is
+ * well formed but names nothing active is a 422, answered after this parse.
+ */
+const directoryQuery = z
+  .strictObject({
+    category: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/).max(64).optional(),
+    district: z.string().regex(/^[a-z]+(-[a-z]+)*$/).max(32).optional(),
+    min: queryInt(0, INT4_MAX).optional(),
+    max: queryInt(0, INT4_MAX).optional(),
+    date: kigaliDate.optional(),
+    page: queryInt(1, DIRECTORY_MAX_PAGE).default(1),
+  })
+  .superRefine((query, ctx) => {
+    if (query.min !== undefined && query.max !== undefined && query.min > query.max) {
+      ctx.addIssue({ code: 'custom', path: ['min'], message: 'min is above max' });
+      ctx.addIssue({ code: 'custom', path: ['max'], message: 'max is below min' });
+    }
+  });
+
 export function publicCatalogueRouter(prisma: PrismaClient, now: () => Date = () => new Date()): Router {
   const router = Router();
 
-  router.get('/photographers', async (_req, res) => {
-    res.json({ photographers: await listPublicPhotographers(prisma, now()) });
+  router.get('/photographers', async (req, res) => {
+    // Who is free on a date changes by the minute; a stale page offers a taken day.
+    res.set('Cache-Control', 'no-store');
+    const query = parseOrReject(directoryQuery, req.query, res);
+    if (query === undefined) return;
+
+    const at = now();
+    const fields = await unknownDirectoryFilters(prisma, query);
+    // A date before today in Kigali, or past the horizon, is a 422 rather than an
+    // empty page: "nobody is free" would be a false answer, and the filter bar can
+    // mark the field (marketplace-spec.md Phase 6 as built).
+    if (query.date !== undefined) {
+      const { first, last } = directoryDateWindow(at);
+      if (query.date < first || query.date > last) fields.push('date');
+    }
+    if (fields.length > 0) {
+      res.status(422).json({ error: 'validation_failed', fields });
+      return;
+    }
+
+    res.json(await searchDirectory(prisma, query, at));
+  });
+
+  router.get('/categories', async (_req, res) => {
+    res.json({ categories: await listActiveCategories(prisma) });
+  });
+
+  router.get('/districts', async (_req, res) => {
+    res.json({ provinces: await listDistrictsByProvince(prisma) });
   });
 
   router.get('/photographers/:handle', async (req, res) => {
-    const photographer = await findPublicPhotographer(prisma, req.params.handle, now());
+    const photographer = await findPublicPhotographerDetail(prisma, req.params.handle, now());
     if (photographer === null) {
       res.status(404).json({ error: 'not_found' });
       return;
     }
-    res.json({ photographer: photographer.profile });
+    res.json({ photographer });
   });
 
   router.get('/photographers/:handle/services', async (req, res) => {

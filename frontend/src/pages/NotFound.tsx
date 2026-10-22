@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
+import { useDocumentMeta } from '@/lib/document-meta'
 import { cn } from '@/lib/utils'
 import { container, pageY, statusTitle } from '@/pages/client/classes'
 
@@ -17,6 +18,12 @@ import { container, pageY, statusTitle } from '@/pages/client/classes'
  */
 export function NotFound() {
   const { t } = useTranslation()
+  // Out of search results while it is shown (R6.6).
+  useDocumentMeta({
+    title: t('meta:titleSuffix', { title: t('meta:notFound.title') }),
+    description: t('notFound:body'),
+    noindex: true,
+  })
 
   return (
     <main className={cn(container, pageY, 'flex min-h-112 flex-col items-center justify-center text-center')}>

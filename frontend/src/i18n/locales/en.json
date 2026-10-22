@@ -1167,7 +1167,9 @@
       "note": "Booking and payment for photography sessions in Kigali.",
       "book": "Book",
       "about": "About",
-      "photographers": "Browse photographers"
+      "photographers": "Browse photographers",
+      "marketplaceNote": "Bookly: find and book photographers across Rwanda.",
+      "listStudio": "List your studio"
     },
     "theme": {
       "system": "Theme: System",
@@ -1262,6 +1264,44 @@
       "eyebrow": "01 — Photographers",
       "title": "Who you can book",
       "more": "Browse photographers"
+    },
+    "market": {
+      "eyebrow": "Photographers across Rwanda",
+      "title": "Find and book photographers across Rwanda",
+      "body": "Compare photographers by what they shoot, where they work and what they charge. Pick a time that is actually free and hold it with a booking fee paid by MoMo.",
+      "search": {
+        "label": "Find a photographer",
+        "category": "Category",
+        "district": "District",
+        "anyCategory": "Any category",
+        "anyDistrict": "Anywhere in Rwanda",
+        "submit": "Find photographers"
+      }
+    },
+    "steps": {
+      "step1": {
+        "title": "Find a photographer",
+        "body": "Filter by what you need, where, your budget and the date you have in mind."
+      },
+      "step2": {
+        "title": "Choose a service and a time",
+        "body": "Every package and price is listed, and you only see times that are free."
+      },
+      "step3": {
+        "title": "Pay the booking fee by MoMo",
+        "body": "A share of the total, paid with MTN MoMo, holds your date. The rest is paid after the shoot."
+      }
+    },
+    "momo": {
+      "title": "Pay by MTN MoMo",
+      "body": "The booking fee is paid with MTN Mobile Money, and you approve it on your own phone. No card is needed."
+    },
+    "studio": {
+      "eyebrow": "For photographers",
+      "title": "List your studio on Bookly",
+      "body": "Publish your services, prices and working hours. Clients book the times you have free and pay the booking fee by MoMo, and you run it all from one calendar.",
+      "cta": "List your studio",
+      "signIn": "Studio sign in"
     }
   },
   "photographers": {
@@ -1721,6 +1761,121 @@
       "loading": "Loading your account…",
       "loadFailed": "Could not load your account. Check your connection and try again.",
       "retry": "Try again"
+    }
+  },
+  "directory": {
+    "intro": "Filter by what you need, where, your budget and a date. Prices are each photographer's cheapest package.",
+    "filters": {
+      "label": "Filters",
+      "open": "Filters",
+      "active_one": "{{count}} active",
+      "active_other": "{{count}} active",
+      "category": "Category",
+      "anyCategory": "Any category",
+      "district": "District",
+      "anyDistrict": "Anywhere in Rwanda",
+      "price": "Price (RWF)",
+      "min": "Lowest",
+      "max": "Highest",
+      "any": "Any",
+      "date": "Available on",
+      "apply": "Show photographers",
+      "clear": "Clear",
+      "clearAll": "Clear filters",
+      "close": "Close filters",
+      "chips": "Active filters",
+      "remove": "Remove filter: {{label}}",
+      "priceRange": "{{min}} to {{max}}",
+      "priceFrom": "From {{min}}",
+      "priceTo": "Up to {{max}}",
+      "freeOn": "Free on {{date}}",
+      "digitsOnly": "Enter a whole number of RWF, digits only.",
+      "openActive_one": "Filters, {{count}} active",
+      "openActive_other": "Filters, {{count}} active"
+    },
+    "invalid": {
+      "category": "That category isn't offered any more. Choose another.",
+      "district": "Choose a district from the list.",
+      "amount": "That amount is too large.",
+      "minAboveMax": "The lowest price is above the highest.",
+      "date": "Choose a date from today up to a year ahead.",
+      "page": "That page doesn't exist.",
+      "summary": "Some filters can't be used. Change the ones marked, or clear them.",
+      "editFilters": "Edit filters",
+      "badLink": "This search link isn't valid."
+    },
+    "count": {
+      "total_one": "{{count}} photographer",
+      "total_other": "{{count}} photographers",
+      "showing_one": "Showing {{count}} photographer free on {{date}}",
+      "showing_other": "Showing {{count}} photographers free on {{date}}",
+      "range": "Showing {{from}}–{{to}}, free on {{date}}"
+    },
+    "results": "Results",
+    "empty": {
+      "filtered": "No photographers match these filters.",
+      "removeDate": "Remove the date",
+      "removePrice": "Remove the price range",
+      "pastEnd": "There is nothing on this page.",
+      "firstPage": "Back to the first page"
+    },
+    "pages": {
+      "label": "Pages",
+      "previous": "Previous",
+      "next": "Next",
+      "current": "Page {{page}}",
+      "currentOf": "Page {{page}} of {{pages}}"
+    },
+    "card": {
+      "notTaking": "Not taking bookings",
+      "viewProfile": "View profile",
+      "more": "+{{count}} more",
+      "districts": "Works in",
+      "categories": "Shoots"
+    }
+  },
+  "profile": {
+    "eyebrow": "Photographer",
+    "services": "Services",
+    "portfolio": "Portfolio",
+    "openPhoto": "View photo {{index}} of {{total}}",
+    "photoAlt": "Photo {{index}} by {{name}}",
+    "counter": "{{index}} of {{total}}",
+    "previousPhoto": "Previous photo",
+    "nextPhoto": "Next photo",
+    "closePhoto": "Close photo",
+    "cancellation": "Cancellation",
+    "photographerCancels": "A photographer who cancels always refunds the booking fee in full.",
+    "contact": "Contact",
+    "priceOnRequest": "Price on request",
+    "yourPhotographer": "Your photographer",
+    "viewProfile": "View profile"
+  },
+  "meta": {
+    "titleSuffix": "{{title}} · Bookly",
+    "home": {
+      "title": "Bookly: find and book photographers across Rwanda",
+      "description": "Compare photographers across Rwanda by category, district, price and free dates, and book online with a booking fee paid by MoMo."
+    },
+    "directory": {
+      "title": "Find photographers across Rwanda",
+      "category": "{{category}} photographers",
+      "district": "Photographers in {{district}}",
+      "both": "{{category}} photographers in {{district}}",
+      "description": "Browse photographers across Rwanda by category, district, price and the date you need, and book a free time online."
+    },
+    "profile": {
+      "description": "See {{name}}'s services, prices and free times, and book online."
+    },
+    "service": {
+      "title": "{{service}} by {{name}}",
+      "description": "Choose a package and a free time to book {{service}} with {{name}}."
+    },
+    "notFound": {
+      "title": "Page not found"
+    },
+    "unavailable": {
+      "title": "Photographer unavailable"
     }
   }
 }

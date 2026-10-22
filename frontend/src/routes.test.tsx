@@ -3,6 +3,7 @@ import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import { routes } from '@/routes'
+import { profile } from '@/test/marketplace-fixtures'
 
 /**
  * Every declared path, one level of children included: the client routes hang
@@ -15,16 +16,7 @@ function declaredPaths(): string[] {
     .filter((path): path is string => path !== undefined)
 }
 
-const PROFILE = {
-  handle: 'kigali-lens',
-  displayName: 'Kigali Lens',
-  coverImageUrl: null,
-  bio: null,
-  contactPhone: null,
-  whatsappPhone: null,
-  email: null,
-  cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
-}
+const PROFILE = profile({ services: [] })
 
 function renderAt(path: string) {
   return render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: [path] })} />)
@@ -45,7 +37,7 @@ describe('routing', () => {
   it('serves the landing page from a plain path', async () => {
     renderAt('/')
     // The wordmark is the shell's link; the page's own h1 is the hero.
-    expect(await screen.findByRole('heading', { level: 1, name: /Book a photographer/ })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Find and book photographers across Rwanda' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Bookly' })).toHaveAttribute('href', '/')
   })
 
@@ -230,19 +222,22 @@ describe('routing', () => {
     expect(fetch).toHaveBeenCalledWith('/api/photographers', expect.anything())
   })
 
-  it('serves a photographer’s services from /p/:handle, under their name', async () => {
+  it('serves a photographer’s profile from /p/:handle, from the profile alone (Phase 6, R6.2)', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: string) =>
-        input.endsWith('/services')
-          ? new Response(JSON.stringify({ services: [] }))
-          : new Response(JSON.stringify({ photographer: PROFILE })),
-      ),
+      vi.fn(async () => new Response(JSON.stringify({ photographer: PROFILE }))),
     )
     renderAt('/p/kigali-lens')
     expect(await screen.findByRole('heading', { level: 1, name: 'Kigali Lens' })).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith('/api/photographers/kigali-lens', expect.anything())
-    expect(fetch).toHaveBeenCalledWith('/api/photographers/kigali-lens/services', expect.anything())
+    expect(fetch).not.toHaveBeenCalledWith('/api/photographers/kigali-lens/services', expect.anything())
+  })
+
+  it('serves the directory with its filters from the query string (R6.3)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ photographers: [], page: 1, pageSize: 24, hasMore: false, total: 0 }))))
+    renderAt('/photographers?category=wedding&district=gasabo')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Photographers' })).toBeInTheDocument()
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/photographers?category=wedding&district=gasabo', expect.anything()))
   })
 
   it('serves a service page from /p/:handle/:slug', async () => {

@@ -154,29 +154,201 @@
         "tags": [
           "Catalogue & availability"
         ],
-        "summary": "List the listed photographers",
-        "description": "Every listed photographer, by display name: those who can be booked, and\nthose whose subscription is `past_due` (`takingBookings: false`,\nmarketplace-spec.md R5.5). Pending, suspended and `expired` photographers\nare not listed. No filters yet: the directory's category, district, price\nand date filters come later. Anonymous.\n",
+        "summary": "The directory",
+        "description": "The public directory (marketplace-spec.md R6.1), 24 a page. Listed are\napproved photographers whose subscription is `trialing`, `active` or\n`past_due` (inside the grace), with at least one active package on an\nactive service. Pending, suspended and `expired` photographers never\nappear. A `past_due` photographer is listed with `takingBookings: false`,\nafter every bookable one, and is left out whenever `date` is given.\n\n**Date.** Kept are the photographers with at least one bookable start\nthat Kigali day for their shortest active package, exactly as\n`GET /api/availability` would offer it: working hours (a dated override\nwins), blocks, bookings and live holds, buffer and lead time. Accepted\nfrom today (Kigali) to 365 days ahead.\n\nEvery parameter is optional and may appear once. An unknown parameter is\na 400. `Cache-Control: no-store`. Anonymous.\n",
+        "security": [],
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "description": "An active category's slug (`GET /api/categories`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "maxLength": 64,
+              "examples": [
+                "wedding"
+              ]
+            }
+          },
+          {
+            "name": "district",
+            "in": "query",
+            "description": "A district code (`GET /api/districts`).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z]+(-[a-z]+)*$",
+              "maxLength": 32,
+              "examples": [
+                "gasabo"
+              ]
+            }
+          },
+          {
+            "name": "min",
+            "in": "query",
+            "description": "Lowest `fromPriceRwf`, inclusive, whole RWF.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            }
+          },
+          {
+            "name": "max",
+            "in": "query",
+            "description": "Highest `fromPriceRwf`, inclusive, whole RWF. Must not be below `min`.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "description": "A Kigali date, `YYYY-MM-DD`, from today to 365 days ahead.",
+            "schema": {
+              "$ref": "#/components/schemas/KigaliDate"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "1-based; defaults to 1. A page past the end is an empty 200.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of the directory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not the shape of a request: an unknown or repeated parameter, an\nempty value, a slug or code of the wrong form, a number that is not\nwhole digits, a malformed date.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "invalid_request"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Well-formed, but breaks a rule; `fields` names each: `category` (no\nactive category has that slug), `district` (no such district),\n`min`/`max` (negative, past the int4 range, or `min > max`, which names\nboth), `date` (before today in Kigali, more than 365 days ahead, or a\nyear the engine cannot compute), `page` (below 1 or above 1000).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/categories": {
+      "get": {
+        "operationId": "listCategories",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "The active categories",
+        "description": "For the directory's filter bar (R6.1). Active categories only, in the platform's order. Anonymous.",
         "security": [],
         "responses": {
           "200": {
-            "description": "The listed photographers.",
+            "description": "The active categories.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "required": [
-                    "photographers"
+                    "categories"
                   ],
                   "additionalProperties": false,
                   "properties": {
-                    "photographers": {
+                    "categories": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/PublicPhotographerSummary"
+                        "$ref": "#/components/schemas/PublicCategory"
                       }
                     }
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/districts": {
+      "get": {
+        "operationId": "listDistricts",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "Rwanda's 30 districts, by province",
+        "description": "For the directory's filter bar (R6.1). The five provinces in a fixed order (Kigali City first), each with its districts. Anonymous.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The districts, grouped by province.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "provinces"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "provinces": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProvinceDistricts"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sitemap.xml": {
+      "get": {
+        "operationId": "getSitemap",
+        "tags": [
+          "Catalogue & availability"
+        ],
+        "summary": "The web app's sitemap",
+        "description": "An XML sitemap (sitemaps.org 0.9) of the web app's crawlable pages\n(marketplace-spec.md R6.6): `{WEB_ORIGIN}/`, `{WEB_ORIGIN}/photographers`\nand `{WEB_ORIGIN}/p/{handle}` for every **bookable** photographer, each\nprofile with `lastmod` from its last update. Past-due, pending,\nsuspended and expired photographers are not listed. At most 50,000\nURLs. Served at the API's root, not under `/api`: the web host rewrites\nits own `/sitemap.xml` here. `Cache-Control: public, max-age=3600`.\nAnonymous.\n",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The sitemap.",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url><loc>https://bookly.example/</loc></url>\n  <url><loc>https://bookly.example/photographers</loc></url>\n  <url><loc>https://bookly.example/p/kigali-lens</loc><lastmod>2026-10-20T08:00:00.000Z</lastmod></url>\n</urlset>\n"
               }
             }
           }
@@ -189,8 +361,8 @@
         "tags": [
           "Catalogue & availability"
         ],
-        "summary": "One photographer's public profile",
-        "description": "The profile behind `/p/{handle}`. Never the photographer's login email,\nstatus or operating settings: `email` is the public contact address they\nchose, or null. An unknown handle and the handle of a photographer who is\nnot listed -- pending, suspended, or with an `expired` subscription -- are\nthe same 404; the profile page words it as \"unavailable\" (R5.5). A\n`past_due` photographer's profile is served with `takingBookings: false`.\nAnonymous.\n",
+        "summary": "One photographer's profile page",
+        "description": "The profile page behind `/p/{handle}` (marketplace-spec.md R6.2): the\nprofile, districts, categories, up to 24 portfolio images, the active\nservices each with its \"from\" price, the cancellation policy and the\ncontact details. Never the photographer's login email, status or\noperating settings: `email` is the public contact address they chose, or\nnull. Text is verbatim: render it as plain text (R6.5). An unknown handle\nand the handle of a photographer who is not listed -- pending, suspended,\nor with an `expired` subscription -- are the same 404; the profile page\nwords it as \"unavailable\" (R5.5). A `past_due` photographer's profile is\nserved with `takingBookings: false`. Anonymous.\n",
         "security": [],
         "parameters": [
           {
@@ -210,7 +382,7 @@
                   "additionalProperties": false,
                   "properties": {
                     "photographer": {
-                      "$ref": "#/components/schemas/PublicPhotographerProfile"
+                      "$ref": "#/components/schemas/PublicPhotographerDetail"
                     }
                   }
                 }
@@ -5220,17 +5392,74 @@
       }
     },
     "schemas": {
+      "KigaliDate": {
+        "type": "string",
+        "format": "date",
+        "description": "A calendar date in Africa/Kigali (UTC+2, no DST), `YYYY-MM-DD`. Years 0000–0099 are refused."
+      },
+      "Rwf": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Whole Rwandan francs. Money is never a float."
+      },
+      "PublicDistrict": {
+        "type": "object",
+        "required": [
+          "code",
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "examples": [
+              "gasabo"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Gasabo"
+            ]
+          }
+        }
+      },
+      "PublicCategory": {
+        "type": "object",
+        "required": [
+          "slug",
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "slug": {
+            "type": "string",
+            "examples": [
+              "wedding"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "examples": [
+              "Wedding"
+            ]
+          }
+        }
+      },
       "TakingBookings": {
         "type": "boolean",
         "description": "Whether the photographer can be booked right now (marketplace-spec.md\nR5.4, R5.5). False while their subscription is `past_due`: they stay\nlisted, the page shows a \"not taking bookings\" notice, and their packages\nanswer the quote, the calendar and the booking form as an inactive package\ndoes. An `expired` photographer is not listed at all.\n"
       },
-      "PublicPhotographerSummary": {
+      "DirectoryPhotographer": {
         "type": "object",
-        "description": "One listed photographer, as the photographers list shows them.",
+        "description": "One card of the directory (marketplace-spec.md R6.1). An allowlist: no id,\nstatus, login, bio or settings.\n",
         "required": [
           "handle",
           "displayName",
           "coverImageUrl",
+          "fromPriceRwf",
+          "districts",
+          "categories",
           "takingBookings"
         ],
         "additionalProperties": false,
@@ -5249,10 +5478,144 @@
               "string",
               "null"
             ],
-            "format": "uri"
+            "format": "uri",
+            "description": "An `https://` URL the photographer pasted."
+          },
+          "fromPriceRwf": {
+            "description": "The cheapest **active** package of an **active** service. A photographer with none is not listed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Rwf"
+              }
+            ]
+          },
+          "districts": {
+            "type": "array",
+            "description": "Where they work, in the districts' fixed order (Kigali's first).",
+            "items": {
+              "$ref": "#/components/schemas/PublicDistrict"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "description": "What they shoot, active categories only, in the platform's order.",
+            "items": {
+              "$ref": "#/components/schemas/PublicCategory"
+            }
           },
           "takingBookings": {
             "$ref": "#/components/schemas/TakingBookings"
+          }
+        }
+      },
+      "DirectoryPage": {
+        "type": "object",
+        "description": "One page of the directory: 24 cards at most, bookable photographers\nfirst, then by `fromPriceRwf`, then by name (case-insensitive), then a\nstable tiebreak, so pages never overlap or skip.\n\n`total` is the exact number of matches across all pages, and is answered\n**only without `date`**: under the date filter the availability engine\ndecides who stays, and it runs on the candidates up to the requested\npage only, so no honest total exists. `hasMore` is always exact: without\na date `page * 24 < total`; with one, true only when a survivor beyond\nthis page was actually found.\n",
+        "required": [
+          "photographers",
+          "page",
+          "pageSize",
+          "hasMore"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "photographers": {
+            "type": "array",
+            "maxItems": 24,
+            "items": {
+              "$ref": "#/components/schemas/DirectoryPhotographer"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pageSize": {
+            "const": 24
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every match across all pages. Absent when `date` is given."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "description": "Every error body. `error` is a stable, machine-readable code.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "examples": [
+              "not_found"
+            ]
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "description": "A well-formed request breaking a rule (422). `fields` names the offending\nfields so a form can mark them; values are never echoed back.\n",
+        "required": [
+          "error",
+          "fields"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "validation_failed"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "email",
+                "startsAt"
+              ]
+            ]
+          }
+        }
+      },
+      "ProvinceDistricts": {
+        "type": "object",
+        "description": "One of Rwanda's five provinces with its districts.",
+        "required": [
+          "code",
+          "name",
+          "districts"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "kigali",
+              "eastern",
+              "northern",
+              "southern",
+              "western"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The province's English name, for display. A translated page may label it by `code` instead.",
+            "examples": [
+              "Kigali City"
+            ]
+          },
+          "districts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicDistrict"
+            }
           }
         }
       },
@@ -5276,9 +5639,74 @@
           }
         }
       },
-      "PublicPhotographerProfile": {
+      "PortfolioImage": {
         "type": "object",
-        "description": "A photographer's public profile. An allowlist: no status, no login email,\nno operating settings. `email` is the contact address the photographer\nchose to publish, or null -- never their login. `cancellationPolicy` is\nthe one setting on it: the terms a new booking would be made under.\n",
+        "required": [
+          "url",
+          "caption"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://"
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          }
+        }
+      },
+      "PublicServiceSummary": {
+        "type": "object",
+        "required": [
+          "slug",
+          "nameEn",
+          "descriptionEn",
+          "coverImageUrl",
+          "fromPriceRwf"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "slug": {
+            "type": "string",
+            "examples": [
+              "portraits"
+            ]
+          },
+          "nameEn": {
+            "type": "string"
+          },
+          "descriptionEn": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "fromPriceRwf": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "The cheapest active package, whole RWF; null while the service has no active package."
+          }
+        }
+      },
+      "PublicPhotographerDetail": {
+        "type": "object",
+        "description": "A photographer's profile page (marketplace-spec.md R6.2). An allowlist:\nno id, no status, no login email, no operating settings. `email` is the\ncontact address the photographer chose to publish, or null -- never\ntheir login; each contact field is null when not set.\n`cancellationPolicy` is the one setting on it: the terms a new booking\nwould be made under.\n\n**Every text field is returned verbatim** (`bio` included, markup and\nall) and must be rendered as plain text, never as HTML or markdown\n(R6.5, T6.4). Image URLs are `https://` only; render them with\n`referrerpolicy=\"no-referrer\"`.\n",
         "required": [
           "handle",
           "displayName",
@@ -5288,7 +5716,11 @@
           "email",
           "coverImageUrl",
           "takingBookings",
-          "cancellationPolicy"
+          "cancellationPolicy",
+          "districts",
+          "categories",
+          "portfolio",
+          "services"
         ],
         "additionalProperties": false,
         "properties": {
@@ -5308,7 +5740,9 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 2000,
+            "description": "Plain text, verbatim. Line breaks are the photographer's own."
           },
           "contactPhone": {
             "type": [
@@ -5338,32 +5772,40 @@
           },
           "cancellationPolicy": {
             "$ref": "#/components/schemas/PublicCancellationPolicy"
-          }
-        }
-      },
-      "Error": {
-        "type": "object",
-        "description": "Every error body. `error` is a stable, machine-readable code.",
-        "required": [
-          "error"
-        ],
-        "properties": {
-          "error": {
-            "type": "string",
-            "examples": [
-              "not_found"
-            ]
+          },
+          "districts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicDistrict"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "description": "Active categories only.",
+            "items": {
+              "$ref": "#/components/schemas/PublicCategory"
+            }
+          },
+          "portfolio": {
+            "type": "array",
+            "maxItems": 24,
+            "description": "At most 24, in the photographer's order.",
+            "items": {
+              "$ref": "#/components/schemas/PortfolioImage"
+            }
+          },
+          "services": {
+            "type": "array",
+            "description": "The active services in catalogue order. Each one's packages and add-ons are at `/api/photographers/{handle}/services/{slug}`.",
+            "items": {
+              "$ref": "#/components/schemas/PublicServiceSummary"
+            }
           }
         }
       },
       "Uuid": {
         "type": "string",
         "format": "uuid"
-      },
-      "Rwf": {
-        "type": "integer",
-        "minimum": 0,
-        "description": "Whole Rwandan francs. Money is never a float."
       },
       "PublicPackage": {
         "type": "object",
@@ -5650,37 +6092,6 @@
             }
           }
         }
-      },
-      "ValidationError": {
-        "type": "object",
-        "description": "A well-formed request breaking a rule (422). `fields` names the offending\nfields so a form can mark them; values are never echoed back.\n",
-        "required": [
-          "error",
-          "fields"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "error": {
-            "const": "validation_failed"
-          },
-          "fields": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "examples": [
-              [
-                "email",
-                "startsAt"
-              ]
-            ]
-          }
-        }
-      },
-      "KigaliDate": {
-        "type": "string",
-        "format": "date",
-        "description": "A calendar date in Africa/Kigali (UTC+2, no DST), `YYYY-MM-DD`. Years 0000–0099 are refused."
       },
       "Instant": {
         "type": "string",

@@ -18,6 +18,7 @@ import { bookingsRouter } from './routes/public-bookings.js';
 import { checkoutRouter } from './routes/public-checkout.js';
 import { publicCatalogueRouter } from './routes/public-catalogue.js';
 import { platformRouter } from './routes/platform.js';
+import { sitemapRouter } from './routes/sitemap.js';
 import { studioRouter } from './routes/studio.js';
 
 // Dev/test default, kept in sync with vite.config.ts's port and .env.example's
@@ -35,8 +36,9 @@ export type AppOptions = {
    *  Omitted, the feature is off: `/api/account/auth/providers` says so and
    *  the Google endpoints answer 404. Tests pass a fake identity provider. */
   google?: GoogleIdentityProvider;
-  /** Mounts the anonymous public routes (`/api/services`, `/api/quote`,
-   *  `/api/availability`, `/api/bookings`). Omitted, they 404 too, for the same
+  /** Mounts the anonymous public routes (`/api/photographers`, `/api/quote`,
+   *  `/api/availability`, `/api/bookings`, and `/sitemap.xml` listing pages on
+   *  `corsOrigin`, the web app's origin). Omitted, they 404 too, for the same
    *  reason. `now` is the injected clock lead time and consent are measured by. */
   publicApi?: {
     prisma: PrismaClient;
@@ -112,6 +114,9 @@ export function createApp(options: AppOptions = {}): Express {
   if (options.publicApi) {
     const { prisma } = options.publicApi;
     app.use('/api', publicCatalogueRouter(prisma, now));
+    // At the root, not under /api: the web host rewrites its /sitemap.xml here (R6.6).
+    // The pages it lists live on the web app's origin, which is the CORS origin.
+    app.use(sitemapRouter(prisma, corsOrigin, now));
     app.use('/api/availability', availabilityRouter(prisma, now));
     app.use('/api/bookings', bookingsRouter(prisma, now, options.publicApi.payments?.secret));
     if (options.publicApi.payments) {

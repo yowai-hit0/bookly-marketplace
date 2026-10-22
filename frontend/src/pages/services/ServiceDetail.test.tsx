@@ -6,6 +6,7 @@ import '@/i18n'
 import type { PublicPhotographerProfile, PublicServiceDetail } from '@/catalogue/api'
 import type { HeldBooking } from '@/catalogue/bookings'
 import { routes } from '@/routes'
+import { profile } from '@/test/marketplace-fixtures'
 
 /**
  * One service's page (plan.md Task 11; spec §3.1 steps 2, 3 and 7, §6.14),
@@ -41,17 +42,14 @@ import { routes } from '@/routes'
 const PROFILE_API = '/api/photographers/kigali-lens'
 const API = `${PROFILE_API}/services`
 
-const PROFILE: PublicPhotographerProfile = {
-  handle: 'kigali-lens',
-  displayName: 'Kigali Lens',
+const PROFILE: PublicPhotographerProfile = profile({
   coverImageUrl: null,
   bio: null,
   contactPhone: null,
   whatsappPhone: null,
   email: null,
-  takingBookings: true,
   cancellationPolicy: { cutoffHours: 0, bookingFeeRefundable: false },
-}
+})
 
 // --- Fixtures ---------------------------------------------------------------
 
@@ -1219,6 +1217,91 @@ describe('booking from the service page', () => {
   })
 })
 
+
+// --- The photographer, on their service's page (Phase 6, R6.4, R6.5) -------------------------
+
+describe('the photographer on the service page (Phase 6)', () => {
+  function panel(): HTMLElement {
+    return screen.getByRole('region', { name: 'Your photographer' })
+  }
+
+  it('links the photographer’s name to their profile', async () => {
+    stubApi()
+    const router = await renderLoaded()
+
+    const link = within(panel()).getByRole('link', { name: 'Kigali Lens, View profile' })
+    expect(link).toHaveAttribute('href', '/p/kigali-lens')
+
+    await user().click(link)
+    expect(router.state.location.pathname).toBe('/p/kigali-lens')
+  })
+
+  it('shows the profile’s own contact channels, WhatsApp in a new tab with no opener or referrer', async () => {
+    stubApi({
+      [PROFILE_API]: () =>
+        json({ photographer: { ...PROFILE, contactPhone: '+250 788 000 000', whatsappPhone: '0788 111 222', email: 'hello@kigalilens.rw' } }),
+    })
+    await renderLoaded()
+
+    const links = within(panel()).getAllByRole('link').slice(1)
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['+250 788 000 000', 'tel:+250788000000'],
+      ['0788 111 222', 'https://wa.me/250788111222'],
+      ['hello@kigalilens.rw', 'mailto:hello@kigalilens.rw'],
+    ])
+    expect(links[1]).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(links[1]).toHaveAttribute('target', '_blank')
+  })
+
+  it('shows no contact, and no placeholder, when the profile sets none', async () => {
+    stubApi()
+    await renderLoaded()
+
+    expect(within(panel()).getAllByRole('link')).toHaveLength(1)
+    expect(screen.queryByText(/\+250 700 000 000|hello@example\.com|studio name/i)).not.toBeInTheDocument()
+    expect(within(summary()).queryByText('Questions?')).not.toBeInTheDocument()
+  })
+
+  it('comes after the price summary, so nothing leading away is reached before the payment notice', async () => {
+    stubApi()
+    await renderLoaded()
+
+    expect(summary().compareDocumentPosition(panel()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('still names and links the photographer when the service has no packages', async () => {
+    stubApi()
+    await renderLoaded(PRODUCTS)
+
+    expect(within(panel()).getByRole('link', { name: 'Kigali Lens, View profile' })).toBeInTheDocument()
+  })
+
+  it('shows an https cover with no Referer, and none of another scheme', async () => {
+    stubApi()
+    await renderLoaded()
+    const cover = screen.getByRole('main').querySelector('header img')
+    expect(cover).toHaveAttribute('src', 'https://images.example.com/portraits.jpg')
+    expect(cover).toHaveAttribute('referrerpolicy', 'no-referrer')
+  })
+
+  it.each(['http://images.example.com/p.jpg', 'javascript:alert(1)'])('shows no cover for %s', async (coverImageUrl) => {
+    stubApi({ [`${API}/portraits`]: () => json({ service: { ...PORTRAITS, coverImageUrl } }) })
+    await renderLoaded()
+
+    expect(screen.getByRole('main').querySelector('header img')).toBeNull()
+  })
+
+  it('titles the page with the service and the photographer (R6.6)', async () => {
+    stubApi()
+    await renderLoaded(WEDDINGS)
+
+    await waitFor(() => expect(document.title).toBe('Weddings by Kigali Lens · Bookly'))
+    expect(document.head.querySelector('meta[name="description"]')).toHaveAttribute(
+      'content',
+      'Choose a package and a free time to book Weddings with Kigali Lens.',
+    )
+  })
+})
 describe('a photographer not taking bookings (Phase 5, R5.5)', () => {
   const NOT_TAKING = "This photographer isn't taking new bookings at the moment. You can still look through their services."
 

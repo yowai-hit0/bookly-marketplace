@@ -1,6 +1,7 @@
 import type { Addon, Package, Prisma, PrismaClient, Service } from '@prisma/client';
 import { bookablePhotographerWhere, isBookable, listedPhotographerWhere } from '../photographers/bookable.js';
 import { getPhotographerSettings, getPlatformSettings } from '../settings/index.js';
+import type { PublicCategory, PublicDistrict } from './directory.js';
 
 /**
  * What the public site may list (plan.md Tasks 10 and 11; brief decision 4):
@@ -32,7 +33,10 @@ import { getPhotographerSettings, getPlatformSettings } from '../settings/index.
  * a photographer's billing state.
  */
 
-/** One card of the photographers list. No filters until the Phase 6 directory. */
+/**
+ * What every public view of a photographer starts from. The directory's card
+ * (catalogue/directory.ts, R6.1) adds the price, districts and categories.
+ */
 export type PublicPhotographerSummary = {
   handle: string;
   displayName: string;
@@ -68,6 +72,37 @@ export type PublicPhotographerProfile = PublicPhotographerSummary & {
   email: string | null;
   cancellationPolicy: PublicCancellationPolicy;
 };
+
+/** One portfolio image (R6.2, R6.5): a pasted `https://` URL and its caption. */
+export type PublicPortfolioImage = { url: string; caption: string | null };
+
+/** One active service as the profile lists it, with the price of its cheapest active package. */
+export type PublicServiceSummary = {
+  slug: string;
+  nameEn: string;
+  descriptionEn: string | null;
+  coverImageUrl: string | null;
+  /** The cheapest active package; null when the service has no active package yet. */
+  fromPriceRwf: number | null;
+};
+
+/**
+ * The profile page `/p/:handle` (marketplace-spec.md R6.2): the profile, where
+ * they work, what they shoot, up to `PORTFOLIO_LIMIT` portfolio images in the
+ * photographer's order, and their active services each with a "from" price.
+ * Still the allowlist: no id, no status, no login, no operating settings.
+ * `bio` is returned verbatim, never transformed: the page renders it as plain
+ * text (R6.5, T6.4).
+ */
+export type PublicPhotographerDetail = PublicPhotographerProfile & {
+  districts: PublicDistrict[];
+  categories: PublicCategory[];
+  portfolio: PublicPortfolioImage[];
+  services: PublicServiceSummary[];
+};
+
+/** At most this many portfolio images per photographer (marketplace-data-model.md §3.6; R6.2). */
+export const PORTFOLIO_LIMIT = 24;
 
 export type PublicPackage = {
   id: string;
@@ -140,26 +175,6 @@ const PROFILE_SELECT = {
 const HANDLE_FORMAT = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
 
 /**
- * Every listed photographer at `now`, by name then handle (brief decision 4;
- * R5.5): the bookable ones and those `past_due`, each saying whether they are
- * taking bookings.
- */
-export async function listPublicPhotographers(prisma: PrismaClient, now: Date = new Date()): Promise<PublicPhotographerSummary[]> {
-  const { subscriptionGraceDays } = await getPlatformSettings(prisma);
-  const rows = await prisma.photographer.findMany({
-    where: listedPhotographerWhere(now, subscriptionGraceDays),
-    orderBy: [{ displayName: 'asc' }, { handle: 'asc' }],
-    select: { ...BOOKABILITY_SELECT, handle: true, displayName: true, coverImageUrl: true },
-  });
-  return rows.map((row) => ({
-    handle: row.handle,
-    displayName: row.displayName,
-    coverImageUrl: row.coverImageUrl,
-    takingBookings: isBookable(row, row.subscription, now),
-  }));
-}
-
-/**
  * A listed photographer by handle at `now` -- their public profile, and their
  * id for the catalogue reads that follow -- or null. Unknown, pending,
  * suspended and expired are all null: the public is never told which.
@@ -177,6 +192,62 @@ export async function findPublicPhotographer(
   });
   if (photographer === null) return null;
   return { id: photographer.id, profile: toPublicProfile(photographer, now) };
+}
+
+/**
+ * A listed photographer's profile page by handle at `now` (R6.2), or null -- the
+ * same null as `findPublicPhotographer` for unknown, pending, suspended and
+ * expired. The portfolio is filtered to `https://` again here although a CHECK
+ * already holds it, so no other scheme can ever reach an `<img src>` (R6.5).
+ */
+export async function findPublicPhotographerDetail(prisma: PrismaClient, handle: string, now: Date = new Date()): Promise<PublicPhotographerDetail | null> {
+  const found = await findPublicPhotographer(prisma, handle, now);
+  if (found === null) return null;
+  const photographerId = found.id;
+
+  const [districts, categories, portfolio, services] = await Promise.all([
+    prisma.photographerDistrict.findMany({
+      where: { photographerId },
+      select: { district: { select: { code: true, name: true } } },
+      orderBy: [{ district: { sortOrder: 'asc' } }, { districtCode: 'asc' }],
+    }),
+    prisma.photographerCategory.findMany({
+      where: { photographerId, category: { isActive: true } },
+      select: { category: { select: { slug: true, nameEn: true } } },
+      orderBy: [{ category: { sortOrder: 'asc' } }, { category: { nameEn: 'asc' } }, { category: { slug: 'asc' } }],
+    }),
+    prisma.portfolioImage.findMany({
+      where: { photographerId, url: { startsWith: 'https://' } },
+      select: { url: true, caption: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+      take: PORTFOLIO_LIMIT,
+    }),
+    prisma.service.findMany({
+      where: { photographerId, isActive: true },
+      orderBy: [...CATALOGUE_ORDER],
+      select: {
+        slug: true,
+        nameEn: true,
+        descriptionEn: true,
+        coverImageUrl: true,
+        packages: { where: { isActive: true }, select: { priceRwf: true }, orderBy: { priceRwf: 'asc' }, take: 1 },
+      },
+    }),
+  ]);
+
+  return {
+    ...found.profile,
+    districts: districts.map((entry) => ({ code: entry.district.code, name: entry.district.name })),
+    categories: categories.map((entry) => ({ slug: entry.category.slug, name: entry.category.nameEn })),
+    portfolio: portfolio.map((image) => ({ url: image.url, caption: image.caption })),
+    services: services.map((service) => ({
+      slug: service.slug,
+      nameEn: service.nameEn,
+      descriptionEn: service.descriptionEn,
+      coverImageUrl: service.coverImageUrl,
+      fromPriceRwf: service.packages[0]?.priceRwf ?? null,
+    })),
+  };
 }
 
 /** One photographer's public catalogue. */

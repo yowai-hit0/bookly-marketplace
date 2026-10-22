@@ -16,6 +16,11 @@ import { isSlotTaken } from './errors.js';
  * directory, the studio and the client's own booking page all have something to
  * show, and per-photographer separation is visible from the first run.
  *
+ * For the directory (Phase 6, R6.1-R6.2) each has a bio, districts, categories,
+ * a cover and a portfolio of DEMO-ONLY stock photos (`unsplash` below), and
+ * their "from" prices differ (35,000, 40,000 and 50,000 RWF) while their
+ * ranges overlap, so the price filter and the sort have something to separate.
+ *
  * Never in production, and never over real data: a demo photographer is
  * created only when both its handle and its email are free, and the booking is
  * recognised by its demo email. The access token's plaintext is never stored
@@ -48,11 +53,18 @@ type DemoPackage = { nameEn: string; descriptionEn: string; priceRwf: number; ph
 type DemoAddon = { nameEn: string; priceRwf: number };
 type DemoService = { slug: string; nameEn: string; descriptionEn: string; packages: DemoPackage[]; addons?: DemoAddon[] };
 
+type DemoImage = { url: string; caption: string | null };
+
 type DemoPhotographer = {
   handle: string;
   displayName: string;
   bio: string;
   contactPhone: string;
+  whatsappPhone: string;
+  /** DEMO ONLY: a stock photo, never a photographer's own work (see `unsplash`). */
+  coverImageUrl: string;
+  /** DEMO ONLY: 4-8 stock photos, in display order (R6.2). */
+  portfolio: DemoImage[];
   /** Kigali wall-clock minutes, every listed weekday (0 = Sunday). */
   hours: { weekdays: number[]; opensMinute: number; closesMinute: number };
   districts: string[];
@@ -61,6 +73,18 @@ type DemoPhotographer = {
   /** Offered on every service of this photographer. */
   sharedAddons: DemoAddon[];
 };
+
+/**
+ * A stock photo on Unsplash's image CDN, by its fixed photo id: a stable public
+ * `https://` URL for the DEMO DIRECTORY ONLY (Phase 6). These are not the demo
+ * photographers' work and must never be presented as any real photographer's
+ * portfolio; a real profile carries the URLs its photographer pastes (R7.2). No
+ * image is downloaded or stored: the browser loads it from Unsplash, with
+ * `referrerpolicy="no-referrer"` (R6.5).
+ */
+function unsplash(photoId: string, width = 1200): string {
+  return `https://images.unsplash.com/photo-${photoId}?auto=format&fit=crop&w=${width}&q=80`;
+}
 
 /**
  * The first is the single-photographer demo catalogue, unchanged, so the demo
@@ -72,8 +96,20 @@ export const DEMO_PHOTOGRAPHERS: readonly DemoPhotographer[] = [
   {
     handle: 'umucyo-studio',
     displayName: 'Umucyo Studio',
-    bio: 'Portraits and small celebrations around Kigali, in natural light.',
+    bio:
+      'Portraits and small celebrations around Kigali, in natural light.\n\n' +
+      'We shoot outdoors in the gardens and streets of the city, or at a place that matters to you, and deliver an edited gallery within a week.',
     contactPhone: '+250788100001',
+    whatsappPhone: '+250788100001',
+    coverImageUrl: unsplash('1524504388940-b1c1722653e1', 1600),
+    portfolio: [
+      { url: unsplash('1506863530036-1efeddceb993'), caption: 'Natural-light portrait' },
+      { url: unsplash('1544005313-94ddf0286df2'), caption: 'Portrait session' },
+      { url: unsplash('1507003211169-0a1dd7228f2d'), caption: null },
+      { url: unsplash('1511895426328-dc8714191300'), caption: 'A family afternoon' },
+      { url: unsplash('1530103862676-de8c9debad1d'), caption: 'Birthday celebration' },
+      { url: unsplash('1464366400600-7168b8af9bc3'), caption: null },
+    ],
     hours: { weekdays: [1, 2, 3, 4, 5], opensMinute: 540, closesMinute: 1020 },
     districts: ['gasabo', 'kicukiro', 'nyarugenge'],
     categories: ['portrait', 'event', 'family'],
@@ -100,8 +136,22 @@ export const DEMO_PHOTOGRAPHERS: readonly DemoPhotographer[] = [
   {
     handle: 'kigali-lens',
     displayName: 'Kigali Lens',
-    bio: 'Weddings and studio portraits. Two photographers on every wedding.',
+    bio:
+      'Weddings and studio portraits. Two photographers on every wedding.\n\n' +
+      'From the gusaba to the last dance, we stay out of the way and catch the moments you will want to keep.',
     contactPhone: '+250788100002',
+    whatsappPhone: '+250788100012',
+    coverImageUrl: unsplash('1519741497674-611481863552', 1600),
+    portfolio: [
+      { url: unsplash('1511285560929-80b456fea0bc'), caption: 'The ceremony' },
+      { url: unsplash('1520854221256-17451cc331bf'), caption: 'First look' },
+      { url: unsplash('1465495976277-4387d4b0b4c6'), caption: null },
+      { url: unsplash('1522673607200-164d1b6ce486'), caption: 'The reception' },
+      { url: unsplash('1469371670807-013ccf25f16a'), caption: 'Details' },
+      { url: unsplash('1529626455594-4ff0802cfb7e'), caption: 'Fashion editorial' },
+      { url: unsplash('1509631179647-0177331693ae'), caption: null },
+      { url: unsplash('1494790108377-be9c29b29330'), caption: 'Studio portrait' },
+    ],
     hours: { weekdays: [1, 2, 3, 4, 5, 6], opensMinute: 480, closesMinute: 1080 },
     districts: ['gasabo', 'nyarugenge', 'kicukiro'],
     categories: ['wedding', 'portrait', 'fashion'],
@@ -127,8 +177,19 @@ export const DEMO_PHOTOGRAPHERS: readonly DemoPhotographer[] = [
   {
     handle: 'hills-and-light',
     displayName: 'Hills & Light',
-    bio: 'Graduations and family sessions, in Musanze, Huye and Kigali.',
+    bio:
+      'Graduations and family sessions, in Musanze, Huye and Kigali.\n\n' +
+      'Unhurried sessions on campus, at home or out in the hills, with time for every grandparent and cousin.',
     contactPhone: '+250788100003',
+    whatsappPhone: '+250788100003',
+    coverImageUrl: unsplash('1470071459604-3b5ec3a7fe05', 1600),
+    portfolio: [
+      { url: unsplash('1523240795612-9a054b0db644'), caption: 'Graduation day' },
+      { url: unsplash('1541339907198-e08756dedf3f'), caption: 'On campus' },
+      { url: unsplash('1517486808906-6ca8b3f04846'), caption: null },
+      { url: unsplash('1475503572774-15a45e5d60b9'), caption: 'Family session' },
+      { url: unsplash('1501785888041-af3ef285b470'), caption: 'Out in the hills' },
+    ],
     hours: { weekdays: [2, 3, 4, 5, 6], opensMinute: 600, closesMinute: 1080 },
     districts: ['musanze', 'huye', 'gasabo'],
     categories: ['graduation', 'family', 'event'],
@@ -153,6 +214,8 @@ export const DEMO_PHOTOGRAPHERS: readonly DemoPhotographer[] = [
 
 export type DemoSummary = {
   photographersCreated: number;
+  /** Demo photographers from an earlier seed given the Phase 6 cover, WhatsApp number and portfolio they lacked. */
+  profilesEnriched: number;
   servicesCreated: number;
   packagesCreated: number;
   addonsCreated: number;
@@ -165,7 +228,7 @@ export function demoPhotographerEmail(handle: string): string {
 }
 
 export async function seedDemoData(prisma: PrismaClient, now: Date = new Date()): Promise<DemoSummary> {
-  const totals = { photographersCreated: 0, servicesCreated: 0, packagesCreated: 0, addonsCreated: 0 };
+  const totals = { photographersCreated: 0, profilesEnriched: 0, servicesCreated: 0, packagesCreated: 0, addonsCreated: 0 };
   // One hash for all three: argon2id is deliberately slow.
   let passwordHash: string | null = null;
 
@@ -173,7 +236,10 @@ export async function seedDemoData(prisma: PrismaClient, now: Date = new Date())
     const email = demoPhotographerEmail(demo.handle);
     const taken = await prisma.photographer.count({ where: { handle: demo.handle } });
     const emailTaken = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM app_user WHERE lower(email) = lower(${email})`;
-    if (taken > 0 || (emailTaken[0]?.n ?? 0) > 0) continue;
+    if (taken > 0 || (emailTaken[0]?.n ?? 0) > 0) {
+      if (await enrichDemoProfile(prisma, demo, email)) totals.profilesEnriched += 1;
+      continue;
+    }
 
     passwordHash ??= await hashPassword(DEMO_PHOTOGRAPHER_PASSWORD);
     const created = await seedPhotographer(prisma, demo, email, passwordHash, now);
@@ -208,7 +274,9 @@ async function seedPhotographer(
         displayName: demo.displayName,
         bio: demo.bio,
         contactPhone: demo.contactPhone,
+        whatsappPhone: demo.whatsappPhone,
         contactEmail: email,
+        coverImageUrl: demo.coverImageUrl,
         status: 'approved',
         submittedAt: now,
         approvedAt: now,
@@ -227,6 +295,7 @@ async function seedPhotographer(
     // The categories come from the seed; one a platform admin removed is skipped.
     const categories = await tx.category.findMany({ where: { slug: { in: demo.categories } }, select: { id: true } });
     await tx.photographerCategory.createMany({ data: categories.map((category) => ({ photographerId, categoryId: category.id })) });
+    await tx.portfolioImage.createMany({ data: demo.portfolio.map((image, sortOrder) => ({ photographerId, ...image, sortOrder })) });
 
     let packages = 0;
     let addons = 0;
@@ -253,6 +322,37 @@ async function seedPhotographer(
 
     return { services: demo.services.length, packages, addons: addons + demo.sharedAddons.length };
   });
+}
+
+/**
+ * A demo photographer created by a seed before Phase 6 gets what the directory
+ * now shows: the cover and WhatsApp number where they are empty, and the
+ * portfolio when they have none. Only the DEMO photographer -- the one at that
+ * handle whose login is the demo address -- and never a field already set, so a
+ * real photographer, or a demo profile someone has edited, is left alone.
+ */
+async function enrichDemoProfile(prisma: PrismaClient, demo: DemoPhotographer, email: string): Promise<boolean> {
+  const photographer = await prisma.photographer.findFirst({
+    where: { handle: demo.handle, user: { email } },
+    select: { id: true, coverImageUrl: true, whatsappPhone: true, _count: { select: { portfolioImages: true } } },
+  });
+  if (photographer === null) return false;
+  const needsPortfolio = photographer._count.portfolioImages === 0;
+  if (photographer.coverImageUrl !== null && photographer.whatsappPhone !== null && !needsPortfolio) return false;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.photographer.update({
+      where: { id: photographer.id },
+      data: {
+        ...(photographer.coverImageUrl === null ? { coverImageUrl: demo.coverImageUrl } : {}),
+        ...(photographer.whatsappPhone === null ? { whatsappPhone: demo.whatsappPhone } : {}),
+      },
+    });
+    if (needsPortfolio) {
+      await tx.portfolioImage.createMany({ data: demo.portfolio.map((image, sortOrder) => ({ photographerId: photographer.id, ...image, sortOrder })) });
+    }
+  });
+  return true;
 }
 
 async function seedDemoBooking(prisma: PrismaClient, now: Date): Promise<DemoSummary['booking']> {
