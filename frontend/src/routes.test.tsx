@@ -127,6 +127,48 @@ describe('routing', () => {
     expect(inShell).not.toContain('/platform/login')
   })
 
+  it('declares the Phase 4 pages: earnings, a payout and the payout method in the studio; payouts and refunds on the platform', () => {
+    const studio = routes.find((route) => route.path === '/studio')
+    const platform = routes.find((route) => route.path === '/platform')
+
+    expect((studio?.children ?? []).map((child) => child.path)).toEqual(expect.arrayContaining(['earnings', 'payouts/:id', 'payout-method']))
+    expect((platform?.children ?? []).map((child) => child.path)).toEqual(expect.arrayContaining(['payouts', 'payouts/:id', 'refunds']))
+    // Inside their guarded layouts, never in the client shell.
+    const shell = routes.find((route) => route.path === undefined)
+    const inShell = (shell?.children ?? []).map((child) => child.path)
+    for (const path of ['/studio/earnings', '/studio/payout-method', '/platform/payouts', '/platform/refunds']) expect(inShell).not.toContain(path)
+  })
+
+  it.each([
+    ['/studio/earnings', '/studio/login'],
+    ['/studio/payouts/p1', '/studio/login'],
+    ['/studio/payout-method', '/studio/login'],
+    ['/platform/payouts', '/platform/login'],
+    ['/platform/payouts/p1', '/platform/login'],
+    ['/platform/refunds', '/platform/login'],
+  ])('sends a signed-out visitor from %s to %s, asking the API nothing', async (path, login) => {
+    const router = createMemoryRouter(routes, { initialEntries: [path] })
+    render(<RouterProvider router={router} />)
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(login))
+    expect(new URLSearchParams(router.state.location.search).get('next')).toBe(path)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['studio', '/studio/earnings', 'Earnings', { totals: { pendingRwf: 0, payableRwf: 0, inDraftRwf: 0, paidRwf: 0 }, items: [], payouts: [] }],
+    ['studio', '/studio/payout-method', 'Payout method', { payoutMethod: null }],
+    ['platform', '/platform/payouts', 'Payouts', { due: [] }],
+    ['platform', '/platform/refunds', 'Refunds', { refunds: [] }],
+  ] as const)('serves %s %s under its own heading', async (area, path, heading, body) => {
+    sessionStorage.setItem(`bookly.${area}.session`, JSON.stringify({ token: 't', expiresAt: '2099-01-01T00:00:00.000Z' }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body))))
+    renderAt(path)
+
+    expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument()
+    sessionStorage.clear()
+  })
+
   it('keeps the platform login bare: no client top bar, no footer', async () => {
     renderAt('/platform/login')
 

@@ -30,6 +30,11 @@ function renderShell(path = '/studio/availability') {
         children: [
           { path: 'availability', element: <main><h1>Availability</h1></main> },
           { path: 'bookings', element: <main><h1>Bookings</h1></main> },
+          { path: 'bookings/:id', element: <main><h1>One booking</h1></main> },
+          { path: 'earnings', element: <main><h1>Earnings</h1></main> },
+          { path: 'payouts/:id', element: <main><h1>One payout</h1></main> },
+          { path: 'payout-method', element: <main><h1>Payout method</h1></main> },
+          { path: 'nowhere', element: <main><h1>Nowhere</h1></main> },
         ],
       },
       { path: '/studio/login', element: <LoginProbe /> },
@@ -87,7 +92,7 @@ describe('the admin shell', () => {
     expect(document.querySelector('#admin-content')).toHaveAttribute('tabindex', '-1')
   })
 
-  it('lists the five pages in order, each keeping the name the e2e suite navigates by', () => {
+  it('lists the six pages in order, Earnings among them (Phase 4), each keeping the name the e2e suite navigates by', () => {
     renderShell()
 
     const nav = screen.getByRole('navigation', { name: 'Admin' })
@@ -97,6 +102,7 @@ describe('the admin shell', () => {
       'Bookings',
       'Catalogue',
       'Availability',
+      'Earnings',
       'Settings',
     ])
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
@@ -104,8 +110,30 @@ describe('the admin shell', () => {
       '/studio/bookings',
       '/studio/catalogue',
       '/studio/availability',
+      '/studio/earnings',
       '/studio/settings',
     ])
+  })
+
+  it.each([
+    ['/studio/earnings', 'Earnings'],
+    ['/studio/payouts/p1', 'Earnings'],
+    ['/studio/payout-method', 'Earnings'],
+    ['/studio/bookings/b1', 'Bookings'],
+  ])('on %s marks %s current, and only that link', (path, current) => {
+    renderShell(path)
+
+    const links = within(screen.getByRole('navigation', { name: 'Admin' })).getAllByRole('link')
+    const marked = links.filter((link) => link.getAttribute('aria-current') === 'page')
+    expect(marked.map((link) => link.textContent)).toEqual([current])
+    expect(marked[0]?.className).toContain('font-medium')
+  })
+
+  it('marks no link current on a path no section owns', () => {
+    renderShell('/studio/nowhere')
+
+    const links = within(screen.getByRole('navigation', { name: 'Admin' })).getAllByRole('link')
+    expect(links.filter((link) => link.hasAttribute('aria-current'))).toEqual([])
   })
 
   it('marks the current page with aria-current and a weight change, not colour alone', () => {

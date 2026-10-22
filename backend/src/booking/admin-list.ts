@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { type KigaliDate, kigaliMinuteToUtc } from '../availability/engine.js';
 import type { BookingStatus } from '../db/statuses.js';
 import { type BookingStage, bookingStage, stageWhere } from './stage.js';
-import { bookingTotals } from './totals.js';
+import { bookingTotals, TOTALS_PAYMENT_SELECT } from './totals.js';
 
 /**
  * The bookings list (plan.md Task 19): filtered by status and date, and paged
@@ -101,7 +101,7 @@ export async function findBookings(prisma: PrismaClient, photographerId: string,
       take: pageSize,
       include: {
         addons: { select: { stage: true, amountRwf: true } },
-        payments: { select: { status: true, amountRwf: true } },
+        payments: { select: TOTALS_PAYMENT_SELECT },
       },
     });
 
@@ -139,7 +139,7 @@ function bookingsWhere(photographerId: string, query: BookingsQuery, now: Date):
 }
 
 type ListedBooking = Prisma.BookingGetPayload<{
-  include: { addons: { select: { stage: true; amountRwf: true } }; payments: { select: { status: true; amountRwf: true } } };
+  include: { addons: { select: { stage: true; amountRwf: true } }; payments: { select: typeof TOTALS_PAYMENT_SELECT } };
 }>;
 
 function toRow(booking: ListedBooking, now: Date): BookingListRow {

@@ -523,6 +523,70 @@ describe('activate and deactivate', () => {
 
 // --- Packages and add-ons ---------------------------------------------------------------------------
 
+describe('the transfer-fee banner on the package price form (R4.5)', () => {
+  const TRANSFER_FEE =
+    'Bookly sends your payouts by manual transfer. The transfer fee is deducted from what you receive, so you may want to include it in your prices.'
+
+  function notice(container: HTMLElement) {
+    return container.querySelector('[data-notice="transfer-fee"]')
+  }
+
+  it('shows on a new package’s form, above its price', async () => {
+    signIn()
+    stubApi()
+    await renderLoaded()
+
+    await user().click(within(serviceCard('Corporate events')).getByRole('button', { name: 'Add package' }))
+
+    const open = form('New package')
+    expect(notice(open)).toHaveTextContent(TRANSFER_FEE)
+    const price = within(open).getByLabelText('Price (RWF)')
+    expect((notice(open) as Node).compareDocumentPosition(price) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('shows on an existing package’s form', async () => {
+    signIn()
+    stubApi()
+    await renderLoaded()
+
+    await user().click(screen.getByRole('button', { name: 'Edit Standard' }))
+
+    expect(notice(form('Edit package'))).toHaveTextContent(TRANSFER_FEE)
+  })
+
+  it('is not on the service or add-on forms, nor on the page itself', async () => {
+    signIn()
+    stubApi()
+    await renderLoaded()
+    const u = user()
+
+    expect(document.querySelector('[data-notice="transfer-fee"]')).toBeNull()
+    for (const [opener, title] of [
+      ['Add service', 'New service'],
+      ['Edit Portraits', 'Edit service'],
+      ['Edit Extra hour', 'Edit add-on'],
+    ] as const) {
+      await u.click(screen.getByRole('button', { name: opener }))
+      expect(notice(form(title))).toBeNull()
+      await u.click(within(form(title)).getByRole('button', { name: 'Cancel' }))
+    }
+  })
+
+  it('does not change what the package form sends', async () => {
+    signIn()
+    const api = stubApi()
+    await renderLoaded()
+
+    await user().click(within(serviceCard('Corporate events')).getByRole('button', { name: 'Add package' }))
+    const open = form('New package')
+    await fill(open, { Name: 'Half day', 'Price (RWF)': '250000', Photos: '80', 'Duration (minutes)': '240' })
+    await user().click(within(open).getByRole('button', { name: 'Create' }))
+
+    await waitFor(() => expect(writes(api)).toHaveLength(1))
+    expect(Object.keys(writes(api)[0]?.body as object)).not.toContain('notice')
+  })
+})
+
 describe('packages', () => {
   it('creates a package under its own service', async () => {
     signIn()

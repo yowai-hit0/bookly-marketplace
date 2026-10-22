@@ -76,12 +76,24 @@
       "description": "Services, packages and add-ons."
     },
     {
+      "name": "Studio earnings",
+      "description": "What the photographer has earned and been paid, and where payouts go (Phase 4)."
+    },
+    {
       "name": "Platform auth",
       "description": "Login, email verification and password reset for a platform admin."
     },
     {
       "name": "Platform photographers",
       "description": "Listing photographers, and approving, suspending and reactivating them."
+    },
+    {
+      "name": "Platform payouts",
+      "description": "Payouts due, building a draft, marking it paid with the transfer reference, or cancelling it (Phase 4)."
+    },
+    {
+      "name": "Platform refunds",
+      "description": "Refunds of money paid online, which sits in the platform's account (Phase 4)."
     },
     {
       "name": "Account auth",
@@ -2837,7 +2849,7 @@
           "Studio payments"
         ],
         "summary": "Record a refund",
-        "description": "Records that the photographer refunded a payment by hand (the system\nnever moves money). Needs the MoMo or bank reference it was sent with.\n",
+        "description": "Records that the photographer gave back **cash** he was handed (the\nsystem never moves money). Needs the reference or note it was given back\nwith.\n\nCash only (Phase 4 refund decision). A payment made online sits in the\nplatform's account, so a platform admin refunds and records it\n(`POST /api/platform/refunds/{paymentId}`); here it is\n`409 refund_with_platform`, and the booking shows it with\n`refundPendingWithPlatform`.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/RowId"
@@ -2888,14 +2900,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The payment is not in a state that can be refunded.",
+            "description": "`not_refundable`: the cash payment is not owed back.\n`refund_with_platform`: the payment was made online; the platform refunds it.\nThe booking as it now stands is included.\n",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminBookingConflict"
                 },
                 "example": {
-                  "error": "not_refundable",
+                  "error": "refund_with_platform",
                   "booking": null
                 }
               }
@@ -3255,6 +3267,157 @@
           },
           "409": {
             "$ref": "#/components/responses/inUse"
+          }
+        }
+      }
+    },
+    "/api/studio/earnings": {
+      "get": {
+        "operationId": "getEarnings",
+        "tags": [
+          "Studio earnings"
+        ],
+        "summary": "Earnings, payouts and totals",
+        "description": "What the photographer is owed and has been paid. The platform holds every\npayment made online and pays it out by hand, with **no commission**; cash\nthe photographer was handed never appears here.\n\n- A booking fee is payable as soon as it succeeds.\n- A session fee is `pending` until the shoot has ended, then payable,\n  unless the booking was cancelled.\n- A refund before any payout voids the line; a refund after one adds a\n  negative `reversal` that the next payout subtracts.\n\nEach line carries its booking's id and reference, to link to it.\n",
+        "responses": {
+          "200": {
+            "description": "Totals, every line, and the payout history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioEarnings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/studio/payouts/{id}": {
+      "get": {
+        "operationId": "getStudioPayout",
+        "tags": [
+          "Studio earnings"
+        ],
+        "summary": "One payout, with its lines",
+        "description": "A draft being prepared or a paid payout of the signed-in photographer's. A cancelled draft, or another photographer's payout, is a 404.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The payout and its lines.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioPayoutDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/studio/payout-method": {
+      "get": {
+        "operationId": "getPayoutMethod",
+        "tags": [
+          "Studio earnings"
+        ],
+        "summary": "The current payout method",
+        "description": "Where payouts go now, or `null` if none has been saved. The page shows the transfer-fee banner (R4.5).",
+        "responses": {
+          "200": {
+            "description": "The current method, or null.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutMethodCurrent"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "operationId": "setPayoutMethod",
+        "tags": [
+          "Studio earnings"
+        ],
+        "summary": "Save the payout method",
+        "description": "Saves where payouts go (MoMo or bank). The previous method is retired, not\nedited, so payouts already built keep naming the destination they were\nbuilt for (R4.1).\n\n**Requires the current password.** Without it, or with the wrong one, the\nanswer is `403 invalid_password` and nothing changes; a wrong password\ncounts toward the account's sign-in lockout exactly like a failed login,\nand once locked the answer is `403 password_locked` until the lock ends.\nOn success an `account_security_alert` email (payout method changed) goes\nto the login address, and the platform's payout screen flags the change\nfor 72 hours.\n\nRate-limited per address (`429`).\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayoutMethodRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new current method.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutMethodEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The current password was missing or wrong (`invalid_password`), or the account is locked by failed attempts (`password_locked`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "invalid_password",
+                        "password_locked"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -3676,6 +3839,487 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/platform/payouts/due": {
+      "get": {
+        "operationId": "listPayoutsDue",
+        "tags": [
+          "Platform payouts"
+        ],
+        "summary": "Payouts due",
+        "description": "Every photographer whose payable balance is above nought, with their\ncurrent payout method. `methodChangedRecently` flags a destination saved\nwithin the last 72 hours: redirecting payouts is what an account\ntakeover would aim for, so confirm it before sending money (R4.1).\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The photographers due a payout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutsDue"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/platform/payouts": {
+      "get": {
+        "operationId": "listPlatformPayouts",
+        "tags": [
+          "Platform payouts"
+        ],
+        "summary": "List payouts",
+        "description": "Every payout, newest first, or only those in one status.",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PayoutStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The payouts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPayoutList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "buildPayout",
+        "tags": [
+          "Platform payouts"
+        ],
+        "summary": "Build a draft payout",
+        "description": "Takes every line payable now for the photographer, totals it, and records\na `draft` for that amount to their current payout method. Then make the\ntransfer outside the app, and mark the draft paid with its reference.\n\nRefused with `409` when the photographer has no payout method\n(`no_payout_method`), already has a draft (`draft_exists`), or the total\nis nought or less (`nothing_payable`: nothing is created, and the balance\ncarries forward to a later payout).\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "photographerId"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "photographerId": {
+                    "$ref": "#/components/schemas/Uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The draft, with its lines.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPayoutEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "No draft was built.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRefused"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/payouts/{id}": {
+      "get": {
+        "operationId": "getPlatformPayout",
+        "tags": [
+          "Platform payouts"
+        ],
+        "summary": "One payout, with its lines",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The payout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPayoutEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/platform/payouts/{id}/mark-paid": {
+      "post": {
+        "operationId": "markPayoutPaid",
+        "tags": [
+          "Platform payouts"
+        ],
+        "summary": "Mark a draft paid",
+        "description": "Records that the transfer was made: its MoMo or bank reference (required,\nand used once across every payout), when, and by whom. Emails the\nphotographer `payout_sent`. Only a draft can be marked paid.\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "transferReference"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "transferReference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "Trimmed. Missing is a 400",
+                    "empty a 422.": null
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Platform-internal; not shown to the photographer."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The payout, now paid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPayoutEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The payout is not a draft (`not_draft`, with the payout as it stands), or the transfer reference is already recorded on another payout (`duplicate_transfer_reference`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PayoutNotDraft"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "const": "duplicate_transfer_reference"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      }
+    },
+    "/api/platform/payouts/{id}/cancel": {
+      "post": {
+        "operationId": "cancelPayout",
+        "tags": [
+          "Platform payouts"
+        ],
+        "summary": "Cancel a draft",
+        "description": "Releases the draft's lines back to the photographer's balance, to be\ntaken by a later payout. Only a draft can be cancelled; who cancelled it\nis recorded. Takes no body.\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The payout, now cancelled, with no lines.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformPayoutEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The payout is not a draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutNotDraft"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/refunds": {
+      "get": {
+        "operationId": "listRefundsDue",
+        "tags": [
+          "Platform refunds"
+        ],
+        "summary": "Refunds due",
+        "description": "Every refund of money paid online (MoMo through MTN or Flutterwave) the\nplatform has still to send, oldest first. The money is in the platform's\naccount, so the platform refunds it by hand and records it here. Two\nkinds (`refundKind`):\n\n- `full`: a payment owed back whole (`refund_due`). `refundAmountRwf` is\n  the amount, less any overpaid part already returned. This includes a\n  payment marked failed on our side (a session-fee ask voided for cash, or\n  an attempt whose provider call failed) that the client then paid\n  anyway, when none of it was due.\n- `overpayment`: a session fee paid for more than the booking was worth.\n  The payment stays `succeeded`, the photographer earned only what was\n  due, and `refundAmountRwf` is the overpaid part.\n\nA payment is listed once: a full refund covers its overpaid part, so a\npayment that became `refund_due` after overpaying is listed only as\n`full`. Cash is the photographer's to give back and is not listed.\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The refunds owed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundsDue"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/platform/refunds/{paymentId}": {
+      "post": {
+        "operationId": "recordPlatformRefund",
+        "tags": [
+          "Platform refunds"
+        ],
+        "summary": "Record a refund",
+        "description": "Records that money paid online was sent back by hand, with the reference\nit went out with and the admin who recorded it. The system moves no\nmoney. Records whichever refund is pending:\n\n- `full`, when the payment is `refund_due`: it becomes `refunded`. This\n  wins if both could apply, since a full refund covers the overpaid part.\n- `overpayment`, when a succeeded session fee has an overpaid part not\n  yet returned: the `overpayment_*` fields are set and the payment stays\n  `succeeded`.\n\nRefused with `409`: nothing pending (`not_refundable`), cash\n(`cash_payment`: the photographer records that), a reference another\nonline refund of either kind already names (`duplicate_refund_reference`),\nor a `refundKind` that is not what is pending (`refund_kind_mismatch`,\nwith `pending`: the list the admin acted on has changed).\n",
+        "security": [
+          {
+            "platformBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "paymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reference"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "Unique across every online refund, full or overpayment."
+                  },
+                  "refundedAt": {
+                    "$ref": "#/components/schemas/OffsetInstant"
+                  },
+                  "refundKind": {
+                    "$ref": "#/components/schemas/RefundKind",
+                    "description": "Optional. The kind the admin means to record, from the list they acted on."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The refund as recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedRefund"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Cash (`cash_payment`), nothing owed back (`not_refundable`), a reference\nalready used (`duplicate_refund_reference`), or another kind pending\nthan the one named (`refund_kind_mismatch`). Nothing was written.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "type": "string",
+                          "enum": [
+                            "cash_payment",
+                            "not_refundable",
+                            "duplicate_refund_reference"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "error",
+                        "pending"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "error": {
+                          "const": "refund_kind_mismatch"
+                        },
+                        "pending": {
+                          "$ref": "#/components/schemas/RefundKind"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
           }
         }
       }
@@ -5316,11 +5960,11 @@
           },
           "collectedRwf": {
             "$ref": "#/components/schemas/Rwf",
-            "description": "Succeeded payments."
+            "description": "Succeeded payments, each for the part that was due (the amount less any overpaid part)."
           },
           "refundDueRwf": {
             "$ref": "#/components/schemas/Rwf",
-            "description": "Money owed back and not yet recorded as refunded."
+            "description": "Money owed back and not yet recorded as refunded: payments owed back\nwhole (less an overpaid part already returned), and overpaid parts of\nsucceeded payments not yet returned.\n"
           },
           "outstandingRwf": {
             "$ref": "#/components/schemas/Rwf",
@@ -6542,7 +7186,12 @@
           "refundedAt",
           "refundReference",
           "note",
-          "canRecordRefund"
+          "canRecordRefund",
+          "refundPendingWithPlatform",
+          "overpaidRwf",
+          "overpaymentRefundPendingWithPlatform",
+          "overpaymentRefundedAt",
+          "overpaymentRefundReference"
         ],
         "additionalProperties": false,
         "properties": {
@@ -6618,7 +7267,36 @@
             "description": "What was typed with a cash payment."
           },
           "canRecordRefund": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "A cash payment owed back, which the photographer records once he has given it back (`POST /api/studio/payments/{id}/refund`). Always false for a payment made online."
+          },
+          "refundPendingWithPlatform": {
+            "type": "boolean",
+            "description": "A payment made online that is owed back. The money is in the platform's\naccount, so a platform admin refunds the client and records it; the\nstudio shows it as pending with the platform (Phase 4 refund decision).\n"
+          },
+          "overpaidRwf": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The part of a session fee paid online over what the booking was worth\n(Phase 4 overpayment decision); 0 when it was not overpaid. The payment\nstays `succeeded`; its earning, and the booking's totals, count only\n`amountRwf - overpaidRwf`.\n"
+          },
+          "overpaymentRefundPendingWithPlatform": {
+            "type": "boolean",
+            "description": "That overpaid part is still to go back to the client. The money is in\nthe platform's account, so the platform returns it and records it; there\nis nothing for the photographer to do. False once the platform records\nit, and false once the whole payment is owed back (a full refund covers it).\n"
+          },
+          "overpaymentRefundedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the platform returned the overpaid part."
+          },
+          "overpaymentRefundReference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The reference it went back with."
           }
         }
       },
@@ -7608,6 +8286,502 @@
           }
         }
       },
+      "PayoutItemState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "payable",
+          "in_draft",
+          "paid",
+          "voided"
+        ],
+        "description": "`pending`: succeeded but not payable yet (a session fee before its shoot\nhas ended). `payable`: payable now, in no payout. `in_draft`: in a payout\nbeing prepared. `paid`: in a payout marked paid. `voided`: refunded before\nany payout, so it no longer counts.\n"
+      },
+      "PayoutItem": {
+        "type": "object",
+        "description": "One line of what the photographer is owed: an `earning` (a succeeded booking\nor session fee paid online, its full amount: no commission) or a\n`reversal` (the negative of an earning already paid out, after its payment\nwas refunded). Cash never has a line.\n",
+        "required": [
+          "id",
+          "kind",
+          "amountRwf",
+          "state",
+          "payoutId",
+          "createdAt",
+          "voidedAt",
+          "payment",
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "earning",
+              "reversal"
+            ]
+          },
+          "amountRwf": {
+            "type": "integer",
+            "description": "Positive for an earning, negative for a reversal."
+          },
+          "state": {
+            "$ref": "#/components/schemas/PayoutItemState"
+          },
+          "payoutId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "voidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "payment": {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "provider",
+              "status",
+              "amountRwf",
+              "settledAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "kind": {
+                "$ref": "#/components/schemas/PaymentKind"
+              },
+              "provider": {
+                "type": "string",
+                "examples": [
+                  "mtn_momo_direct",
+                  "flutterwave"
+                ]
+              },
+              "status": {
+                "$ref": "#/components/schemas/PaymentStatus"
+              },
+              "amountRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "settledAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "booking": {
+            "type": "object",
+            "description": "The booking the line is for. `id` opens it in the studio.",
+            "required": [
+              "id",
+              "reference",
+              "status",
+              "startsAt",
+              "endsAt"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "reference": {
+                "$ref": "#/components/schemas/BookingReference"
+              },
+              "status": {
+                "$ref": "#/components/schemas/BookingStatus"
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "endsAt": {
+                "$ref": "#/components/schemas/Instant"
+              }
+            }
+          }
+        }
+      },
+      "PayoutMethodKind": {
+        "type": "string",
+        "enum": [
+          "momo",
+          "bank"
+        ]
+      },
+      "MomoNetwork": {
+        "type": "string",
+        "enum": [
+          "mtn",
+          "airtel"
+        ]
+      },
+      "PayoutMethod": {
+        "type": "object",
+        "description": "Where the photographer is paid. Immutable: saving a new one retires this\nrow and creates another, so `id` changes on every save.\n",
+        "required": [
+          "id",
+          "kind",
+          "momoNetwork",
+          "momoNumber",
+          "bankName",
+          "bankAccountNumber",
+          "accountName",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PayoutMethodKind"
+          },
+          "momoNetwork": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MomoNetwork"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set for `momo` only."
+          },
+          "momoNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+2507[2389][0-9]{7}$",
+            "description": "E.164. Set for `momo` only."
+          },
+          "bankName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set for `bank` only."
+          },
+          "bankAccountNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set for `bank` only."
+          },
+          "accountName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "The name the account is registered to."
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant",
+            "description": "When this destination was saved."
+          }
+        }
+      },
+      "StudioPayout": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "amountRwf",
+          "itemCount",
+          "transferReference",
+          "createdAt",
+          "paidAt",
+          "payoutMethod"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "paid"
+            ]
+          },
+          "amountRwf": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "transferReference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The MoMo or bank transaction id",
+            "once paid.": null
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "paidAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "payoutMethod": {
+            "$ref": "#/components/schemas/PayoutMethod",
+            "description": "The destination it was sent, or is being sent, to."
+          }
+        }
+      },
+      "StudioEarnings": {
+        "type": "object",
+        "required": [
+          "totals",
+          "items",
+          "payouts"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "totals": {
+            "type": "object",
+            "description": "Sums of the lines in each state. `payableRwf` may be nought or negative when reversals outweigh new earnings.",
+            "required": [
+              "pendingRwf",
+              "payableRwf",
+              "inDraftRwf",
+              "paidRwf"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pendingRwf": {
+                "type": "integer"
+              },
+              "payableRwf": {
+                "type": "integer"
+              },
+              "inDraftRwf": {
+                "type": "integer"
+              },
+              "paidRwf": {
+                "type": "integer"
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "description": "Every line, voided ones included, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/PayoutItem"
+            }
+          },
+          "payouts": {
+            "type": "array",
+            "description": "The draft being prepared, if any, and every paid payout, newest first. Cancelled drafts are not shown.",
+            "items": {
+              "$ref": "#/components/schemas/StudioPayout"
+            }
+          }
+        }
+      },
+      "StudioPayoutDetail": {
+        "type": "object",
+        "required": [
+          "payout"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payout": {
+            "type": "object",
+            "required": [
+              "id",
+              "status",
+              "amountRwf",
+              "itemCount",
+              "transferReference",
+              "createdAt",
+              "paidAt",
+              "payoutMethod",
+              "items"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "paid"
+                ]
+              },
+              "amountRwf": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "itemCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "transferReference": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "createdAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "paidAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "payoutMethod": {
+                "$ref": "#/components/schemas/PayoutMethod"
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PayoutItem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PayoutMethodCurrent": {
+        "type": "object",
+        "required": [
+          "payoutMethod"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payoutMethod": {
+            "description": "The current destination, or null if none has been saved.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PayoutMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PayoutMethodRequest": {
+        "description": "One of two shapes, by `kind`; a field of the other shape is a `400`.\n`currentPassword` is the account's password: without it, or wrong, the\nchange is a `403`.\n",
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "MoMo",
+            "required": [
+              "kind",
+              "momoNetwork",
+              "momoNumber",
+              "accountName"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "momo"
+              },
+              "momoNetwork": {
+                "$ref": "#/components/schemas/MomoNetwork"
+              },
+              "momoNumber": {
+                "type": "string",
+                "maxLength": 32,
+                "description": "A Rwandan mobile number, typed any usual way (`0788 123 456`,\n`+250 788 123 456`); stored as E.164. It must be on the network's\nown prefixes (MTN 078/079, Airtel 072/073), or it is a `422`.\n"
+              },
+              "accountName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "currentPassword": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "Bank",
+            "required": [
+              "kind",
+              "bankName",
+              "bankAccountNumber",
+              "accountName"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "bank"
+              },
+              "bankName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "bankAccountNumber": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 40,
+                "description": "Letters, digits, spaces and dashes, with at least one digit."
+              },
+              "accountName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "currentPassword": {
+                "type": "string",
+                "maxLength": 1024
+              }
+            }
+          }
+        ]
+      },
+      "PayoutMethodEnvelope": {
+        "type": "object",
+        "required": [
+          "payoutMethod"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payoutMethod": {
+            "$ref": "#/components/schemas/PayoutMethod"
+          }
+        }
+      },
       "UserEnvelope": {
         "type": "object",
         "required": [
@@ -7732,6 +8906,692 @@
           },
           "photographer": {
             "$ref": "#/components/schemas/PlatformPhotographer"
+          }
+        }
+      },
+      "PhotographerSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "handle",
+          "displayName",
+          "email",
+          "status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "The photographer's login address."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PhotographerStatus"
+          }
+        }
+      },
+      "PlatformPayoutMethod": {
+        "type": "object",
+        "description": "A payout method as the platform sees it, with when it was replaced.",
+        "required": [
+          "id",
+          "kind",
+          "momoNetwork",
+          "momoNumber",
+          "bankName",
+          "bankAccountNumber",
+          "accountName",
+          "createdAt",
+          "retiredAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PayoutMethodKind"
+          },
+          "momoNetwork": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MomoNetwork"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "momoNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bankName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bankAccountNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "retiredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the photographer replaced it; null while current."
+          }
+        }
+      },
+      "PayoutsDue": {
+        "type": "object",
+        "required": [
+          "due"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "due": {
+            "type": "array",
+            "description": "Photographers whose payable balance is above nought, largest first.",
+            "items": {
+              "type": "object",
+              "required": [
+                "photographer",
+                "payableRwf",
+                "itemCount",
+                "payoutMethod",
+                "methodChangedRecently",
+                "draftPayoutId"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "photographer": {
+                  "$ref": "#/components/schemas/PhotographerSummary"
+                },
+                "payableRwf": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "itemCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "payoutMethod": {
+                  "description": "The current destination; null when none is saved (a draft cannot be built).",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PlatformPayoutMethod"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "methodChangedRecently": {
+                  "type": "boolean",
+                  "description": "The destination was saved within the last 72 hours (R4.1). A takeover would aim here; confirm with the photographer before sending."
+                },
+                "draftPayoutId": {
+                  "description": "A draft already being prepared, which must be paid or cancelled before another is built.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Uuid"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "PayoutStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "paid",
+          "cancelled"
+        ]
+      },
+      "UserSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "fullName"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "NullableUserSummary": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserSummary"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "PlatformPayout": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "amountRwf",
+          "itemCount",
+          "photographer",
+          "payoutMethod",
+          "payoutMethodIsCurrent",
+          "methodChangedRecently",
+          "transferReference",
+          "note",
+          "createdAt",
+          "createdBy",
+          "paidAt",
+          "paidBy",
+          "cancelledAt",
+          "cancelledBy"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PayoutStatus"
+          },
+          "amountRwf": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The items' total when the draft was built."
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Nought once a draft is cancelled",
+            "which releases its items.": null
+          },
+          "photographer": {
+            "$ref": "#/components/schemas/PhotographerSummary"
+          },
+          "payoutMethod": {
+            "$ref": "#/components/schemas/PlatformPayoutMethod",
+            "description": "The destination the draft was built for."
+          },
+          "payoutMethodIsCurrent": {
+            "type": "boolean",
+            "description": "False once the photographer has saved another destination since the draft was built. Check before transferring."
+          },
+          "methodChangedRecently": {
+            "type": "boolean",
+            "description": "The photographer's current destination was saved within the last 72 hours (R4.1)."
+          },
+          "transferReference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the admin typed when marking it paid. Platform-internal."
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/UserSummary"
+          },
+          "paidAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "paidBy": {
+            "$ref": "#/components/schemas/NullableUserSummary"
+          },
+          "cancelledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cancelledBy": {
+            "$ref": "#/components/schemas/NullableUserSummary"
+          }
+        }
+      },
+      "PlatformPayoutList": {
+        "type": "object",
+        "required": [
+          "payouts"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payouts": {
+            "type": "array",
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/PlatformPayout"
+            }
+          }
+        }
+      },
+      "PlatformPayoutDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "amountRwf",
+          "itemCount",
+          "photographer",
+          "payoutMethod",
+          "payoutMethodIsCurrent",
+          "methodChangedRecently",
+          "transferReference",
+          "note",
+          "createdAt",
+          "createdBy",
+          "paidAt",
+          "paidBy",
+          "cancelledAt",
+          "cancelledBy",
+          "items"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PayoutStatus"
+          },
+          "amountRwf": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "itemCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "photographer": {
+            "$ref": "#/components/schemas/PhotographerSummary"
+          },
+          "payoutMethod": {
+            "$ref": "#/components/schemas/PlatformPayoutMethod"
+          },
+          "payoutMethodIsCurrent": {
+            "type": "boolean"
+          },
+          "methodChangedRecently": {
+            "type": "boolean"
+          },
+          "transferReference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/UserSummary"
+          },
+          "paidAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "paidBy": {
+            "$ref": "#/components/schemas/NullableUserSummary"
+          },
+          "cancelledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cancelledBy": {
+            "$ref": "#/components/schemas/NullableUserSummary"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayoutItem"
+            }
+          }
+        }
+      },
+      "PlatformPayoutEnvelope": {
+        "type": "object",
+        "required": [
+          "payout"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payout": {
+            "$ref": "#/components/schemas/PlatformPayoutDetail"
+          }
+        }
+      },
+      "BuildRefused": {
+        "type": "object",
+        "description": "`no_payout_method`: the photographer has no destination saved.\n`draft_exists`: a draft is already being prepared (`payoutId` names it).\n`nothing_payable`: the payable total is nought or less (`payableRwf`);\nnothing was created and the balance carries forward.\n",
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "no_payout_method",
+              "draft_exists",
+              "nothing_payable"
+            ]
+          },
+          "payoutId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "payableRwf": {
+            "type": "integer",
+            "maximum": 0
+          }
+        }
+      },
+      "PayoutNotDraft": {
+        "type": "object",
+        "description": "Only a draft can be marked paid or cancelled. The payout as it now stands.",
+        "required": [
+          "error",
+          "payout"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "not_draft"
+          },
+          "payout": {
+            "$ref": "#/components/schemas/PlatformPayoutDetail"
+          }
+        }
+      },
+      "RefundKind": {
+        "type": "string",
+        "enum": [
+          "full",
+          "overpayment"
+        ],
+        "description": "`full`: the payment is owed back whole (`refund_due`). `overpayment`: a\nsession fee paid online for more than the booking was worth; it stays\n`succeeded`, and only the overpaid part goes back (Phase 4 overpayment\ndecision). A payment is listed once: a full refund covers its overpaid part.\n"
+      },
+      "RefundDue": {
+        "type": "object",
+        "required": [
+          "paymentId",
+          "kind",
+          "provider",
+          "method",
+          "amountRwf",
+          "ourRef",
+          "providerRef",
+          "settledAt",
+          "refundKind",
+          "refundAmountRwf",
+          "overpaidRwf",
+          "booking",
+          "photographer"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "paymentId": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PaymentKind"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "mtn_momo_direct",
+              "flutterwave"
+            ]
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amountRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "The whole payment",
+            "as it was paid.": null
+          },
+          "ourRef": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "providerRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The provider's transaction id",
+            "to refund against.": null
+          },
+          "settledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "refundKind": {
+            "$ref": "#/components/schemas/RefundKind"
+          },
+          "refundAmountRwf": {
+            "$ref": "#/components/schemas/Rwf",
+            "description": "What to send back. `full`: the whole amount, less an overpaid part the\nplatform already returned. `overpayment`: the overpaid part.\n"
+          },
+          "overpaidRwf": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The payment's overpaid part, returned or not; 0 when it was not overpaid."
+          },
+          "booking": {
+            "type": "object",
+            "required": [
+              "id",
+              "reference",
+              "status",
+              "startsAt",
+              "contactName",
+              "contactEmail",
+              "contactPhone"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "reference": {
+                "$ref": "#/components/schemas/BookingReference"
+              },
+              "status": {
+                "$ref": "#/components/schemas/BookingStatus"
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "contactName": {
+                "type": "string"
+              },
+              "contactEmail": {
+                "type": "string"
+              },
+              "contactPhone": {
+                "type": "string"
+              }
+            }
+          },
+          "photographer": {
+            "type": "object",
+            "required": [
+              "id",
+              "handle",
+              "displayName"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "handle": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "RefundsDue": {
+        "type": "object",
+        "required": [
+          "refunds"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "refunds": {
+            "type": "array",
+            "description": "Oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/RefundDue"
+            }
+          }
+        }
+      },
+      "RecordedRefund": {
+        "type": "object",
+        "required": [
+          "refund"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "refund": {
+            "type": "object",
+            "required": [
+              "paymentId",
+              "kind",
+              "provider",
+              "amountRwf",
+              "status",
+              "refundKind",
+              "refundAmountRwf",
+              "overpaidRwf",
+              "refundedAt",
+              "refundReference",
+              "refundedByUserId"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "paymentId": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "kind": {
+                "$ref": "#/components/schemas/PaymentKind"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "amountRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "refunded",
+                  "succeeded"
+                ],
+                "description": "A full refund leaves the payment `refunded`; an overpayment refund leaves it `succeeded`."
+              },
+              "refundKind": {
+                "$ref": "#/components/schemas/RefundKind"
+              },
+              "refundAmountRwf": {
+                "$ref": "#/components/schemas/Rwf",
+                "description": "What was sent back."
+              },
+              "overpaidRwf": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "refundedAt": {
+                "$ref": "#/components/schemas/Instant",
+                "description": "When that refund was sent (`refunded_at`, or `overpayment_refunded_at`)."
+              },
+              "refundReference": {
+                "type": "string"
+              },
+              "refundedByUserId": {
+                "$ref": "#/components/schemas/Uuid"
+              }
+            }
           }
         }
       },

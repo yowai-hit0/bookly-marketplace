@@ -91,6 +91,50 @@ export async function attemptLogin(deps: AuthDeps, area: AuthArea, email: string
   return { status: 'ok', user: signedIn, ...issued };
 }
 
+export type CurrentPasswordCheck =
+  | 'ok'
+  /** Wrong. Counted toward the lockout, exactly like a failed login. */
+  | 'invalid_password'
+  /** The account is locked by failed attempts: nothing was checked. */
+  | 'locked';
+
+/**
+ * Re-checks a signed-in user's password before a sensitive change -- changing
+ * the payout method (marketplace-spec.md R4.1, T4.4) -- so a stolen token alone
+ * cannot redirect payouts.
+ *
+ * It shares the login's lockout rather than keeping a limit of its own: the
+ * attempt is claimed first with the same one-statement claim (so a burst of
+ * guesses through a stolen token gets at most LOCKOUT_THRESHOLD checks per
+ * lock window), a wrong password counts as a failed login, the attempt that
+ * locks sends the same `login_lockout` alert, and the right password clears the
+ * count as a successful login does. A token in hand is no licence to guess.
+ * Locked, it answers `locked` without spending Argon2: the caller is signed in
+ * as this user, so saying so discloses nothing.
+ */
+export async function verifyCurrentPassword(
+  deps: AuthDeps,
+  area: AuthArea,
+  user: Pick<AppUser, 'id' | 'email' | 'passwordHash' | 'emailVerifiedAt'>,
+  password: string,
+): Promise<CurrentPasswordCheck> {
+  const now = deps.now();
+  if (user.passwordHash === null) {
+    // No password to check (a Google-only client): no attempt to count either.
+    await spendDummyPasswordCheck(password);
+    return 'invalid_password';
+  }
+  const attemptNumber = await claimLoginAttempt(deps, user.id, now);
+  if (attemptNumber === null) return 'locked';
+
+  if (!(await verifyPassword(user.passwordHash, password))) {
+    await alertIfLocked(deps, area, { id: user.id, email: user.email, passwordHash: user.passwordHash, emailVerifiedAt: user.emailVerifiedAt }, attemptNumber, now);
+    return 'invalid_password';
+  }
+  await deps.prisma.appUser.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil: null } });
+  return 'ok';
+}
+
 /** Minutes to lock for this failure count, or null if it does not lock. */
 export function lockoutMinutesFor(failedLoginCount: number): number | null {
   if (failedLoginCount <= 0 || failedLoginCount % LOCKOUT_THRESHOLD !== 0) return null;

@@ -560,7 +560,7 @@ describe('payload validation', () => {
     expect(payloadError(() => render(template, { variant, ...rest })).message).toContain('variant');
   });
 
-  it.each(['admin_alert', 'admin_new_booking', 'subscription_reminder', 'payout_sent'])('refuses %s, which has no renderer, as an unknown template', (template) => {
+  it.each(['admin_alert', 'admin_new_booking', 'subscription_reminder', 'subscription_receipt', 'subscription_expired'])('refuses %s, which has no renderer, as an unknown template', (template) => {
     expect(payloadError(() => render(template, {})).message).toBe(`Unknown email template: ${template}`);
   });
 
@@ -722,10 +722,11 @@ describe('content rules', () => {
     expect(email.text).toContain('Now: Friday, 9 October 2026, 11:00 to 12:00 (Kigali time)');
   });
 
-  it('refund_due tells the photographer the system does not move money', () => {
+  it('refund_due for money paid online says the platform refunds it: there is nothing for the photographer to send (Phase 4)', () => {
     const email = renderFixture(emailFixture('photographer_alert refund_due'));
 
-    expect(email.text).toContain('The system does not move money. Refund the client through MTN MoMo');
+    expect(email.text).toContain("The client paid online, into the platform's account, so the platform refunds them and records it");
+    expect(email.text).toContain('it comes off your next payout');
   });
 
   it.each([
@@ -869,6 +870,56 @@ describe('reschedule with and without an access token', () => {
     expect(email.subject).toMatchSnapshot('subject');
     expect(email.text).toMatchSnapshot('text');
     expect(email.html).toMatchSnapshot('html');
+  });
+});
+
+// --- Money out (marketplace-spec.md Phase 4) ------------------------------------------------
+
+describe('payouts and refunds copy (Phase 4)', () => {
+  it('refund_due: money paid online is the platform’s to refund; the photographer is told there is nothing to send', () => {
+    for (const provider of ['mtn_momo_direct', 'flutterwave']) {
+      const email = renderWith('photographer_alert refund_due', { provider });
+      expect(email.text).toContain('the platform refunds them and records it');
+      expect(email.text).not.toContain('record the refund on the booking');
+      expect(email.html).toContain('The client paid online, so the platform refunds them.');
+    }
+  });
+
+  it('refund_due: cash is the photographer’s to give back and record', () => {
+    const email = renderWith('photographer_alert refund_due', { provider: 'cash' });
+    expect(email.text).toContain('This was paid in cash: give it back to the client, then record the refund on the booking.');
+    expect(email.text).not.toContain('the platform refunds them');
+  });
+
+  it('payout_method_changed: says added for a first method, changed for a replacement, and names only the last four digits', () => {
+    const added = renderWith('account_security_alert payout_method_changed', { replaced: false, destination: { kind: 'momo', provider: 'airtel', last4: '4567' } });
+    expect(added.subject).toBe('A payout method was added to your studio');
+    expect(added.text).toContain('Airtel MoMo number ending 4567');
+
+    const changed = renderFixture(emailFixture('account_security_alert payout_method_changed'));
+    expect(changed.subject).toBe('Your payout method was changed');
+    expect(changed.text).toContain('Bank of Kigali account ending 4567');
+    expect(changed.text).toContain('14 Mar 2026, 17:00');
+    expect(changed.html).toContain(`${FIXTURE_WEB_ORIGIN}/studio/payout-method`);
+  });
+
+  it('payout_method_changed: refuses a destination that is more than four characters, or any other area', () => {
+    expect(payloadError(() => render('account_security_alert', { ...emailFixture('account_security_alert payout_method_changed').payload, destination: { kind: 'momo', provider: 'mtn', last4: '788123456' } })).message).toContain('destination.last4');
+    expect(payloadError(() => render('account_security_alert', { ...emailFixture('account_security_alert payout_method_changed').payload, area: 'account' })).message).toContain('area');
+  });
+
+  it('payout_sent: the amount, the reference, the masked destination, the fee note and a link to the earnings page', () => {
+    const email = renderFixture(emailFixture('payout_sent'));
+    expect(email.subject).toBe('Payout sent: 125,000 RWF');
+    expect(email.text).toContain('MTN-TX-4471');
+    expect(email.text).toContain('MTN MoMo number ending 3456');
+    expect(email.text).toContain('No commission is taken.');
+    expect(email.html).toContain(`${FIXTURE_WEB_ORIGIN}/studio/earnings`);
+  });
+
+  it('payout_sent: refuses a payout of nought and a missing reference', () => {
+    expect(payloadError(() => render('payout_sent', { ...emailFixture('payout_sent').payload, amountRwf: 0 })).message).toContain('amountRwf');
+    expect(payloadError(() => render('payout_sent', { ...emailFixture('payout_sent').payload, transferReference: ' ' })).message).toContain('transferReference');
   });
 });
 
@@ -1135,10 +1186,12 @@ describe('photographer_alert refund_due for cash (admin console fixes, item 7)',
     expect(email.text).not.toContain('Refund the client through');
   });
 
-  it('keeps the provider sentence for money paid online', () => {
+  it('for money paid online, says the platform refunds it instead (Phase 4 refund decision)', () => {
     const email = renderWith('photographer_alert refund_due', { provider: 'mtn_momo_direct' });
 
-    expect(email.text).toContain('Refund the client through MTN MoMo, then record the refund on the booking.');
+    expect(email.text).toContain('MTN MoMo');
+    expect(email.text).toContain('the platform refunds them and records it');
+    expect(email.text).not.toContain('Refund the client through');
   });
 });
 

@@ -12,7 +12,7 @@ The data model changes are in [`docs/marketplace-data-model.md`](marketplace-dat
 | Topic | Decision |
 |---|---|
 | Money in | Clients pay into the **platform's** MoMo or Flutterwave account. They choose MoMo (MTN or Airtel) or **card** (Flutterwave hosted checkout) at checkout. **Card is deferred (user decision, 2026-10-17; Phase 3):** MoMo only until then. |
-| Money out | Each photographer saves one payout destination: MoMo (network, number, account name) or bank (bank, account number, account name). The platform transfers their share **by hand**. **No commission.** A banner says transfer fees are deducted from what they receive, so they should price accordingly. |
+| Money out | Each photographer saves one payout destination: MoMo (network, number, account name) or bank (bank, account number, account name). The platform transfers their share **by hand**. **No commission.** A banner says transfer fees are deducted from what they receive, so they should price accordingly. **Refunds (Phase 4):** a platform admin records the refund of money paid online; the photographer records the refund of cash he collected. |
 | Payout timing | The booking fee is payable as soon as its payment succeeds. The session fee is payable once the session has ended and the booking was not cancelled. A refund after a payout becomes a negative line on the next payout. |
 | Fees and cancellation | **Each photographer decides, with no platform limits:** booking-fee %, lead time, buffer, delivery expiry, and the client cancellation policy (cut-off and whether the booking fee is refunded). One platform rule is assumed: *a photographer who cancels always refunds the booking fee in full* (today's §6.11 behaviour). |
 | Subscription | One plan, **monthly or yearly**, paid by MoMo or card. A **30-day** free trial starts at approval. Reminders go out 7, 3 and 1 days before the period ends. After that, 7 days of `past_due`: the profile stays visible but can't be booked. Then `expired`: hidden from the directory. Existing bookings always carry on. |
@@ -179,7 +179,7 @@ Everything in **`marketplace-data-model.md`** applies; that is the specification
   - a verified webhook (constant-time check of the hash or HMAC over the raw body), or
   - the server calling Flutterwave to verify the transaction, matching `tx_ref`, **amount** and **currency** exactly.
 
-  The existing protections stay as they are: store first, dedupe, forward-only status changes, `amount_mismatch` ignored. (The MoMo webhook rules of T3.3, the currency check included, are built now.)
+  The existing protections stay as they are: store first, dedupe, forward-only status changes, `amount_mismatch` ignored. (Phase 4 makes one exception: a verified success revives a payment we failed ourselves without a provider verdict; see Phase 4 "as built".) (The MoMo webhook rules of T3.3, the currency check included, are built now.)
 - **R3.4** At **initiation and at the claim**, the photographer must be approved with a live subscription. Amounts always come from the booking snapshots (`bookingTotals()`), never from the client.
   - As built (2026-10-17): the booking-fee checkout re-checks bookability (`photographers/bookable.ts`) inside its transaction, after `already_paid` and `hold_expired`. An unbookable photographer is `409 photographer_unavailable`: no payment row, no prompt, the booking untouched, payable again on reactivation. The code names no status, so suspended, pending and (from Phase 5) out of subscription look the same from outside. An attempt started before a suspension still settles through its webhook.
   - **Session fees stay payable.** R5.5 and T9.2 say existing bookings carry on, so the client's session fee for a confirmed or completed booking is **not** refused when the photographer has since been suspended (or is pending again), and neither is the photographer's own request. Only new booking-fee payments are refused.
@@ -202,12 +202,16 @@ Everything in **`marketplace-data-model.md`** applies; that is the specification
 ---
 
 ## Phase 4: Payouts
+> **Refunds follow the money (user decision, Phase 4).** Money paid online (`mtn_momo_direct`, `flutterwave`) sits in the platform's account, so **only a platform admin records its refund**, on `/platform/refunds` (`POST /api/platform/refunds/:paymentId`). The photographer **keeps recording refunds of cash** he was handed, in the studio; the studio refund route refuses anything else as `409 refund_with_platform`, and the studio booking view shows an online `refund_due` as pending with the platform (`refundPendingWithPlatform`). The platform's route refuses cash as `409 cash_payment`. The `refund_due` photographer alert says so for online money. Payouts cover booking and session fees only: a Phase 5 subscription payment never creates a payout item.
+
+> **Overpayments go back from the platform (user decision, Phase 4).** When a client pays a session fee online for more than the booking is worth, the money is in the platform's account. The photographer **earns only what was due**: the earning is `amount_rwf - overpaid_rwf`. The extra is listed on `/api/platform/refunds` as an **overpayment refund** (`refundKind: 'overpayment'`), which a platform admin sends back to the client and records with a reference. The payment itself **stays `succeeded`**. The photographer is told, with nothing to do: the overpayment alert says the platform will return the difference to the client.
+
 **Requirements**
 - **R4.1** `payout_method` is immutable: a change retires the old row and inserts a new one.
   - Changing it **requires the current password** and sends an `account_security_alert` email.
   - The platform's payout screen flags methods changed within the last 72 hours, because redirecting payouts is what an account takeover would aim for.
 - **R4.2** `payout_item`:
-  - an `earning` for every succeeded non-cash booking or session fee (amount = payment amount; no commission)
+  - an `earning` for every succeeded non-cash booking or session fee (amount = payment amount less any overpaid part; no commission)
   - a `refund_due` payment voids its earning if it hasn't been paid out yet, or adds a `reversal` otherwise
 - **R4.3** "Payable now" is calculated each time from the SQL in `marketplace-data-model.md` §3.9, not stored.
 - **R4.4** Platform flow:
@@ -217,12 +221,66 @@ Everything in **`marketplace-data-model.md`** applies; that is the specification
   4. Mark it paid with the transfer reference (required, unique). That emails `payout_sent`.
 - **R4.5** Studio "Earnings" page: pending, payable and paid, each line linked to its booking. The payout-method page and the catalogue price form both show the **transfer-fee banner**.
 - **R4.6** Refunds are recorded on the platform's `/platform/refunds` page (the money is in your account). Recording a refund marks the payment `refunded` with a reference.
+  - Recording an **overpayment refund** sets the payment's `overpayment_*` columns and leaves it `succeeded`.
+
+**As built (Phase 4, stage 1)**
+- **Ledger** (`payouts/ledger.ts`): the only writer of items, called in the transaction that changes the payment.
+  - `recordEarning` runs on every success the webhook path applies (booking fee confirming or re-confirming, session fee, a fee for a booking in no state to take one), so the reconciler earns too. Cash and kinds other than `booking_fee`/`session_fee` are refused.
+  - `recordRefundDue` runs on every move to `refund_due`: client cancel, photographer cancel, and the late slot-taken and duplicate-fee webhooks (which never succeeded, so find nothing to undo). A platform cancel (Phase 9) must call it too.
+  - An earning in a **draft** when its payment is refunded is reversed, not voided, so the draft amount stands. Cancelling that draft voids the earning and its reversal together: neither was ever paid.
+  - **No backfill:** a payment that succeeded before the Phase 4 migration has no earning.
+- **Payable now** is the §3.9 SQL with the app's injected clock in place of `now()`.
+- **Payout method change** (`PUT /api/studio/payout-method`):
+  - The current password check **shares the login lockout**: a wrong password counts as a failed login and the locking attempt sends the `login_lockout` alert. Locked, the answer is `403 password_locked`; a missing or empty password is `403 invalid_password` and is not counted.
+  - Rate-limited per address (`payoutMethodPerIp`, 10 an hour).
+  - Saving the **first** method takes the same path and sends the same alert (worded "added").
+  - The MoMo number must be E.164 Rwandan on its own network's prefixes (MTN 078/079, Airtel 072/073).
+- **72-hour flag:** a method is flagged while its current row is under 72 hours old, a first method included.
+- **Who did what:** a payout records who built, paid and cancelled it, and a payment records who recorded its refund (`refunded_by_user_id`, photographer or platform admin).
+- **Concurrency:**
+  - A build takes a per-photographer advisory lock and locks the items `FOR UPDATE`. A racing refund is ordered against it: void before, reversal after.
+  - Mark-paid and cancel lock the payout row and act on a `draft` only.
+  - The transfer reference is unique, checked first and mapped from `23505`.
+  - **One lock order for a booking's money** (documented in `payments/webhooks.ts` `applyEvent`): the photographer's calendar lock, then the booking row, then its payment rows, then their payout items. Each path takes a prefix in that order. A webhook success matches its payment unlocked, takes the calendar and booking locks, then locks and re-reads the payment. Before this, a success took the payment row first while cash takes the booking first and then the open ask's payment row, and the two could deadlock (`40P01`, a 500 for the photographer). A race test runs a cash recording against a session-fee success, in both orders.
+- **The studio's Earnings page:**
+  - Lines are `pending`, `payable`, `in_draft`, `paid` or `voided`, each with its booking's id and reference.
+  - Payout history shows the draft and paid payouts; a cancelled draft is hidden from the studio.
+  - `GET /api/studio/payouts/:id` reads one, and is in the isolation sweep.
+- **The payout's `note`** (typed at mark-paid) is platform-internal: never in the studio or the email.
+- **Overpayments** (migration `20261017193312_payment_overpayment`; `marketplace-data-model.md` §3.9). The payment gets `overpaid_rwf` and `overpayment_refunded_at`, `overpayment_refund_reference`, `overpayment_refunded_by_user_id`: columns, not a table, because a payment has at most one overpayment and its full refund already lives on the same row.
+  - **Recording it.** The webhook path measures a session fee's overpaid part under the booking's row lock, and sets it in the same update that sets `succeeded`. `recordEarning` then earns `amount_rwf - overpaid_rwf`. A replay never reaches it (the payment is settled), so `overpaid_rwf` is never added twice.
+  - **Wholly extra** (`overpaid >= amount`), for example a stale prompt approved after the balance was paid in cash: the fee is `refund_due` with reason `duplicate_payment`, earns nothing, and is listed as a full refund, like a duplicate booking fee. Its alert names it as a session fee paid after the booking was paid in full. `CHECK payment_overpaid_range` keeps `overpaid_rwf` below the amount.
+  - **A session fee voided by cash and then paid anyway.** Recording cash voids an open ask (`failed`, `superseded_by_cash`), but the client can still approve it. A verified success with matching amount and currency is then the only record that the money reached the platform's account. So it is an exception to forward-only: the payment is revived and measured like any success.
+    - Wholly extra: `refund_due` with reason `duplicate_payment`, `settled_at` and the provider reference set, no earning, the duplicate session-fee alert, and listed as a `full` refund.
+    - Partly due (the cash covered only part of the balance): it succeeds with its overpaid part.
+    - Its `failure_reason` is kept, as the record of why it was voided, and a replay finds it settled and is ignored.
+  - **A late success on an attempt whose provider call failed on our side** (user decision, Phase 4: "count it, refund only if extra"). An attempt we marked `failed` because the call to the provider failed may still have reached the payer. A verified late success (amount and currency matching) revives it, and it takes the success path exactly as a pending payment would:
+    - **Booking fee:** it confirms the booking if the slot is still free (the claim lock and the slot-occupied check, re-confirming an expired booking). If the slot was taken it is `refund_due` `late_payment_slot_taken`; if a retry already paid the fee it is `refund_due` `duplicate_payment`.
+    - **Session fee:** it pays what is still owed, with the overpayment split when partly extra, or is `refund_due` `duplicate_payment` when wholly extra.
+    - Earnings and alerts are as for any success.
+  - **Which failures revive** (`locallyFailed`, payments/webhooks.ts): exactly `superseded_by_cash`, `provider_timeout`, and any reason starting `provider_unavailable: ` (our call errored without a verdict: unreachable, an unreadable answer or 5xx, a token or configuration failure). As a second guard, no FAILED verdict from the provider may have been applied for the payment.
+    - **Never revived:** a rejection the provider answered at initiation (MTN 400/409 as its code or `http_400`/`http_409`, Flutterwave's failure codes, `redirect_required`), our own pre-check refusals (`method_unavailable`, `phone_not_rwandan_mobile`), and any failure the provider reported in a FAILED event. Forward-only stands there, logged as `webhook_success_for_failed_payment`.
+    - A revival is logged as `webhook_success_for_locally_failed_payment` (warn) with its reason, and its `failure_reason` is kept. A replay finds it settled and is ignored.
+    - The reconciler still looks up only payments in progress, so a revival arrives by webhook.
+  - **Totals.** `bookingTotals.collectedRwf` counts each succeeded payment for `amount - overpaid_rwf`. `refundDueRwf` includes overpaid parts not yet returned. Each payment's overpaid part is what is extra after the earlier payments' overpaid parts, so two overpayments never double-count, and an add-on added afterwards asks for new money. The client's receipt still shows what they actually paid (`paidRwf` adds the overpaid part still held) and names the difference.
+  - **A full refund after an overpayment.** `refund_due` covers the overpaid part, so the overpayment entry drops off the list. The earning is voided, or reversed, for its own (reduced) amount. A full refund's `refundAmountRwf` is `amount - overpaid_rwf` when the overpaid part was already returned, and `amount` otherwise; the same figure goes in the cancellation alert and email and in `refundDueRwf`.
+  - **Recording a refund** (`POST /api/platform/refunds/:paymentId { reference, refundedAt?, refundKind? }`) records whichever is pending. **If both could apply, the full refund takes precedence.** It refuses cash (`409 cash_payment`) and a payment with nothing pending (`409 not_refundable`). The optional `refundKind` (beyond the decision, a safety check) must match what is pending, else `409 refund_kind_mismatch { pending }`: an admin who returned the overpaid part from a list that has since changed is never recorded as having refunded the whole payment.
+  - **Online refund references are unique** across `refund_reference` and `overpayment_refund_reference`, full refunds included: a repeat is `409 duplicate_refund_reference`. This is checked under a per-reference advisory lock across both columns, and held by the partial uniques `payment_refund_reference_online_unique` and `payment_overpayment_refund_reference_unique`, with `23505` mapped to the same answer. Cash references are the photographer's own words and stay outside the rule.
+  - **The studio booking view** shows each payment's `overpaidRwf`, `overpaymentRefundPendingWithPlatform`, `overpaymentRefundedAt` and `overpaymentRefundReference`.
+  - **No backfill:** an overpayment taken before the migration has `overpaid_rwf = 0` and its earning at the full amount.
 
 **Test criteria**
 - **T4.1** A succeeded booking fee is payable immediately. A succeeded session fee becomes payable only after `ends_at`, and not if the booking was cancelled. A cash payment creates no item.
 - **T4.2** A refund before payout voids the earning. A refund after payout creates a reversal, and the next payout nets it off.
 - **T4.3** A second draft for the same photographer, marking paid without a reference, or a duplicate reference: each is refused.
 - **T4.4** Photographer A can't read B's earnings or payout method (404). Changing the method without the password gets 403, and the security email is enqueued.
+- **T4.5** Overpayments:
+  - An overpaid success earns only what was due, is listed as an overpayment refund, and recording it removes the entry and keeps the payment `succeeded`.
+  - A replayed webhook adds no second overpaid part.
+  - A wholly extra fee is `refund_due` (including a stale prompt approved after cash).
+  - An add-on after an overpayment asks for new money, and two overpayments do not double-count.
+  - A full refund after an overpayment drops the entry and voids or reverses the earning's own amount. Its refund amount is less the overpaid part only when that part was already returned (both branches).
+  - A duplicate online reference is refused within a kind and across kinds, while cash is unaffected. Cash, nothing pending, and photographer and client tokens are refused.
 
 ---
 

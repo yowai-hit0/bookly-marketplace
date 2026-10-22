@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { type AdminBooking, findAdminBooking } from '../booking/admin-view.js';
 import { completeIfSettled } from '../booking/auto-complete.js';
-import { bookingTotals } from '../booking/totals.js';
+import { bookingTotals, TOTALS_PAYMENT_SELECT } from '../booking/totals.js';
 import { latestSessionFee, moneyMoving, PAYABLE_STATUSES } from './session-fee.js';
 
 /**
@@ -24,8 +24,17 @@ import { latestSessionFee, moneyMoving, PAYABLE_STATUSES } from './session-fee.j
  * money twice: the client's page then shows what is left, if anything, and a
  * payment made there opens a fresh attempt for exactly that.
  *
+ * If the client approves the voided ask anyway, the money has moved: the
+ * provider's success revives it (payments/webhooks.ts, `revivable`),
+ * and what was not due goes back from the platform.
+ *
  * Paid in full after the shoot has begun, the booking completes in the same
  * transaction (item 6, `auto-complete.ts`).
+ *
+ * Cash creates no payout item (marketplace-spec.md R4.2, T4.1): the
+ * photographer was handed the money, so the platform owes him nothing for it,
+ * and this path deliberately never calls `payouts/ledger.ts`. Refunding it is
+ * his to record too (`payments/refund.ts`).
  *
  * Only on the signed-in photographer's own booking (marketplace-spec.md R1.4):
  * the row lock is by id and photographer, so another photographer's booking
@@ -63,7 +72,10 @@ export async function recordCashPayment(deps: CashPaymentDeps, bookingId: string
   const now = deps.now();
 
   const outcome = await prisma.$transaction(async (tx): Promise<Outcome> => {
-    // The lock every money edit takes: the balance read here cannot move.
+    // The lock every money edit takes: the balance read here cannot move. The
+    // booking row first, then its payment rows (`latestSessionFee`, the voiding
+    // below): the lock order in payments/webhooks.ts `applyEvent`, which a
+    // session-fee success follows too, so the two queue and never deadlock.
     const bookings = await tx.$queryRaw<{ id: string; status: string; package_price_rwf: number }[]>`
       SELECT id::text AS id, status, package_price_rwf
         FROM booking
@@ -75,7 +87,7 @@ export async function recordCashPayment(deps: CashPaymentDeps, bookingId: string
 
     const [addons, payments] = await Promise.all([
       tx.bookingAddon.findMany({ where: { bookingId: booking.id }, select: { stage: true, amountRwf: true } }),
-      tx.payment.findMany({ where: { bookingId: booking.id }, select: { status: true, amountRwf: true } }),
+      tx.payment.findMany({ where: { bookingId: booking.id }, select: TOTALS_PAYMENT_SELECT }),
     ]);
     const { outstandingRwf } = bookingTotals({ status: booking.status, packagePriceRwf: booking.package_price_rwf }, addons, payments);
     if (outstandingRwf <= 0) return 'nothing_to_pay';

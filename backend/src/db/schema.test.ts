@@ -29,13 +29,13 @@ beforeEach(async () => {
 /**
  * The 14 single-photographer tables, less `admin_user` and `setting`, plus the
  * nine Phase 1 adds (marketplace-spec.md brief decision 1), plus Phase 2's
- * `oauth_flow` (decision 6). Subscriptions and payouts take it to 27 in later
- * phases.
+ * `oauth_flow` (decision 6), plus Phase 4's `payout_method`, `payout` and
+ * `payout_item`. Subscriptions take it to 27 in Phase 5.
  */
-const APPLICATION_TABLE_COUNT = 22;
+const APPLICATION_TABLE_COUNT = 25;
 
-/** Tables a later phase adds; Phase 1's baseline must not. */
-const LATER_PHASE_TABLES = ['subscription', 'subscription_period', 'payout_method', 'payout', 'payout_item'];
+/** Tables a later phase adds; nothing before Phase 5 may. */
+const LATER_PHASE_TABLES = ['subscription', 'subscription_period'];
 
 type Ids = { photographerId: string; serviceId: string; packageId: string; clientId: string };
 
@@ -142,7 +142,7 @@ const SLOT = { startsAt: NINE, endsAt: TEN, bufferEndsAt: TEN_THIRTY };
 // --- Shape ------------------------------------------------------------------
 
 describe('the schema', () => {
-  it('has 22 application tables (Phase 1 of the marketplace, and Phase 2 oauth_flow) plus Prisma migration history, and no view', async () => {
+  it('has 25 application tables (Phase 1 of the marketplace, Phase 2 oauth_flow, Phase 4 payouts) plus Prisma migration history, and no view', async () => {
     const tables = await db.query<{ tablename: string }>(
       `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`,
     );
@@ -158,7 +158,7 @@ describe('the schema', () => {
     expect(views.rowCount).toBe(0);
   });
 
-  it('leaves subscriptions and payouts to their own phases, and admin_user and setting behind', async () => {
+  it('leaves subscriptions to Phase 5, and admin_user and setting behind', async () => {
     const tables = await db.query<{ tablename: string }>(
       `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1)`,
       [[...LATER_PHASE_TABLES, 'admin_user', 'setting']],
@@ -521,6 +521,279 @@ describe('payment CHECKs', () => {
 
     await insertCash('session_fee');
     expect(await sqlstateOf(db, () => insertCash('booking_fee'))).toBe('23514');
+  });
+});
+
+// --- Payouts (Phase 4; marketplace-data-model.md §3.8-§3.11, §7) ------------------
+
+describe('payouts', () => {
+  type PayoutWorld = Ids & { bookingId: string; paymentId: string; adminId: string; methodId: string };
+
+  /** A world, its booking, a succeeded payment, a platform admin and a current MoMo method. */
+  async function payoutWorld(handle = 'studio-a', reference = 'BKY-2610-AAAAA', first?: Ids): Promise<PayoutWorld> {
+    const ids = first === undefined ? await insertWorld(handle) : await insertSecondWorld(first, handle);
+    const bookingId = await insertBooking(ids, reference, SLOT);
+    const payment = await db.query<{ id: string }>(
+      `INSERT INTO payment (booking_id, kind, provider, amount_rwf, status) VALUES ($1, 'booking_fee', 'mtn_momo_direct', 16000, 'succeeded') RETURNING id`,
+      [bookingId],
+    );
+    const admin = await db.query<{ id: string }>(`INSERT INTO app_user (email, role, password_hash) VALUES ($1, 'platform_admin', 'x') RETURNING id`, [
+      `admin-${handle}@example.com`,
+    ]);
+    const methodId = await insertMethod(ids.photographerId);
+    return { ...ids, bookingId, paymentId: firstRow(payment).id, adminId: firstRow(admin).id, methodId };
+  }
+
+  async function insertMethod(photographerId: string, overrides: Record<string, string | null> = {}): Promise<string> {
+    const row = { kind: 'momo', momo_network: 'mtn', momo_number: '+250788123456', bank_name: null, bank_account_number: null, account_name: 'Studio A', ...overrides };
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO payout_method (photographer_id, kind, momo_network, momo_number, bank_name, bank_account_number, account_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [photographerId, row.kind, row.momo_network, row.momo_number, row.bank_name, row.bank_account_number, row.account_name],
+    );
+    return firstRow(result).id;
+  }
+
+  async function insertPayout(w: { photographerId: string; methodId: string; adminId: string }): Promise<string> {
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO payout (photographer_id, amount_rwf, payout_method_id, created_by_user_id) VALUES ($1, 16000, $2, $3) RETURNING id`,
+      [w.photographerId, w.methodId, w.adminId],
+    );
+    return firstRow(result).id;
+  }
+
+  const markPaid = (payoutId: string, adminId: string, reference = 'MTN-1') =>
+    db.query(`UPDATE payout SET status = 'paid', transfer_reference = $3, paid_at = now(), paid_by_user_id = $2 WHERE id = $1`, [payoutId, adminId, reference]);
+
+  const insertItem = (w: { photographerId: string; paymentId: string }, kind: string, amount: number, payoutId: string | null = null, voided = false) =>
+    db.query(
+      `INSERT INTO payout_item (photographer_id, payment_id, kind, amount_rwf, payout_id, voided_at)
+       VALUES ($1, $2, $3, $4, $5, CASE WHEN $6::boolean THEN now() END)`,
+      [w.photographerId, w.paymentId, kind, amount, payoutId, voided],
+    );
+
+  it('has every partial unique and the unpaid-items index, by name and predicate', async () => {
+    const result = await db.query<{ indexname: string; indexdef: string }>(`SELECT indexname, indexdef FROM pg_indexes WHERE indexname = ANY($1)`, [
+      ['payout_method_one_current', 'payout_one_draft', 'payout_transfer_reference_unique', 'payout_item_unpaid_idx'],
+    ]);
+    const defs = Object.fromEntries(result.rows.map((row) => [row.indexname, row.indexdef]));
+    expect(defs.payout_method_one_current).toMatch(/UNIQUE.*\(photographer_id\) WHERE \(retired_at IS NULL\)/);
+    expect(defs.payout_one_draft).toMatch(/UNIQUE.*\(photographer_id\) WHERE \(status = 'draft'::text\)/);
+    expect(defs.payout_transfer_reference_unique).toMatch(/UNIQUE.*\(transfer_reference\) WHERE \(transfer_reference IS NOT NULL\)/);
+    expect(defs.payout_item_unpaid_idx).toMatch(/\(photographer_id\) WHERE \(\(payout_id IS NULL\) AND \(voided_at IS NULL\)\)/);
+    expect(defs.payout_item_unpaid_idx).not.toMatch(/UNIQUE/);
+  });
+
+  it('holds the sign to the kind: an earning positive, a reversal negative, nothing at nought', async () => {
+    const w = await payoutWorld();
+    expect(await sqlstateOf(db, () => insertItem(w, 'earning', -16000))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertItem(w, 'reversal', 16000))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertItem(w, 'earning', 0))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertItem(w, 'commission', 100))).toBe('23514');
+    await insertItem(w, 'earning', 16000);
+    await insertItem(w, 'reversal', -16000);
+  });
+
+  it('allows one earning and one reversal per payment (@@unique([paymentId, kind]))', async () => {
+    const w = await payoutWorld();
+    await insertItem(w, 'earning', 16000);
+    expect(await sqlstateOf(db, () => insertItem(w, 'earning', 16000))).toBe('23505');
+    await insertItem(w, 'reversal', -16000);
+    expect(await sqlstateOf(db, () => insertItem(w, 'reversal', -16000))).toBe('23505');
+  });
+
+  it('refuses an item both voided and in a payout', async () => {
+    const w = await payoutWorld();
+    const payoutId = await insertPayout(w);
+    expect(await sqlstateOf(db, () => insertItem(w, 'earning', 16000, payoutId, true))).toBe('23514');
+    await insertItem(w, 'earning', 16000, payoutId, false);
+  });
+
+  it('refuses a paid payout without a reference, a paid time or who paid it, and a reference on an unpaid one', async () => {
+    const w = await payoutWorld();
+    const payoutId = await insertPayout(w);
+    const pay = (set: string, params: unknown[]) => sqlstateOf(db, () => db.query(`UPDATE payout SET status = 'paid', ${set} WHERE id = $1`, [payoutId, ...params]));
+
+    expect(await pay('paid_at = now(), paid_by_user_id = $2', [w.adminId])).toBe('23514');
+    expect(await pay(`transfer_reference = 'MTN-1', paid_by_user_id = $2`, [w.adminId])).toBe('23514');
+    expect(await pay(`transfer_reference = 'MTN-1', paid_at = now()`, [])).toBe('23514');
+    expect(await sqlstateOf(db, () => db.query(`UPDATE payout SET transfer_reference = 'MTN-1' WHERE id = $1`, [payoutId]))).toBe('23514');
+    expect(await sqlstateOf(db, () => db.query(`UPDATE payout SET transfer_reference = '' WHERE id = $1`, [payoutId]))).toBe('23514');
+    expect(await pay(`transfer_reference = 'MTN-1', paid_at = now(), paid_by_user_id = $2`, [w.adminId])).toBeUndefined();
+  });
+
+  it('refuses a cancelled payout without its date or who cancelled it', async () => {
+    const w = await payoutWorld();
+    const payoutId = await insertPayout(w);
+    const cancel = (set: string, params: unknown[]) =>
+      sqlstateOf(db, () => db.query(`UPDATE payout SET status = 'cancelled', ${set} WHERE id = $1`, [payoutId, ...params]));
+
+    expect(await cancel('cancelled_by_user_id = $2', [w.adminId])).toBe('23514');
+    expect(await cancel('cancelled_at = now()', [])).toBe('23514');
+    expect(await cancel('cancelled_at = now(), cancelled_by_user_id = $2', [w.adminId])).toBeUndefined();
+  });
+
+  it('refuses a payout of nought or less, and a status outside the vocabulary', async () => {
+    const w = await payoutWorld();
+    const payoutId = await insertPayout(w);
+    expect(await sqlstateOf(db, () => db.query('UPDATE payout SET amount_rwf = 0 WHERE id = $1', [payoutId]))).toBe('23514');
+    expect(await sqlstateOf(db, () => db.query(`UPDATE payout SET status = 'sent' WHERE id = $1`, [payoutId]))).toBe('23514');
+  });
+
+  it('allows one draft per photographer, and another once it is paid', async () => {
+    const w = await payoutWorld();
+    const first = await insertPayout(w);
+    expect(await sqlstateOf(db, () => insertPayout(w))).toBe('23505');
+    await markPaid(first, w.adminId);
+    await insertPayout(w);
+  });
+
+  it('uses a transfer reference once, across photographers', async () => {
+    const a = await payoutWorld();
+    const b = await payoutWorld('studio-b', 'BKY-2610-BBBBB', a);
+    await markPaid(await insertPayout(a), a.adminId, 'MTN-SAME');
+    const other = await insertPayout(b);
+    expect(await sqlstateOf(db, () => markPaid(other, b.adminId, 'MTN-SAME'))).toBe('23505');
+  });
+
+  it('allows one current method per photographer; retiring it frees the slot', async () => {
+    const w = await payoutWorld();
+    expect(await sqlstateOf(db, () => insertMethod(w.photographerId))).toBe('23505');
+    await db.query('UPDATE payout_method SET retired_at = now() WHERE id = $1', [w.methodId]);
+    await insertMethod(w.photographerId, { kind: 'bank', momo_network: null, momo_number: null, bank_name: 'Bank of Kigali', bank_account_number: '00040-1' });
+  });
+
+  it('holds a method to its shape per kind, its network, its number format and its name length', async () => {
+    const w = await payoutWorld();
+    await db.query('UPDATE payout_method SET retired_at = now() WHERE id = $1', [w.methodId]);
+    const refused: Record<string, string | null>[] = [
+      { momo_number: null },
+      { bank_name: 'Bank of Kigali' },
+      { kind: 'bank', momo_network: null, momo_number: null, bank_name: 'BK', bank_account_number: null },
+      { kind: 'bank', bank_name: 'BK', bank_account_number: '12345' },
+      { kind: 'paypal' },
+      { momo_network: 'tigo' },
+      { momo_number: '0788123456' },
+      { momo_number: '+254712345678' },
+      { account_name: '' },
+      { account_name: 'x'.repeat(121) },
+    ];
+    for (const overrides of refused) {
+      expect(await sqlstateOf(db, () => insertMethod(w.photographerId, overrides)), JSON.stringify(overrides)).toBe('23514');
+    }
+  });
+
+  it("refuses a payout to another photographer's method (composite foreign key)", async () => {
+    const a = await payoutWorld();
+    const b = await payoutWorld('studio-b', 'BKY-2610-BBBBB', a);
+    expect(await sqlstateOf(db, () => insertPayout({ photographerId: a.photographerId, methodId: b.methodId, adminId: a.adminId }))).toBe('23503');
+  });
+
+  it('records who refunded only on a refunded payment', async () => {
+    const w = await payoutWorld();
+    expect(await sqlstateOf(db, () => db.query('UPDATE payment SET refunded_by_user_id = $2 WHERE id = $1', [w.paymentId, w.adminId]))).toBe('23514');
+    await db.query(`UPDATE payment SET status = 'refunded', refunded_at = now(), refunded_by_user_id = $2 WHERE id = $1`, [w.paymentId, w.adminId]);
+  });
+
+  // --- Overpayments (Phase 4 overpayment decision) ---
+
+  /** A succeeded payment on the world's booking; a session fee paid online unless told otherwise. */
+  async function insertPaid(w: PayoutWorld, seed: { kind?: string; provider?: string; amount?: number; overpaid?: number; status?: string } = {}): Promise<string> {
+    const result = await db.query<{ id: string }>(
+      `INSERT INTO payment (booking_id, kind, provider, amount_rwf, overpaid_rwf, status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [w.bookingId, seed.kind ?? 'session_fee', seed.provider ?? 'mtn_momo_direct', seed.amount ?? 40000, seed.overpaid ?? 0, seed.status ?? 'succeeded'],
+    );
+    return firstRow(result).id;
+  }
+
+  const recordOverpaymentRefund = (paymentId: string, adminId: string, reference = 'MTN-OVER-1') =>
+    db.query(
+      `UPDATE payment SET overpayment_refunded_at = now(), overpayment_refund_reference = $3, overpayment_refunded_by_user_id = $2 WHERE id = $1`,
+      [paymentId, adminId, reference],
+    );
+
+  it('has both refund-reference partial uniques, by name and predicate', async () => {
+    const result = await db.query<{ indexname: string; indexdef: string }>(`SELECT indexname, indexdef FROM pg_indexes WHERE indexname = ANY($1)`, [
+      ['payment_refund_reference_online_unique', 'payment_overpayment_refund_reference_unique'],
+    ]);
+    const defs = Object.fromEntries(result.rows.map((row) => [row.indexname, row.indexdef]));
+    expect(defs.payment_refund_reference_online_unique).toMatch(
+      /UNIQUE.*\(refund_reference\) WHERE \(\(refund_reference IS NOT NULL\) AND \(provider <> 'cash'::text\)\)/,
+    );
+    expect(defs.payment_overpayment_refund_reference_unique).toMatch(/UNIQUE.*\(overpayment_refund_reference\) WHERE \(overpayment_refund_reference IS NOT NULL\)/);
+  });
+
+  it('defaults overpaid_rwf to nought, and holds it at or above nought and below the amount', async () => {
+    const w = await payoutWorld();
+    expect((await db.query<{ overpaid_rwf: number }>('SELECT overpaid_rwf FROM payment WHERE id = $1', [w.paymentId])).rows[0]?.overpaid_rwf).toBe(0);
+    expect(await sqlstateOf(db, () => insertPaid(w, { overpaid: -1 }))).toBe('23514');
+    // Wholly extra is refund_due, never an overpayment of the whole amount.
+    expect(await sqlstateOf(db, () => insertPaid(w, { amount: 40000, overpaid: 40000 }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPaid(w, { amount: 40000, overpaid: 39999 }))).toBeUndefined();
+  });
+
+  it('lets only an online session fee be overpaid', async () => {
+    const w = await payoutWorld();
+    expect(await sqlstateOf(db, () => insertPaid(w, { provider: 'cash', overpaid: 1000 }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPaid(w, { kind: 'booking_fee', status: 'failed', overpaid: 1000 }))).toBe('23514');
+    expect(await sqlstateOf(db, () => insertPaid(w, { provider: 'flutterwave', overpaid: 1000 }))).toBeUndefined();
+  });
+
+  it('records an overpayment refund whole -- when, the reference and who -- and only on an overpaid payment', async () => {
+    const w = await payoutWorld();
+    const overpaid = await insertPaid(w, { overpaid: 10000 });
+    const exact = await insertPaid(w);
+    const partly = (set: string, params: unknown[]) => sqlstateOf(db, () => db.query(`UPDATE payment SET ${set} WHERE id = $1`, [overpaid, ...params]));
+
+    expect(await partly('overpayment_refund_reference = $2', ['MTN-OVER-1'])).toBe('23514');
+    expect(await partly('overpayment_refunded_at = now(), overpayment_refund_reference = $2', ['MTN-OVER-1'])).toBe('23514');
+    expect(await partly('overpayment_refunded_at = now(), overpayment_refunded_by_user_id = $2', [w.adminId])).toBe('23514');
+    expect(await sqlstateOf(db, () => recordOverpaymentRefund(exact, w.adminId))).toBe('23514');
+    expect(await sqlstateOf(db, () => recordOverpaymentRefund(overpaid, w.adminId, ''))).toBe('23514');
+    expect(await sqlstateOf(db, () => recordOverpaymentRefund(overpaid, w.adminId))).toBeUndefined();
+  });
+
+  it('uses an online refund reference once in each column, and leaves cash references free', async () => {
+    const w = await payoutWorld();
+    const refund = (paymentId: string, reference: string) =>
+      db.query(`UPDATE payment SET status = 'refunded', refunded_at = now(), refund_reference = $2 WHERE id = $1`, [paymentId, reference]);
+    const online = [await insertPaid(w, { status: 'refund_due' }), await insertPaid(w, { status: 'refund_due', provider: 'flutterwave' })];
+    const cash = [await insertPaid(w, { status: 'refund_due', provider: 'cash' }), await insertPaid(w, { status: 'refund_due', provider: 'cash' })];
+
+    await refund(online[0] ?? '', 'REF-1');
+    expect(await sqlstateOf(db, () => refund(online[1] ?? '', 'REF-1'))).toBe('23505');
+    // Cash is the photographer's own words: the same twice, and the same as an online refund's.
+    expect(await sqlstateOf(db, () => refund(cash[0] ?? '', 'REF-1'))).toBeUndefined();
+    expect(await sqlstateOf(db, () => refund(cash[1] ?? '', 'REF-1'))).toBeUndefined();
+
+    const overpaid = [await insertPaid(w, { overpaid: 10000 }), await insertPaid(w, { overpaid: 5000 })];
+    await recordOverpaymentRefund(overpaid[0] ?? '', w.adminId, 'OVER-1');
+    expect(await sqlstateOf(db, () => recordOverpaymentRefund(overpaid[1] ?? '', w.adminId, 'OVER-1'))).toBe('23505');
+  });
+
+  it('restricts deleting the admin who recorded an overpayment refund', async () => {
+    const w = await payoutWorld();
+    const overpaid = await insertPaid(w, { overpaid: 10000 });
+    await recordOverpaymentRefund(overpaid, w.adminId);
+    // The payout world's own rows name no admin; this one does.
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM app_user WHERE id = $1', [w.adminId]))).toBe('23503');
+  });
+
+  it('restricts deletes of a payment, payout, method, admin or photographer that money-out rows name', async () => {
+    const w = await payoutWorld();
+    const payoutId = await insertPayout(w);
+    await insertItem(w, 'earning', 16000, payoutId);
+
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM payment WHERE id = $1', [w.paymentId]))).toBe('23503');
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM payout WHERE id = $1', [payoutId]))).toBe('23503');
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM payout_method WHERE id = $1', [w.methodId]))).toBe('23503');
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM app_user WHERE id = $1', [w.adminId]))).toBe('23503');
+
+    // With everything else of theirs gone, the payout method alone still holds the photographer.
+    for (const table of ['payout_item', 'payout', 'payment', 'booking', 'package', 'service']) await db.query(`DELETE FROM ${table}`);
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM photographer WHERE id = $1', [w.photographerId]))).toBe('23503');
+    await db.query('DELETE FROM payout_method');
+    expect(await sqlstateOf(db, () => db.query('DELETE FROM photographer WHERE id = $1', [w.photographerId]))).toBeUndefined();
   });
 });
 

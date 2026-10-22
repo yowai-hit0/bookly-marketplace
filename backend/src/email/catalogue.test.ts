@@ -85,14 +85,15 @@ describe('outbox_template_allowed and the templates', () => {
     }
   });
 
-  it('there are twenty files: the thirteen before the marketplace, with admin_alert split in two, the three account emails and the three moderation emails', () => {
+  it('there are twenty-one files: the thirteen before the marketplace, with admin_alert split in two, the three account emails, the three moderation emails and payout_sent', () => {
     // 13 - admin_alert + photographer_alert + platform_alert + account_password_reset + account_security_alert;
     // admin_new_booking is renamed photographer_new_booking. Phase 2 makes
     // photographer_approved and photographer_suspended sendable (decision 7),
     // then account_verify_email (decision 3) and photographer_application_received (decision 4).
-    expect(templateFiles()).toHaveLength(20);
+    // Phase 4 makes payout_sent sendable (R4.4).
+    expect(templateFiles()).toHaveLength(21);
     expect(EMAIL_TEMPLATES).toHaveLength(24);
-    expect(RESERVED_EMAIL_TEMPLATES).toHaveLength(4);
+    expect(RESERVED_EMAIL_TEMPLATES).toHaveLength(3);
   });
 
   it('no longer has an admin_alert or admin_new_booking, in the CHECK or on disk', async () => {

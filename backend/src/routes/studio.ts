@@ -11,6 +11,7 @@ import { blocksRouter, workingHoursRouter } from './studio-availability.js';
 import { studioBookingsRouter } from './studio-bookings.js';
 import { calendarRouter } from './studio-calendar.js';
 import { catalogueRouter } from './studio-catalogue.js';
+import { studioPayoutsRouter } from './studio-payouts.js';
 import { settingsRouter } from './studio-settings.js';
 import { parseOrReject } from './validation.js';
 
@@ -99,6 +100,9 @@ export function studioRouter(deps: StudioRouterDeps): Router {
 
   // Catalogue CMS (Task 10).
   router.use(catalogueRouter(deps.prisma, deps.now));
+
+  // Earnings, payouts and the payout method (Phase 4: R4.1, R4.5).
+  router.use(studioPayoutsRouter(deps));
 
   return router;
 }

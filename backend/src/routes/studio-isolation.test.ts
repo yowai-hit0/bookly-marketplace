@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { issueToken } from '../auth/token.js';
 import { createPrismaClient } from '../db/client.js';
+import { recordEarning } from '../payouts/ledger.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
 import { loadSpec, scanRoutes, specOperations } from '../test/openapi.js';
 import {
@@ -38,12 +39,14 @@ import {
  *
  * B's rows are in the states that would let each action succeed -- a confirmed
  * booking whose shoot has begun and which still owes money, a completed one
- * with a delivery link, a payment flagged `refund_due`, a removable post-shoot
- * line -- so a scope that leaked would show up as a 200 and a changed row, not
- * hide behind a 409.
+ * with a delivery link, a cash payment flagged `refund_due` (the only refund
+ * the studio records since Phase 4), a removable post-shoot line, a paid payout
+ * -- so a scope that leaked would show up as a 200 and a changed row, not hide
+ * behind a 409.
  *
  * The list endpoints are swept the other way: A's bookings, calendar, blocks,
- * hours and catalogue hold A's rows and none of B's.
+ * hours, catalogue, earnings and payout method hold A's rows and none of B's
+ * (marketplace-spec.md T4.4).
  */
 
 let prisma: PrismaClient;
@@ -55,7 +58,7 @@ let a: PaymentWorld;
 /** Photographer B, whose ids A names. */
 let b: PaymentWorld;
 let theirs: TheirIds;
-let mine: { bookingId: string; reference: string; blockId: string; hoursId: string };
+let mine: { bookingId: string; reference: string; blockId: string; hoursId: string; payoutId: string; payoutMethodId: string };
 
 const WEB_ORIGIN = 'https://admin.bookly.example';
 /** After every fixture shoot below has begun. */
@@ -72,8 +75,16 @@ type TheirIds = {
   /** A post-shoot line nobody has paid for: removable. */
   bookingAddonId: string;
   noteId: string;
-  /** Flagged `refund_due`: refundable. */
+  /** Cash flagged `refund_due`: refundable in the studio. */
   paymentId: string;
+  /** A paid payout of B's, with one earning in it (Phase 4). */
+  payoutId: string;
+  /** B's earning line, and the online fee it is for. */
+  payoutItemId: string;
+  earningPaymentId: string;
+  /** B's current payout method, and its MoMo number. */
+  payoutMethodId: string;
+  momoNumber: string;
   serviceId: string;
   packageId: string;
   ownAddonId: string;
@@ -121,8 +132,9 @@ async function seedTheirs(world: PaymentWorld): Promise<TheirIds> {
     where: { id: completed.id },
     data: { deliveryUrl: 'https://photos.example-host.com/s/theirs', deliveryExpiresOn: new Date('2027-09-01T00:00:00Z') },
   });
-  await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
-  const payment = await insertPayment(prisma, completed.id, { status: 'refund_due', amountRwf: 20_000 });
+  const fee = await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
+  const payment = await insertPayment(prisma, completed.id, { status: 'refund_due', kind: 'session_fee', provider: 'cash', amountRwf: 20_000 });
+  const payouts = await paidPayout(world, fee.id, 'THEIR-TRANSFER', '+250788000999');
   const line = await prisma.bookingAddon.create({
     data: { bookingId: booking.id, addonId: world.ownAddonId, nameSnapshot: 'Extra hour', unitPriceRwf: 10_000, amountRwf: 10_000, stage: 'post_shoot' },
   });
@@ -144,7 +156,35 @@ async function seedTheirs(world: PaymentWorld): Promise<TheirIds> {
     sharedAddonId: world.sharedAddonId,
     blockId: block.id,
     hoursId: hours.id,
+    payoutId: payouts.payoutId,
+    payoutItemId: payouts.itemId,
+    earningPaymentId: fee.id,
+    payoutMethodId: payouts.methodId,
+    momoNumber: '+250788000999',
   };
+}
+
+/** The fee's earning, a current MoMo method, and a paid payout holding the earning. */
+async function paidPayout(world: PaymentWorld, paymentId: string, reference: string, momoNumber: string) {
+  await prisma.$transaction((tx) => recordEarning(tx, paymentId));
+  const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
+  const method = await prisma.payoutMethod.create({
+    data: { photographerId: world.photographerId, kind: 'momo', momoNetwork: 'mtn', momoNumber, accountName: `Account ${reference}` },
+  });
+  const payout = await prisma.payout.create({
+    data: {
+      photographerId: world.photographerId,
+      status: 'paid',
+      amountRwf: 20_000,
+      payoutMethodId: method.id,
+      createdByUserId: admin.id,
+      transferReference: reference,
+      paidAt: NOW,
+      paidByUserId: admin.id,
+    },
+  });
+  const item = await prisma.payoutItem.update({ where: { paymentId_kind: { paymentId, kind: 'earning' } }, data: { payoutId: payout.id } });
+  return { payoutId: payout.id, itemId: item.id, methodId: method.id };
 }
 
 async function seedMine(world: PaymentWorld) {
@@ -154,7 +194,9 @@ async function seedMine(world: PaymentWorld) {
     data: { ...owner, startsAt: new Date('2027-05-03T12:00:00Z'), endsAt: new Date('2027-05-03T14:00:00Z') },
   });
   const hours = await prisma.workingHours.create({ data: { ...owner, weekday: 1, opensMinute: 540, closesMinute: 1020 } });
-  return { bookingId: booking.id, reference: booking.reference, blockId: block.id, hoursId: hours.id };
+  const fee = await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
+  const payouts = await paidPayout(world, fee.id, 'MY-TRANSFER', '+250788000111');
+  return { bookingId: booking.id, reference: booking.reference, blockId: block.id, hoursId: hours.id, payoutId: payouts.payoutId, payoutMethodId: payouts.methodId };
 }
 
 /**
@@ -177,6 +219,10 @@ async function rowsOf(photographerId: string): Promise<Record<string, unknown[]>
     working_hours: owned('working_hours'),
     availability_block: owned('availability_block'),
     photographer_setting: 'SELECT * FROM photographer_setting WHERE photographer_id = $1',
+    // Phase 4: money out.
+    payout_method: owned('payout_method'),
+    payout: owned('payout'),
+    payout_item: owned('payout_item'),
   };
   const rows: Record<string, unknown[]> = {};
   for (const [table, sql] of Object.entries(queries)) rows[table] = (await raw.query(sql, [photographerId])).rows;
@@ -237,7 +283,12 @@ const SWEEP: Record<string, Case[]> = {
     { label: 'their booking and note', params: (ids) => ({ id: ids.bookingId, noteId: ids.noteId }) },
     { label: 'my booking, their note', params: (ids) => ({ id: mine.bookingId, noteId: ids.noteId }) },
   ],
-  'POST /api/studio/payments/:id/refund': [{ label: 'their payment', params: (ids) => ({ id: ids.paymentId }), body: { reference: 'MOMO-123456' } }],
+  'POST /api/studio/payments/:id/refund': [
+    { label: 'their cash payment', params: (ids) => ({ id: ids.paymentId }), body: { reference: 'MOMO-123456' } },
+    { label: 'their online payment', params: (ids) => ({ id: ids.earningPaymentId }), body: { reference: 'MOMO-123456' } },
+  ],
+  // Phase 4 (T4.4).
+  'GET /api/studio/payouts/:id': [{ label: 'their paid payout', params: (ids) => ({ id: ids.payoutId }) }],
   'PATCH /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }), body: { nameEn: 'Mine now', isActive: false } }],
   'DELETE /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }) }],
   'PATCH /api/studio/packages/:id': [{ label: 'their package', params: (ids) => ({ id: ids.packageId }), body: { priceRwf: 1 } }],
@@ -336,8 +387,14 @@ describe('A’s lists never hold B’s rows', () => {
       theirs.sharedAddonId,
       theirs.blockId,
       theirs.hoursId,
+      theirs.payoutId,
+      theirs.payoutItemId,
+      theirs.earningPaymentId,
+      theirs.payoutMethodId,
+      theirs.momoNumber,
       'THEIR-NOTE',
       'THEIR-BLOCK',
+      'THEIR-TRANSFER',
     ];
   }
 
@@ -352,6 +409,8 @@ describe('A’s lists never hold B’s rows', () => {
     ['the blocks', '/api/studio/blocks'],
     ['the working hours', '/api/studio/working-hours'],
     ['the catalogue', '/api/studio/catalogue'],
+    ['the earnings (T4.4)', '/api/studio/earnings'],
+    ['the payout method (T4.4)', '/api/studio/payout-method'],
   ])('%s', async (_label, path) => {
     const res = await get(path);
 
@@ -366,6 +425,10 @@ describe('A’s lists never hold B’s rows', () => {
     expect((await get('/api/studio/working-hours')).text).toContain(mine.hoursId);
     const catalogue = (await get('/api/studio/catalogue')).text;
     for (const id of [a.serviceId, a.packageId, a.ownAddonId, a.sharedAddonId]) expect(catalogue).toContain(id);
+    const earnings = (await get('/api/studio/earnings')).text;
+    for (const mark of [mine.payoutId, 'MY-TRANSFER', mine.reference]) expect(earnings).toContain(mark);
+    expect((await get('/api/studio/payout-method')).text).toContain(mine.payoutMethodId);
+    expect((await get(`/api/studio/payouts/${mine.payoutId}`)).status).toBe(200);
   });
 
   it('never finds B’s booking by searching for it, by reference or by the client both share', async () => {

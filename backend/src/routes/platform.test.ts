@@ -237,7 +237,8 @@ describe('who the platform admits', () => {
   /** Every non-auth platform operation in the spec, with its parameters filled in. */
   async function platformRoutes(): Promise<{ method: 'get' | 'post'; path: string }[]> {
     const operations = specOperations(await loadSpec()).filter((op) => op.path.startsWith('/api/platform/') && !op.path.startsWith('/api/platform/auth/'));
-    return operations.map((op) => ({ method: op.method as 'get' | 'post', path: op.path.replace(':id', world.photographerId) }));
+    // Every path parameter (`:id`, `:paymentId`) gets a real row's id, so a leak would act on something.
+    return operations.map((op) => ({ method: op.method as 'get' | 'post', path: op.path.replace(/:\w+/g, world.photographerId) }));
   }
 
   async function forged(user: AppUser, aud: string, role: string): Promise<string> {
@@ -253,7 +254,8 @@ describe('who the platform admits', () => {
   }
 
   it('covers every platform route the spec declares', async () => {
-    expect((await platformRoutes()).length).toBe(5);
+    // Moderation (5) and Phase 4's payouts and refunds (8).
+    expect((await platformRoutes()).length).toBe(13);
   });
 
   it.each<[string, () => Promise<string | null>, 'invalid_token' | undefined]>([

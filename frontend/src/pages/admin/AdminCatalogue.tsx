@@ -28,6 +28,7 @@ import { EYEBROW, META, PAGE, SECTION_TITLE } from './console/classes'
 import { LoadingRegion, PanelSkeleton } from './console/Skeletons'
 import { PageHeader } from './console/PageHeader'
 import { EntityForm, type FieldSpec } from './EntityForm'
+import { TransferFeeNotice } from './console/TransferFeeNotice'
 import { FormDialog } from './console/FormDialog'
 
 /**
@@ -290,6 +291,7 @@ export function AdminCatalogue() {
             fields={PACKAGE_FIELDS}
             values={packageFormValues(pkg)}
             schema={packageFormSchema}
+            notice={<TransferFeeNotice />}
             onSave={(payload) => saved(catalogueApi.updatePackage(pkg.id, payload).then(rememberWarning))}
             onCancel={() => setEditing(null)}
           />,
@@ -436,6 +438,7 @@ export function AdminCatalogue() {
                 fields={PACKAGE_FIELDS}
                 values={packageFormValues()}
                 schema={packageFormSchema}
+                notice={<TransferFeeNotice />}
                 onSave={(payload) =>
                   saved(catalogueApi.createPackage({ ...payload, serviceId: service.id }).then(rememberWarning))
                 }

@@ -516,7 +516,20 @@ describe('what the route answers', () => {
     expect(await events()).toMatchObject([{ our_ref: unknown, status: 'ignored', processing_error: 'no_matching_payment', signature_valid: true }]);
   });
 
-  it('200 and nothing changes for a success on a payment already failed', async () => {
+  it('200 and nothing changes for a success on a payment the provider refused', async () => {
+    const mtn = fakeMtn();
+    const app = appWith(mtn.provider);
+    const booking = await insertBooking(prisma, world);
+    const failed = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'http_400' });
+
+    expectReceived(await callback(app, callbackPath(mtn.provider, failed.ourRef), mtnStatusBody(failed.ourRef, 'SUCCESSFUL')));
+
+    expect(await events()).toMatchObject([{ status: 'ignored', processing_error: 'payment_failed' }]);
+    expect(await rows('SELECT status, failure_reason FROM payment')).toEqual([{ status: 'failed', failure_reason: 'http_400' }]);
+    expect((await bookingStatus(booking.reference)).status).toBe('pending_payment');
+  });
+
+  it('200 and a confirmed booking for a late success on an attempt whose call timed out on our side', async () => {
     const mtn = fakeMtn();
     const app = appWith(mtn.provider);
     const booking = await insertBooking(prisma, world);
@@ -524,9 +537,9 @@ describe('what the route answers', () => {
 
     expectReceived(await callback(app, callbackPath(mtn.provider, failed.ourRef), mtnStatusBody(failed.ourRef, 'SUCCESSFUL')));
 
-    expect(await events()).toMatchObject([{ status: 'ignored', processing_error: 'payment_failed' }]);
-    expect(await rows('SELECT status, failure_reason FROM payment')).toEqual([{ status: 'failed', failure_reason: 'provider_timeout' }]);
-    expect((await bookingStatus(booking.reference)).status).toBe('pending_payment');
+    expect(await events()).toMatchObject([{ status: 'applied' }]);
+    expect(await rows('SELECT status, failure_reason FROM payment')).toEqual([{ status: 'succeeded', failure_reason: 'provider_timeout' }]);
+    expect((await bookingStatus(booking.reference)).status).toBe('confirmed');
   });
 
   it('200 and a re-confirmed booking for a late success whose slot is free', async () => {

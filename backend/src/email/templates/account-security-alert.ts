@@ -18,8 +18,14 @@ import { type EmailContext, defineTemplate, instant, siteUrl, tr } from './share
  *                   the existing account's own sign-in page, in `area`. The
  *                   signup itself answered exactly as for a new address.
  *
- * Phase 4 adds a changed payout method (R4.1). `login_lockout` was a variant of
- * `admin_alert` before the marketplace, with the same payload.
+ *   payout_method_changed  the studio's payout destination was saved
+ *                   (marketplace-spec.md R4.1, T4.4): `replaced` says whether one
+ *                   was replaced or this is the first. Names the network or bank
+ *                   and the last four digits only, and says what to do if it
+ *                   was not them. Its button goes to the payout-method page.
+ *
+ * `login_lockout` was a variant of `admin_alert` before the marketplace, with
+ * the same payload.
  */
 
 const loginLockout = z.object({
@@ -34,12 +40,52 @@ const accountExists = z.object({
   area: z.enum(AUTH_AREAS),
 });
 
+/** What payouts/method.ts `maskedDestination` puts in the payload. */
+export const maskedDestination = z.object({
+  kind: z.enum(['momo', 'bank']),
+  /** The MoMo network (`mtn`, `airtel`) or the bank's name. */
+  provider: z.string().trim().min(1).max(100),
+  last4: z.string().regex(/^[0-9A-Za-z]{1,4}$/),
+});
+
+const payoutMethodChanged = z.object({
+  variant: z.literal('payout_method_changed'),
+  area: z.literal('studio').default('studio'),
+  replaced: z.boolean(),
+  changedAt: instant,
+  destination: maskedDestination,
+});
+
 export const accountSecurityAlert = defineTemplate({
-  payload: z.discriminatedUnion('variant', [loginLockout, accountExists]),
+  payload: z.discriminatedUnion('variant', [loginLockout, accountExists, payoutMethodChanged]),
   compose(p, ctx): ComposedEmail {
+    if (p.variant === 'payout_method_changed') return composePayoutMethodChanged(p, ctx);
     return p.variant === 'account_exists' ? composeAccountExists(p, ctx) : composeLoginLockout(p, ctx);
   },
 });
+
+/** `MTN MoMo number ending 4567` or `Bank of Kigali account ending 0012`. */
+export function destinationText(ctx: EmailContext, destination: z.infer<typeof maskedDestination>): string {
+  if (destination.kind === 'bank') return tr(ctx, 'email:accountSecurityAlert.payoutMethodChanged.destinationBank', { bank: destination.provider, last4: destination.last4 });
+  const network = destination.provider === 'airtel' ? 'Airtel' : destination.provider === 'mtn' ? 'MTN' : destination.provider;
+  return tr(ctx, 'email:accountSecurityAlert.payoutMethodChanged.destinationMomo', { network, last4: destination.last4 });
+}
+
+function composePayoutMethodChanged(p: z.infer<typeof payoutMethodChanged>, ctx: EmailContext): ComposedEmail {
+  const when = formatDateTime(p.changedAt);
+  const destination = destinationText(ctx, p.destination);
+  const key = p.replaced ? 'changed' : 'added';
+  return {
+    subject: tr(ctx, `email:accountSecurityAlert.payoutMethodChanged.${key}.subject`),
+    preheader: tr(ctx, 'email:accountSecurityAlert.payoutMethodChanged.preheader', { destination }),
+    blocks: [
+      { type: 'heading', text: tr(ctx, `email:accountSecurityAlert.payoutMethodChanged.${key}.heading`) },
+      { type: 'paragraph', text: tr(ctx, `email:accountSecurityAlert.payoutMethodChanged.${key}.intro`, { when, destination }) },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.payoutMethodChanged.ifNotYou') },
+      { type: 'button', label: tr(ctx, 'email:accountSecurityAlert.payoutMethodChanged.button'), href: siteUrl(ctx, '/studio/payout-method') },
+    ],
+  };
+}
 
 function composeAccountExists(p: z.infer<typeof accountExists>, ctx: EmailContext): ComposedEmail {
   return {

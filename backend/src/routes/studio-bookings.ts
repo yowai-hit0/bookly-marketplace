@@ -43,7 +43,9 @@ import { kigaliDate, parseOrReject } from './validation.js';
  *   POST /bookings/:id/no-show                       200 | 404 | 409
  *   POST /bookings/:id/resend-link                   200 | 404 | 409
  *   POST /payments/:id/refund      { reference, refundedAt? }
- *        200 { booking } | 404 | 409 not_refundable | 422
+ *        200 { booking } | 404 | 409 not_refundable | 409 refund_with_platform | 422
+ *        Cash only (Phase 4 refund decision): a payment made online is refunded
+ *        and recorded by a platform admin (`/api/platform/refunds`, R4.6).
  *
  * And the post-shoot half (plan.md Task 20; spec §3.5 steps 2-3, §6.15):
  *
@@ -362,7 +364,7 @@ export function studioBookingsRouter(deps: AdminBookingsDeps): Router {
 
     const scope = scoped(res);
     const result = await recordRefund(
-      scope,
+      { prisma, now, actor: { area: 'studio', photographerId: scope.photographerId, userId: photographerLocals(res).user.id } },
       id,
       { reference: body.reference, ...(body.refundedAt === undefined ? {} : { refundedAt: body.refundedAt }) },
     );
@@ -370,7 +372,9 @@ export function studioBookingsRouter(deps: AdminBookingsDeps): Router {
       res.status(404).json({ error: 'not_found' });
       return;
     }
-    if (result.status === 'not_refundable') {
+    // Money paid online sits in the platform's account: a platform admin
+    // refunds and records it (Phase 4 refund decision, R4.6). Cash only here.
+    if (result.status !== 'recorded') {
       const payment = await prisma.payment.findFirst({
         where: { id, booking: { photographerId: scope.photographerId } },
         select: { bookingId: true },
@@ -379,7 +383,9 @@ export function studioBookingsRouter(deps: AdminBookingsDeps): Router {
         res.status(404).json({ error: 'not_found' });
         return;
       }
-      await answerConflict(scope, res, payment.bookingId, 'not_refundable');
+      // `cash_payment`, `duplicate_refund_reference` and `refund_kind_mismatch` are the platform's
+      // refusals and cannot arise here; they read as not refundable.
+      await answerConflict(scope, res, payment.bookingId, result.status === 'refund_with_platform' ? 'refund_with_platform' : 'not_refundable');
       return;
     }
 

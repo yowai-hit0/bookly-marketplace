@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { accessTokenExpiry, generateAccessToken } from '../booking/access-token.js';
 import { type AdminBooking, findAdminBooking } from '../booking/admin-view.js';
-import { bookingTotals } from '../booking/totals.js';
+import { bookingTotals, TOTALS_PAYMENT_SELECT } from '../booking/totals.js';
 import { enqueue } from '../outbox/enqueue.js';
 import { ATTEMPT_IN_FLIGHT, CALL_IN_FLIGHT_SECONDS, PAYMENT_ATTEMPT_WINDOW_SECONDS } from './initiate.js';
 import type { PaymentProviderId } from './provider.js';
@@ -93,7 +93,8 @@ export async function requestSessionFee(deps: SessionFeeDeps, bookingId: string)
 
   const outcome = await prisma.$transaction(async (tx): Promise<Outcome> => {
     // Locked for the same reason the client's own attempt locks it: two
-    // requests at once must not become two rows for the same money.
+    // requests at once must not become two rows for the same money. Booking row,
+    // then payment rows: the lock order in payments/webhooks.ts `applyEvent`.
     const bookings = await tx.$queryRaw<BookingRow[]>`
       SELECT id::text AS id, status, package_price_rwf, reference, locale, contact_name, contact_email,
              service_name_snapshot, package_name_snapshot, starts_at, ends_at
@@ -107,7 +108,7 @@ export async function requestSessionFee(deps: SessionFeeDeps, bookingId: string)
 
     const [addons, payments] = await Promise.all([
       tx.bookingAddon.findMany({ where: { bookingId: booking.id }, select: { stage: true, amountRwf: true } }),
-      tx.payment.findMany({ where: { bookingId: booking.id }, select: { status: true, amountRwf: true } }),
+      tx.payment.findMany({ where: { bookingId: booking.id }, select: TOTALS_PAYMENT_SELECT }),
     ]);
     const { outstandingRwf } = bookingTotals(
       { status: booking.status, packagePriceRwf: booking.package_price_rwf },

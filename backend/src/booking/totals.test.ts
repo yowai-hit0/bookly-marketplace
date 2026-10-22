@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BOOKING_STATUSES } from '../db/statuses.js';
-import { type TotalsAddon, type TotalsPayment, bookingTotals } from './totals.js';
+import { type TotalsAddon, type TotalsPayment, bookingTotals, dueRwf, overpaymentHeldRwf, refundAmountRwf } from './totals.js';
 
 /**
  * A booking's money, derived (data-model_v2.md §6.1; spec §6.10-§6.12). No
@@ -135,5 +135,38 @@ describe('bookingTotals: outstanding, by booking status (data-model_v2.md §6.1)
     totalsFor('confirmed', addons, payments);
     expect(addons).toEqual(ADDONS);
     expect(payments).toEqual(PAYMENTS);
+  });
+});
+
+describe('bookingTotals: an overpaid payment (Phase 4 overpayment decision)', () => {
+  /** 50,000 owed: the package and one at-booking add-on. */
+  const owed: TotalsAddon[] = [{ stage: 'at_booking', amountRwf: 10_000 }];
+  const bookingFee: TotalsPayment = { status: 'succeeded', amountRwf: 20_000 };
+  const overpaid: TotalsPayment = { status: 'succeeded', amountRwf: 40_000, overpaidRwf: 10_000, overpaymentRefundedAt: null };
+  const returned: TotalsPayment = { ...overpaid, overpaymentRefundedAt: new Date('2027-01-10T08:00:00Z') };
+
+  it('collects only the part that was due, and reports the overpaid part as owed back', () => {
+    expect(totalsFor('confirmed', owed, [bookingFee, overpaid])).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 10_000, outstandingRwf: 0 });
+  });
+
+  it('owes nothing back once the platform has returned the overpaid part, and still collects what was due', () => {
+    expect(totalsFor('confirmed', owed, [bookingFee, returned])).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 0, outstandingRwf: 0 });
+  });
+
+  it('asks for an add-on afterwards in full: the overpaid part never pays for it', () => {
+    const later: TotalsAddon[] = [...owed, { stage: 'post_shoot', amountRwf: 15_000 }];
+    expect(totalsFor('confirmed', later, [bookingFee, overpaid])).toMatchObject({ grandTotalRwf: 65_000, outstandingRwf: 15_000 });
+  });
+
+  it('owes back a payment flagged whole for its whole amount, less an overpaid part already returned', () => {
+    const due = (payment: TotalsPayment): TotalsPayment => ({ ...payment, status: 'refund_due' });
+    expect(totalsFor('cancelled_by_photographer', owed, [due(bookingFee), due(overpaid)]).refundDueRwf).toBe(60_000);
+    expect(totalsFor('cancelled_by_photographer', owed, [due(bookingFee), due(returned)]).refundDueRwf).toBe(50_000);
+  });
+
+  it('reads a payment without the overpayment fields as never overpaid', () => {
+    expect(dueRwf({ status: 'succeeded', amountRwf: 20_000 })).toBe(20_000);
+    expect(refundAmountRwf({ status: 'refund_due', amountRwf: 20_000 })).toBe(20_000);
+    expect(overpaymentHeldRwf({ status: 'succeeded', amountRwf: 20_000 })).toBe(0);
   });
 });

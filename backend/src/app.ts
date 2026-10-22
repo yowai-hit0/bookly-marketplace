@@ -103,6 +103,8 @@ export function createApp(options: AppOptions = {}): Express {
   for (const area of ['studio', 'account'] as const) app.post(`/api/${area}/auth/signup`, rateLimit(limiters.signupPerIp, now, areaIpKey(area)));
   app.post('/api/account/auth/google/start', rateLimit(limiters.googleStartPerIp, now, areaIpKey('account')));
   app.post('/api/account/auth/google/callback', rateLimit(limiters.googleCallbackPerIp, now, areaIpKey('account')));
+  // Redirecting payouts is what a takeover aims for (R4.1).
+  app.put('/api/studio/payout-method', rateLimit(limiters.payoutMethodPerIp, now, areaIpKey('studio')));
 
   app.use('/api', healthRouter);
   if (options.publicApi) {

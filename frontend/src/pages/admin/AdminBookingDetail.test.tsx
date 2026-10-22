@@ -49,6 +49,11 @@ const BOOKING_FEE: AdminPayment = {
   refundReference: null,
   note: null,
   canRecordRefund: false,
+  refundPendingWithPlatform: false,
+  overpaidRwf: 0,
+  overpaymentRefundPendingWithPlatform: false,
+  overpaymentRefundedAt: null,
+  overpaymentRefundReference: null,
 }
 
 const BOOKING: AdminBooking = {
@@ -119,9 +124,28 @@ const CANCELLED: AdminBooking = {
   stage: 'cancelled_by_photographer',
   lifecycle: { ...BOOKING.lifecycle, cancelledAt: '2026-10-02T09:00:00.000Z', cancellationReason: 'Studio flooded.' },
   money: { ...BOOKING.money, totals: { ...BOOKING.money.totals, collectedRwf: 0, refundDueRwf: 20_000, outstandingRwf: 0 } },
-  payments: [{ ...BOOKING_FEE, status: 'refund_due', canRecordRefund: true }],
+  // Paid online, so the platform refunds it (Phase 4 refund decision): no form in the studio.
+  payments: [{ ...BOOKING_FEE, status: 'refund_due', canRecordRefund: false, refundPendingWithPlatform: true }],
   actions: { canReschedule: false, canCancel: false, canComplete: false, canMarkNoShow: false, canResendLink: true, canEditAddons: false, canRequestSessionFee: false, canEditDelivery: false, canSendDelivery: false },
 }
+
+const CASH_PAYMENT_ID = 'c2b8d3e5-0000-4000-8000-0000000000ca'
+
+/** Cash he was handed, owed back after he cancelled: the one refund the studio records (Phase 4). */
+const CASH_FEE: AdminPayment = {
+  ...BOOKING_FEE,
+  id: CASH_PAYMENT_ID,
+  kind: 'session_fee',
+  provider: 'cash',
+  ourRef: 'ca5h0001',
+  providerRef: null,
+  method: null,
+  status: 'refund_due',
+  canRecordRefund: true,
+  refundPendingWithPlatform: false,
+}
+
+const CASH_REFUND_DUE: AdminBooking = { ...CANCELLED, payments: [CASH_FEE] }
 
 // --- The catalogue the post-shoot picker loads (plan.md Task 20) --------------------
 
@@ -674,36 +698,189 @@ describe('the one-click actions', () => {
 
 // --- Recording a refund ------------------------------------------------------------------
 
-describe('recording a refund (spec §6.16)', () => {
+describe('recording a refund (spec §6.16; Phase 4: cash only)', () => {
   const REFUNDED: AdminBooking = {
-    ...CANCELLED,
-    payments: [{ ...BOOKING_FEE, status: 'refunded', refundedAt: '2026-10-03T08:00:00.000Z', refundReference: 'MOMO-REF-7781', canRecordRefund: false }],
+    ...CASH_REFUND_DUE,
+    payments: [{ ...CASH_FEE, status: 'refunded', refundedAt: '2026-10-03T08:00:00.000Z', refundReference: 'CASH-RET-7781', canRecordRefund: false }],
     money: { ...CANCELLED.money, totals: { ...CANCELLED.money.totals, refundDueRwf: 0 } },
   }
 
-  it('offers the form only for a payment flagged for refund', async () => {
-    stubApi({ booking: CANCELLED })
+  it('offers the form for cash he was handed and now owes back', async () => {
+    stubApi({ booking: CASH_REFUND_DUE })
     await renderLoaded()
 
     expect(screen.getByLabelText('Refund reference')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Record 20,000 RWF refunded' })).toBeInTheDocument()
     expect(section('Payments')).toHaveTextContent('The system moves no money.')
+    expect(section('Payments')).not.toHaveTextContent('Refund pending with the platform')
   })
 
-  it('posts the reference to the payment and shows the refunded state', async () => {
-    const { sent } = stubApi({ booking: CANCELLED, onPost: (_call, current) => ((current.value = REFUNDED), json({ booking: REFUNDED })) })
+  it('posts the reference to the cash payment and shows the refunded state', async () => {
+    const { sent } = stubApi({ booking: CASH_REFUND_DUE, onPost: (_call, current) => ((current.value = REFUNDED), json({ booking: REFUNDED })) })
     await renderLoaded()
 
-    await user().type(screen.getByLabelText('Refund reference'), 'MOMO-REF-7781')
+    await user().type(screen.getByLabelText('Refund reference'), 'CASH-RET-7781')
     await user().click(screen.getByRole('button', { name: 'Record 20,000 RWF refunded' }))
 
     await waitFor(() => expect(section('Payments')).toHaveTextContent('Refunded'))
     expect(writes(sent)).toEqual([
-      { method: 'POST', url: `/api/studio/payments/${PAYMENT_ID}/refund`, body: { reference: 'MOMO-REF-7781' } },
+      { method: 'POST', url: `/api/studio/payments/${CASH_PAYMENT_ID}/refund`, body: { reference: 'CASH-RET-7781' } },
     ])
-    expect(section('Payments')).toHaveTextContent('refund MOMO-REF-7781')
+    expect(section('Payments')).toHaveTextContent('refund CASH-RET-7781')
     expect(screen.queryByLabelText('Refund reference')).not.toBeInTheDocument()
     expect(section('Money')).not.toHaveTextContent('To refund')
+  })
+
+  it('sends nothing for a blank reference', async () => {
+    const { sent } = stubApi({ booking: CASH_REFUND_DUE })
+    await renderLoaded()
+
+    await user().type(screen.getByLabelText('Refund reference'), '   ')
+    await user().click(screen.getByRole('button', { name: 'Record 20,000 RWF refunded' }))
+
+    expect(writes(sent)).toEqual([])
+  })
+})
+
+describe('a refund of money paid online (Phase 4 refund decision)', () => {
+  it('says it is pending with the platform, and offers no way to record it', async () => {
+    stubApi({ booking: CANCELLED })
+    await renderLoaded()
+
+    const payments = section('Payments')
+    expect(payments).toHaveTextContent('Refund due')
+    expect(payments).toHaveTextContent('Refund pending with the platform')
+    expect(payments).toHaveTextContent("The client paid online, so the money is in Bookly's account: Bookly sends the refund and records it.")
+    expect(within(payments).queryByLabelText('Refund reference')).not.toBeInTheDocument()
+    expect(within(payments).queryByRole('button', { name: /refunded/ })).not.toBeInTheDocument()
+    // The money owed back still shows: only who sends it changed.
+    expect(section('Money')).toHaveTextContent('To refund20,000 RWF')
+  })
+
+  it('keeps the cash action beside an online refund on the same booking', async () => {
+    stubApi({ booking: { ...CANCELLED, payments: [CANCELLED.payments[0] as AdminPayment, CASH_FEE] } })
+    await renderLoaded()
+
+    const payments = section('Payments')
+    expect(payments).toHaveTextContent('Refund pending with the platform')
+    expect(within(payments).getAllByLabelText('Refund reference')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-refund="platform"]')).toHaveLength(1)
+  })
+
+  it('says nothing about the platform for a payment that is not owed back', async () => {
+    stubApi()
+    await renderLoaded()
+
+    expect(section('Payments')).not.toHaveTextContent('Refund pending with the platform')
+    expect(document.querySelector('[data-refund="platform"]')).toBeNull()
+  })
+
+  it('maps a 409 refund_with_platform to words and shows the booking it carried', async () => {
+    const { sent } = stubApi({
+      booking: CASH_REFUND_DUE,
+      onPost: (_call, current) => ((current.value = CANCELLED), json({ error: 'refund_with_platform', booking: CANCELLED }, 409)),
+    })
+    await renderLoaded()
+    const before = gets(sent).length
+
+    await user().type(screen.getByLabelText('Refund reference'), 'CASH-RET-7781')
+    await user().click(screen.getByRole('button', { name: 'Record 20,000 RWF refunded' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This payment was made online, so Bookly refunds it, not you. The booking below is up to date.')
+    await waitFor(() => expect(section('Payments')).toHaveTextContent('Refund pending with the platform'))
+    expect(screen.queryByLabelText('Refund reference')).not.toBeInTheDocument()
+    expect(gets(sent).length).toBe(before)
+  })
+})
+
+describe('an overpaid session fee (Phase 4 overpayment decision)', () => {
+  /** A 30,000 RWF session fee paid as 35,000 RWF online: 5,000 RWF is the client's. */
+  const OVERPAID_FEE: AdminPayment = {
+    ...BOOKING_FEE,
+    id: 'c2b8d3e5-0000-4000-8000-0000000000ef',
+    kind: 'session_fee',
+    ourRef: 'e5e5e5e5',
+    providerRef: '4100000999',
+    amountRwf: 35_000,
+    status: 'succeeded',
+    overpaidRwf: 5_000,
+    overpaymentRefundPendingWithPlatform: true,
+  }
+  const PAID_IN_FULL: AdminBooking = {
+    ...BOOKING,
+    // Collected leaves the overpaid part out; to refund holds it while it is pending.
+    money: { ...BOOKING.money, totals: { ...BOOKING.money.totals, collectedRwf: 50_000, refundDueRwf: 5_000, outstandingRwf: 0 } },
+    payments: [BOOKING_FEE, OVERPAID_FEE],
+  }
+  const RETURNED: AdminBooking = {
+    ...PAID_IN_FULL,
+    money: { ...BOOKING.money, totals: { ...BOOKING.money.totals, collectedRwf: 50_000, refundDueRwf: 0, outstandingRwf: 0 } },
+    payments: [
+      BOOKING_FEE,
+      { ...OVERPAID_FEE, overpaymentRefundPendingWithPlatform: false, overpaymentRefundedAt: '2026-10-20T08:15:00.000Z', overpaymentRefundReference: 'OVR-2210-77' },
+    ],
+  }
+
+  it('says the platform will return the extra and that he earns only what was due, with nothing for him to record', async () => {
+    stubApi({ booking: PAID_IN_FULL })
+    await renderLoaded()
+
+    const payments = section('Payments')
+    expect(payments.querySelector('[data-overpayment="pending"]')).toHaveTextContent(
+      'The client paid 5,000 RWF more than was due; the platform will return it to them. You earn only what was due.',
+    )
+    expect(payments.querySelector('[data-overpayment="refunded"]')).toBeNull()
+    // Still a paid payment, not a refund he owes.
+    expect(payments).toHaveTextContent('Paid')
+    expect(within(payments).queryByLabelText('Refund reference')).not.toBeInTheDocument()
+    expect(payments).not.toHaveTextContent('Refund pending with the platform')
+  })
+
+  it('shows the totals the API derived: collected without the extra, the extra still to refund', async () => {
+    stubApi({ booking: PAID_IN_FULL })
+    await renderLoaded()
+
+    expect(section('Money')).toHaveTextContent('Collected50,000 RWF')
+    expect(section('Money')).toHaveTextContent('To refund5,000 RWF')
+    expect(section('Money')).toHaveTextContent('Still to pay0 RWF')
+  })
+
+  it('once returned, says when and with what reference, and nothing is pending', async () => {
+    stubApi({ booking: RETURNED })
+    await renderLoaded()
+
+    const payments = section('Payments')
+    expect(payments.querySelector('[data-overpayment="refunded"]')).toHaveTextContent(
+      'The client paid 5,000 RWF more than was due. The platform returned it on 20 Oct 2026, 10:15, reference OVR-2210-77. You earn only what was due.',
+    )
+    expect(payments.querySelector('[data-overpayment="pending"]')).toBeNull()
+    expect(section('Money')).not.toHaveTextContent('To refund')
+  })
+
+  it('shows a dash, not null, for a return recorded without a reference', async () => {
+    stubApi({ booking: { ...RETURNED, payments: [{ ...(RETURNED.payments[1] as AdminPayment), overpaymentRefundReference: null }] } })
+    await renderLoaded()
+
+    expect(section('Payments').querySelector('[data-overpayment="refunded"]')).toHaveTextContent('reference —.')
+    expect(section('Payments')).not.toHaveTextContent('null')
+  })
+
+  it('leaves the overpayment to the full refund once the whole payment is owed back', async () => {
+    // A full refund covers the overpaid part: the API stops flagging it pending.
+    const owed: AdminPayment = { ...OVERPAID_FEE, status: 'refund_due', overpaymentRefundPendingWithPlatform: false, refundPendingWithPlatform: true }
+    stubApi({ booking: { ...CANCELLED, payments: [owed] } })
+    await renderLoaded()
+
+    const payments = section('Payments')
+    expect(payments).toHaveTextContent('Refund pending with the platform')
+    expect(payments.querySelector('[data-overpayment]')).toBeNull()
+  })
+
+  it('says nothing about an overpayment on a payment that was not overpaid', async () => {
+    stubApi()
+    await renderLoaded()
+
+    expect(document.querySelector('[data-overpayment]')).toBeNull()
   })
 })
 
@@ -766,10 +943,10 @@ describe('when the API refuses an action', () => {
   })
 
   it('maps a 409 not_refundable to words', async () => {
-    stubApi({ booking: CANCELLED, onPost: () => json({ error: 'not_refundable', booking: CANCELLED }, 409) })
+    stubApi({ booking: CASH_REFUND_DUE, onPost: () => json({ error: 'not_refundable', booking: CASH_REFUND_DUE }, 409) })
     await renderLoaded()
 
-    await user().type(screen.getByLabelText('Refund reference'), 'MOMO-REF-7781')
+    await user().type(screen.getByLabelText('Refund reference'), 'CASH-RET-7781')
     await user().click(screen.getByRole('button', { name: 'Record 20,000 RWF refunded' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('This payment is not flagged for a refund.')
@@ -1152,6 +1329,11 @@ describe('requesting the session fee', () => {
           refundReference: null,
           note: null,
           canRecordRefund: false,
+          refundPendingWithPlatform: false,
+          overpaidRwf: 0,
+          overpaymentRefundPendingWithPlatform: false,
+          overpaymentRefundedAt: null,
+          overpaymentRefundReference: null,
         },
       ],
       messages: [

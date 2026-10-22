@@ -63,6 +63,17 @@ describe('limited endpoints', () => {
     expect(Number(refused.headers['retry-after'])).toBeGreaterThan(0);
   });
 
+  it('limits changing the payout method, a PUT, and leaves reading it alone (Phase 4, R4.1)', async () => {
+    const app = createApp({ rateLimits: { payoutMethodPerIp: tight } });
+
+    expect((await request(app).put('/api/studio/payout-method').send({})).status).toBe(404);
+    const refused = await request(app).put('/api/studio/payout-method').send({});
+    expect([refused.status, refused.body]).toEqual([429, { error: 'rate_limited' }]);
+
+    expect((await request(app).get('/api/studio/payout-method')).status).toBe(404);
+    expect((await request(app).get('/api/studio/payout-method')).status).toBe(404);
+  });
+
   it('shares one allowance between the two payment routes', async () => {
     const app = createApp({ rateLimits: { paymentsPerIp: tight } });
 

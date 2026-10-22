@@ -136,13 +136,14 @@ describe('the platform console shell', () => {
     expect(router.state.location.pathname).toBe('/platform/photographers')
   })
 
-  it('has a skip link, a Platform nav with the one section, and sign out', async () => {
+  it('has a skip link, a Platform nav with its sections (Payouts and Refunds since Phase 4), and sign out', async () => {
     platformApi()
     renderAt()
     await table()
 
     expect(screen.getByRole('link', { name: 'Skip to content' })).toHaveAttribute('href', '#platform-content')
     const nav = screen.getByRole('navigation', { name: 'Platform' })
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Photographers', 'Payouts', 'Refunds'])
     expect(within(nav).getByRole('link', { name: 'Photographers' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
   })

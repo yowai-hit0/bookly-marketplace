@@ -2,12 +2,13 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { isSlotTaken, isTransactionConflict } from '../db/errors.js';
 import { enqueue } from '../outbox/enqueue.js';
 import { bookingPhotographerRecipient } from '../outbox/recipients.js';
+import { recordRefundDue } from '../payouts/ledger.js';
 import { getPhotographerSettings } from '../settings/index.js';
 import { issueAccessToken } from './access-link.js';
 import { hashAccessToken } from './access-token.js';
 import { type AdminBooking, findAdminBooking } from './admin-view.js';
 import { expireOverlappingStaleHolds, lockPhotographerCalendar } from './claim.js';
-import { bookingTotals } from './totals.js';
+import { bookingTotals, refundAmountRwf, TOTALS_PAYMENT_SELECT } from './totals.js';
 
 /**
  * What the photographer does to a booking after it exists (plan.md Task 19;
@@ -20,8 +21,11 @@ import { bookingTotals } from './totals.js';
  * being cancelled.
  *
  * The photographer moves no money here either (spec §6.16). Cancelling marks
- * what is owed back `refund_due` and alerts him; `refunded` is his own record
- * of having sent it, taken by `payments/refund.ts`.
+ * what is owed back `refund_due` and alerts him, and takes back each payment's
+ * earning through the payout ledger (payouts/ledger.ts, R4.2). Who records the
+ * refund depends on where the money is (Phase 4 refund decision): the
+ * photographer for cash he was handed (`payments/refund.ts`), a platform admin
+ * for money paid online, which sits in the platform's account.
  *
  * Every action is scoped to `deps.photographerId`, the signed-in photographer
  * from the verified token (marketplace-spec.md R1.4): another photographer's
@@ -162,7 +166,7 @@ export async function cancelByAdmin(deps: AdminActionDeps, bookingId: string, re
     });
     if (count === 0) return false;
 
-    const refunded = await flagRefunds(tx, booking);
+    const refunded = await flagRefunds(tx, booking, now);
     await enqueue(tx, {
       kind: 'email',
       template: 'cancellation',
@@ -180,7 +184,8 @@ export async function cancelByAdmin(deps: AdminActionDeps, bookingId: string, re
         cancelledBy: 'admin',
         reason,
         bookingFeeRwf: booking.bookingFeeRwf,
-        refundRwf: refunded.reduce((total, payment) => total + payment.amountRwf, 0),
+        // Less any overpaid part the platform already sent back (`refundAmountRwf`).
+        refundRwf: refunded.reduce((total, payment) => total + refundAmountRwf(payment), 0),
       },
     });
 
@@ -196,7 +201,7 @@ export async function cancelByAdmin(deps: AdminActionDeps, bookingId: string, re
           variant: 'refund_due',
           reference: booking.reference,
           clientName: booking.contactName,
-          amountRwf: payment.amountRwf,
+          amountRwf: refundAmountRwf(payment),
           reason: 'admin_cancelled',
           paymentReference: payment.providerRef ?? payment.ourRef,
           provider: payment.provider,
@@ -250,7 +255,7 @@ async function close(
     if (status === 'completed') {
       const [addons, payments] = await Promise.all([
         tx.bookingAddon.findMany({ where: { bookingId: booking.id }, select: { stage: true, amountRwf: true } }),
-        tx.payment.findMany({ where: { bookingId: booking.id }, select: { status: true, amountRwf: true } }),
+        tx.payment.findMany({ where: { bookingId: booking.id }, select: TOTALS_PAYMENT_SELECT }),
       ]);
       const totals = bookingTotals({ status: booking.status, packagePriceRwf: booking.packagePriceRwf }, addons, payments);
       if (totals.outstandingRwf > 0) return 'balance_due';
@@ -306,12 +311,21 @@ export async function resendAccessLink(deps: AdminActionDeps, bookingId: string)
   return reload(deps, booking.id);
 }
 
-/** Money collected that is now owed back. Returns what it flagged. */
-async function flagRefunds(tx: Prisma.TransactionClient, booking: AdminBooking): Promise<AdminBooking['payments']> {
+/**
+ * Money collected that is now owed back. Returns what it flagged. Called with
+ * the booking row held: booking, then payments, then payout items -- the lock
+ * order in payments/webhooks.ts `applyEvent`.
+ */
+async function flagRefunds(tx: Prisma.TransactionClient, booking: AdminBooking, now: Date): Promise<AdminBooking['payments']> {
   const flagged: AdminBooking['payments'] = [];
   for (const payment of booking.payments.filter((row) => row.status === 'succeeded')) {
     const { count } = await tx.payment.updateMany({ where: { id: payment.id, status: 'succeeded' }, data: { status: 'refund_due' } });
-    if (count === 1) flagged.push(payment);
+    if (count !== 1) continue;
+    // Its earning is voided, or reversed if already in a payout (R4.2, T4.2).
+    await recordRefundDue(tx, payment.id, now);
+    // Re-read under the row lock the update took: an overpayment refund the
+    // platform recorded since the booking was read changes what is owed back.
+    flagged.push(await tx.payment.findUniqueOrThrow({ where: { id: payment.id } }));
   }
   return flagged;
 }

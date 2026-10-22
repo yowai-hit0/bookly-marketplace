@@ -1,0 +1,310 @@
+# The platform's payouts and refunds (marketplace-spec.md Phase 4: R4.1, R4.4,
+# R4.6, T4.3). Every operation requires a platform admin's bearer token; a
+# photographer's or a client's is a 401. The admin acting is recorded on every
+# payout (built by, paid by, cancelled by) and on every refund.
+
+due:
+  get:
+    operationId: listPayoutsDue
+    tags: [Platform payouts]
+    summary: Payouts due
+    description: |
+      Every photographer whose payable balance is above nought, with their
+      current payout method. `methodChangedRecently` flags a destination saved
+      within the last 72 hours: redirecting payouts is what an account
+      takeover would aim for, so confirm it before sending money (R4.1).
+    security:
+      - platformBearer: []
+    responses:
+      '200':
+        description: The photographers due a payout.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PayoutsDue }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+payouts:
+  get:
+    operationId: listPlatformPayouts
+    tags: [Platform payouts]
+    summary: List payouts
+    description: Every payout, newest first, or only those in one status.
+    security:
+      - platformBearer: []
+    parameters:
+      - name: status
+        in: query
+        required: false
+        schema: { $ref: ../components/payouts.yaml#/schemas/PayoutStatus }
+    responses:
+      '200':
+        description: The payouts.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PlatformPayoutList }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  post:
+    operationId: buildPayout
+    tags: [Platform payouts]
+    summary: Build a draft payout
+    description: |
+      Takes every line payable now for the photographer, totals it, and records
+      a `draft` for that amount to their current payout method. Then make the
+      transfer outside the app, and mark the draft paid with its reference.
+
+      Refused with `409` when the photographer has no payout method
+      (`no_payout_method`), already has a draft (`draft_exists`), or the total
+      is nought or less (`nothing_payable`: nothing is created, and the balance
+      carries forward to a later payout).
+    security:
+      - platformBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [photographerId]
+            additionalProperties: false
+            properties:
+              photographerId: { $ref: ../components/common.yaml#/schemas/Uuid }
+    responses:
+      '201':
+        description: The draft, with its lines.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PlatformPayoutEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: No draft was built.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/BuildRefused }
+
+payout:
+  get:
+    operationId: getPlatformPayout
+    tags: [Platform payouts]
+    summary: One payout, with its lines
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        description: The payout.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PlatformPayoutEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+markPaid:
+  post:
+    operationId: markPayoutPaid
+    tags: [Platform payouts]
+    summary: Mark a draft paid
+    description: |
+      Records that the transfer was made: its MoMo or bank reference (required,
+      and used once across every payout), when, and by whom. Emails the
+      photographer `payout_sent`. Only a draft can be marked paid.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [transferReference]
+            additionalProperties: false
+            properties:
+              transferReference: { type: string, minLength: 1, maxLength: 100, description: Trimmed. Missing is a 400, empty a 422. }
+              note: { type: [string, 'null'], minLength: 1, maxLength: 500, description: Platform-internal; not shown to the photographer. }
+    responses:
+      '200':
+        description: The payout, now paid.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PlatformPayoutEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: The payout is not a draft (`not_draft`, with the payout as it stands), or the transfer reference is already recorded on another payout (`duplicate_transfer_reference`).
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: ../components/payouts.yaml#/schemas/PayoutNotDraft
+                - type: object
+                  required: [error]
+                  additionalProperties: false
+                  properties:
+                    error: { const: duplicate_transfer_reference }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+
+cancel:
+  post:
+    operationId: cancelPayout
+    tags: [Platform payouts]
+    summary: Cancel a draft
+    description: |
+      Releases the draft's lines back to the photographer's balance, to be
+      taken by a later payout. Only a draft can be cancelled; who cancelled it
+      is recorded. Takes no body.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        description: The payout, now cancelled, with no lines.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PlatformPayoutEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: The payout is not a draft.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PayoutNotDraft }
+
+refunds:
+  get:
+    operationId: listRefundsDue
+    tags: [Platform refunds]
+    summary: Refunds due
+    description: |
+      Every refund of money paid online (MoMo through MTN or Flutterwave) the
+      platform has still to send, oldest first. The money is in the platform's
+      account, so the platform refunds it by hand and records it here. Two
+      kinds (`refundKind`):
+
+      - `full`: a payment owed back whole (`refund_due`). `refundAmountRwf` is
+        the amount, less any overpaid part already returned. This includes a
+        payment marked failed on our side (a session-fee ask voided for cash, or
+        an attempt whose provider call failed) that the client then paid
+        anyway, when none of it was due.
+      - `overpayment`: a session fee paid for more than the booking was worth.
+        The payment stays `succeeded`, the photographer earned only what was
+        due, and `refundAmountRwf` is the overpaid part.
+
+      A payment is listed once: a full refund covers its overpaid part, so a
+      payment that became `refund_due` after overpaying is listed only as
+      `full`. Cash is the photographer's to give back and is not listed.
+    security:
+      - platformBearer: []
+    responses:
+      '200':
+        description: The refunds owed.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/RefundsDue }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+refund:
+  post:
+    operationId: recordPlatformRefund
+    tags: [Platform refunds]
+    summary: Record a refund
+    description: |
+      Records that money paid online was sent back by hand, with the reference
+      it went out with and the admin who recorded it. The system moves no
+      money. Records whichever refund is pending:
+
+      - `full`, when the payment is `refund_due`: it becomes `refunded`. This
+        wins if both could apply, since a full refund covers the overpaid part.
+      - `overpayment`, when a succeeded session fee has an overpaid part not
+        yet returned: the `overpayment_*` fields are set and the payment stays
+        `succeeded`.
+
+      Refused with `409`: nothing pending (`not_refundable`), cash
+      (`cash_payment`: the photographer records that), a reference another
+      online refund of either kind already names (`duplicate_refund_reference`),
+      or a `refundKind` that is not what is pending (`refund_kind_mismatch`,
+      with `pending`: the list the admin acted on has changed).
+    security:
+      - platformBearer: []
+    parameters:
+      - name: paymentId
+        in: path
+        required: true
+        schema: { $ref: ../components/common.yaml#/schemas/Uuid }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [reference]
+            additionalProperties: false
+            properties:
+              reference:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: Unique across every online refund, full or overpayment.
+              refundedAt: { $ref: ../components/common.yaml#/schemas/OffsetInstant }
+              refundKind:
+                $ref: ../components/payouts.yaml#/schemas/RefundKind
+                description: Optional. The kind the admin means to record, from the list they acted on.
+    responses:
+      '200':
+        description: The refund as recorded.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/RecordedRefund }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: |
+          Cash (`cash_payment`), nothing owed back (`not_refundable`), a reference
+          already used (`duplicate_refund_reference`), or another kind pending
+          than the one named (`refund_kind_mismatch`). Nothing was written.
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [error]
+                  additionalProperties: false
+                  properties:
+                    error: { type: string, enum: [cash_payment, not_refundable, duplicate_refund_reference] }
+                - type: object
+                  required: [error, pending]
+                  additionalProperties: false
+                  properties:
+                    error: { const: refund_kind_mismatch }
+                    pending: { $ref: ../components/payouts.yaml#/schemas/RefundKind }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed

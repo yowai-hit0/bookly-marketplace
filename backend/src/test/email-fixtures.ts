@@ -223,6 +223,31 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
+    name: 'account_security_alert payout_method_changed',
+    template: 'account_security_alert',
+    payload: {
+      variant: 'payout_method_changed',
+      area: 'studio',
+      replaced: true,
+      /** format.json `formatDateTime`: 14 Mar 2026, 17:00. */
+      changedAt: '2026-03-14T15:00:00.000Z',
+      destination: { kind: 'bank', provider: 'Bank of Kigali', last4: '4567' },
+    },
+  },
+  {
+    name: 'payout_sent',
+    template: 'payout_sent',
+    payload: {
+      displayName: 'Kigali Lens',
+      amountRwf: 125_000,
+      transferReference: 'MTN-TX-4471',
+      /** format.json `formatDateTime`: 1 Jul 2026, 08:00. */
+      paidAt: '2026-07-01T06:00:00Z',
+      itemCount: 3,
+      destination: { kind: 'momo', provider: 'mtn', last4: '3456' },
+    },
+  },
+  {
     name: 'account_password_reset',
     template: 'account_password_reset',
     payload: {
@@ -298,7 +323,7 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
 export const TEMPLATE_VARIANTS = {
   photographer_alert: ['payment_received', 'retries_exhausted', 'refund_due', 'booking_cancelled'],
   platform_alert: ['retries_exhausted'],
-  account_security_alert: ['login_lockout', 'account_exists'],
+  account_security_alert: ['login_lockout', 'account_exists', 'payout_method_changed'],
 } as const satisfies Partial<Record<SendableEmailTemplate, readonly string[]>>;
 
 export function emailFixture(name: string): EmailFixture {

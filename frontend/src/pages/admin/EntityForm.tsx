@@ -1,5 +1,5 @@
 import { CircleAlert } from 'lucide-react'
-import { type FormEvent, useId, useState } from 'react'
+import { type FormEvent, type ReactNode, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { z } from 'zod'
@@ -37,12 +37,14 @@ type Props<T> = {
   /** Throws `ApiError` when the API refuses the save. */
   onSave: (payload: T) => Promise<void>
   onCancel: () => void
+  /** A notice above the fields: the package price form carries the transfer-fee banner (R4.5). */
+  notice?: ReactNode
 }
 
 /** The API names the stored field; the form names what he types. */
 const FORM_FIELD_FOR: Record<string, string> = { bookingFeeRateOverride: 'bookingFeePercent' }
 
-export function EntityForm<T>({ title, submitLabel, fields, values, schema, onSave, onCancel }: Props<T>) {
+export function EntityForm<T>({ title, submitLabel, fields, values, schema, onSave, onCancel, notice }: Props<T>) {
   const { t } = useTranslation()
   const inDialog = useInDialog()
   const navigate = useNavigate()
@@ -96,6 +98,7 @@ export function EntityForm<T>({ title, submitLabel, fields, values, schema, onSa
     <form className={inDialog ? 'flex flex-col gap-4' : SUBPANEL} aria-label={title} noValidate onSubmit={onSubmit}>
       {/* In a dialog the dialog's own title names the form. */}
       {!inDialog && <h3 className="text-base font-medium">{title}</h3>}
+      {notice}
       <div className="grid gap-4 sm:grid-cols-2">
         {fields.map((field) => {
           const inputId = `${idPrefix}-${field.name}`

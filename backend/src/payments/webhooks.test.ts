@@ -3,8 +3,10 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import type pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { type AccessToken, hashAccessToken } from '../booking/access-token.js';
+import { bookingTotals } from '../booking/totals.js';
 import { createPrismaClient } from '../db/client.js';
 import { renderEmail } from '../email/render.js';
+import { listRefundsDue } from '../payouts/payouts.js';
 import { connect, firstRow, testDatabaseUrl, truncateAll } from '../test/database.js';
 import {
   BUFFER_MINUTES,
@@ -26,9 +28,12 @@ import {
   seedWorld,
   stubProvider,
 } from '../test/payment-fixtures.js';
+import { recordCashPayment } from './cash.js';
+import { CALL_IN_FLIGHT_SECONDS, PAYMENT_ATTEMPT_WINDOW_SECONDS } from './initiate.js';
 import type { MtnMomoProvider } from './mtn-momo.js';
 import type { ProviderEvent, WebhookDelivery } from './provider.js';
-import { type WebhookDeps, type WebhookOutcome, receiveWebhook, recordEvent } from './webhooks.js';
+import { recordRefund } from './refund.js';
+import { type WebhookDeps, type WebhookOutcome, locallyFailed, receiveWebhook, recordEvent } from './webhooks.js';
 
 /**
  * Applying what a payment provider says (plan.md Task 17; spec §3.1 steps
@@ -609,14 +614,17 @@ describe('an event for a payment already settled', () => {
     expect(await outbox()).toEqual([]);
   });
 
-  it('never resurrects a failed payment: failed -> succeeded is ignored, the booking not confirmed, and the money flagged in the log', async () => {
+  it('never resurrects a payment the provider failed: failed -> succeeded is ignored, the booking not confirmed, and the money flagged in the log', async () => {
+    // A rejection the provider answered at initiation. A failure of our own
+    // making, with no verdict behind it, is revived instead (see the late
+    // successes below).
     const booking = await insertBooking(prisma, world);
-    const payment = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'provider_timeout' });
+    const payment = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'http_400' });
 
     const outcome = await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
 
     expect(outcome).toMatchObject({ status: 'ignored', note: 'payment_failed' });
-    expect(await paymentRow(payment.id)).toMatchObject({ status: 'failed', failure_reason: 'provider_timeout', settled_at: null, provider_ref: null });
+    expect(await paymentRow(payment.id)).toMatchObject({ status: 'failed', failure_reason: 'http_400', settled_at: null, provider_ref: null });
     expect(await bookingRow(booking.id)).toMatchObject({ status: 'pending_payment', confirmed_at: null, access_token_hash: null });
     expect(sink.entries).toContainEqual(expect.objectContaining({ level: 'error', event: 'webhook_success_for_failed_payment', eventRowId: outcome.eventRowId }));
   });
@@ -1101,7 +1109,7 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     expect(tokens).toEqual([]);
   });
 
-  it('enqueues an alert that renders, telling the photographer why and that the system moves no money', async () => {
+  it('enqueues an alert that renders, telling the photographer why and that the platform refunds it (Phase 4)', async () => {
     const { payment } = await expiredWithPayment();
     await insertBooking(prisma, world, { status: 'confirmed', startsAt: SLOT });
     await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
@@ -1110,7 +1118,16 @@ describe('a late success for an expired booking (spec §6.9)', () => {
     const email = renderEmail('photographer_alert', alert?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
     expect(email.subject).toContain('Refund due: 20,000 RWF');
     expect(email.text).toContain('booked by someone else');
-    expect(email.text).toContain('The system does not move money.');
+    // Paid online, so the money is in the platform's account: there is nothing for the photographer to send.
+    expect(email.text).toContain('the platform refunds them and records it');
+  });
+
+  it('earns nothing: the money never succeeded, so the payout ledger has no line for it (R4.2)', async () => {
+    const { payment } = await expiredWithPayment();
+    await insertBooking(prisma, world, { status: 'confirmed', startsAt: SLOT });
+    await deliver(statusDelivery(payment.ourRef, 'SUCCESSFUL'));
+
+    expect(await prisma.payoutItem.count({ where: { paymentId: payment.id } })).toBe(0);
   });
 
   it.each([
@@ -1895,5 +1912,711 @@ describe('a succeeded session fee', () => {
       expect(outcome).toMatchObject({ status: 'applied', note: 'payment_succeeded' });
       expect(await completion(booking.id)).toStrictEqual({ status: 'confirmed', completedAt: null });
     });
+  });
+});
+
+// --- Overpayments (Phase 4 overpayment decision) ------------------------------------------------
+
+/**
+ * A session fee paid online for more than the booking is worth: the money is in
+ * the platform's account, so the photographer earns only what was due, the
+ * payment stays `succeeded` with `overpaid_rwf` set in the same transaction, and
+ * the platform lists the difference to send back. A fee that is wholly extra is
+ * `refund_due` instead, like a second booking fee: `overpaid_rwf` is always
+ * below the amount (CHECK payment_overpaid_range).
+ */
+describe('an overpaid session fee', () => {
+  /** A completed shoot: 50,000 owed, 20,000 booking fee collected, `amountRwf` asked for. */
+  async function askedFor(amountRwf: number) {
+    const booking = await insertBooking(prisma, world, { status: 'completed' });
+    await insertPayment(prisma, booking.id, { status: 'succeeded' });
+    const sessionFee = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf });
+    return { booking, sessionFee };
+  }
+
+  async function overpaid(id: string) {
+    const row = await prisma.payment.findUniqueOrThrow({ where: { id } });
+    return { status: row.status, overpaidRwf: row.overpaidRwf, overpaymentRefundedAt: row.overpaymentRefundedAt };
+  }
+
+  async function earnings(paymentId: string) {
+    return (await prisma.payoutItem.findMany({ where: { paymentId } })).map((item) => ({ kind: item.kind, amountRwf: item.amountRwf }));
+  }
+
+  async function totalsOf(bookingId: string) {
+    const booking = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: { addons: true, payments: true } });
+    return bookingTotals(booking, booking.addons, booking.payments);
+  }
+
+  async function addOn(bookingId: string, amountRwf: number) {
+    await prisma.bookingAddon.create({
+      data: { bookingId, addonId: world.sharedAddonId, nameSnapshot: 'Rush edit', unitPriceRwf: amountRwf, amountRwf, stage: 'post_shoot' },
+    });
+  }
+
+  it('succeeds with the overpaid part recorded, and earns only what was due', async () => {
+    const { sessionFee } = await askedFor(40_000);
+
+    const outcome = await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
+
+    expect(outcome).toMatchObject({ status: 'applied' });
+    expect(await overpaid(sessionFee.id)).toStrictEqual({ status: 'succeeded', overpaidRwf: 10_000, overpaymentRefundedAt: null });
+    expect(await earnings(sessionFee.id)).toStrictEqual([{ kind: 'earning', amountRwf: 30_000 }]);
+  });
+
+  it('counts only what was due towards the booking, and the overpaid part as owed back', async () => {
+    const { booking, sessionFee } = await askedFor(40_000);
+    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
+
+    expect(await totalsOf(booking.id)).toMatchObject({ grandTotalRwf: 50_000, collectedRwf: 50_000, refundDueRwf: 10_000, outstandingRwf: 0 });
+  });
+
+  it('tells the photographer the platform will return the difference, with nothing for them to do', async () => {
+    const { sessionFee } = await askedFor(40_000);
+    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
+
+    const alert = (await outbox()).find((row) => row.dedupe_key === `email:photographer_alert:overpayment:${sessionFee.id}`);
+    expect(alert?.payload).toMatchObject({ variant: 'refund_due', reason: 'overpayment', amountRwf: 10_000, provider: 'mtn_momo_direct' });
+    const email = renderEmail('photographer_alert', alert?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
+    expect(email.text).toContain('the platform will return the difference to the client');
+    expect(email.text).toContain('there is nothing for you to do');
+    // Nothing comes off a payout: the earning was only ever what was due.
+    expect(email.text).not.toContain('next payout');
+  });
+
+  it('still receipts what the client actually paid, naming the difference', async () => {
+    const { sessionFee } = await askedFor(40_000);
+    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
+
+    const receipt = (await outbox()).find((row) => row.template === 'payment_receipt');
+    expect(receipt?.payload).toMatchObject({ amountRwf: 40_000, totalRwf: 50_000, paidRwf: 60_000, outstandingRwf: 0, overpaidRwf: 10_000 });
+  });
+
+  it('lists the overpaid part for the platform to send back', async () => {
+    const { booking, sessionFee } = await askedFor(40_000);
+    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
+
+    expect(await listRefundsDue(prisma)).toMatchObject([
+      { paymentId: sessionFee.id, refundKind: 'overpayment', refundAmountRwf: 10_000, overpaidRwf: 10_000, amountRwf: 40_000, booking: { id: booking.id } },
+    ]);
+  });
+
+  it('is idempotent: a redelivery and a later event for the same payment add no second overpaid part or earning', async () => {
+    const { booking, sessionFee } = await askedFor(40_000);
+    const delivery = statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' });
+
+    await deliver(delivery);
+    const once = await rowJson('payment', sessionFee.id);
+    const messages = await outbox();
+    const replay = await deliver(delivery);
+    // Another event id for the same success: what the reconciler's lookup would bring.
+    const lookup = await recordEvent(deps(), 'mtn_momo_direct', {
+      signatureValid: true,
+      event: event({ ourRef: sessionFee.ourRef, reportedStatus: 'succeeded', amount: 40_000 }),
+      payload: null,
+    });
+
+    expect([replay.status, lookup.status]).toEqual(['ignored', 'ignored']);
+    expect(await rowJson('payment', sessionFee.id)).toBe(once);
+    expect(await overpaid(sessionFee.id)).toMatchObject({ overpaidRwf: 10_000 });
+    expect(await earnings(sessionFee.id)).toStrictEqual([{ kind: 'earning', amountRwf: 30_000 }]);
+    expect(await outbox()).toStrictEqual(messages);
+    expect(await totalsOf(booking.id)).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 10_000 });
+  });
+
+  it('leaves an exact payment un-overpaid: no overpaid part, the full earning, nothing listed', async () => {
+    const { sessionFee } = await askedFor(30_000);
+    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+    expect(await overpaid(sessionFee.id)).toMatchObject({ status: 'succeeded', overpaidRwf: 0 });
+    expect(await earnings(sessionFee.id)).toStrictEqual([{ kind: 'earning', amountRwf: 30_000 }]);
+    expect(await listRefundsDue(prisma)).toEqual([]);
+  });
+
+  it('asks for new money for an add-on after an overpayment, instead of spending what is owed back', async () => {
+    const { booking, sessionFee } = await askedFor(40_000);
+    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
+
+    await addOn(booking.id, 15_000);
+
+    // Counted gross, the 10,000 queued for refund would have paid for most of it.
+    expect(await totalsOf(booking.id)).toMatchObject({ grandTotalRwf: 65_000, collectedRwf: 50_000, outstandingRwf: 15_000, refundDueRwf: 10_000 });
+  });
+
+  it('measures a second overpayment against what was due, not against the first one’s surplus', async () => {
+    const { booking, sessionFee } = await askedFor(40_000);
+    await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '40000' }));
+    await addOn(booking.id, 15_000);
+    const second = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 20_000 });
+
+    await deliver(statusDelivery(second.ourRef, 'SUCCESSFUL', { amount: '20000' }));
+
+    // 15,000 was due; 5,000 is extra. Gross, it would read as 15,000 (80,000 - 65,000).
+    expect(await overpaid(second.id)).toMatchObject({ status: 'succeeded', overpaidRwf: 5_000 });
+    expect(await earnings(second.id)).toStrictEqual([{ kind: 'earning', amountRwf: 15_000 }]);
+    expect(await totalsOf(booking.id)).toMatchObject({ grandTotalRwf: 65_000, collectedRwf: 65_000, refundDueRwf: 15_000, outstandingRwf: 0 });
+    // Both settled at the same injected instant, so compared without their order.
+    const listed = (await listRefundsDue(prisma)).map((row) => [row.paymentId, row.refundKind, row.refundAmountRwf]);
+    expect(listed).toHaveLength(2);
+    expect(listed).toEqual(
+      expect.arrayContaining([
+        [sessionFee.id, 'overpayment', 10_000],
+        [second.id, 'overpayment', 5_000],
+      ]),
+    );
+  });
+
+  describe('wholly extra: none of it was due', () => {
+    it('is refund_due as a duplicate payment when a stale prompt is approved after the balance was paid in cash', async () => {
+      // The client was asked online, left the prompt, and paid the photographer
+      // in cash instead; the prompt is old enough not to count as money moving.
+      const booking = await insertBooking(prisma, world, { status: 'completed' });
+      await insertPayment(prisma, booking.id, { status: 'succeeded' });
+      const stale = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, ageSeconds: PAYMENT_ATTEMPT_WINDOW_SECONDS + 60 });
+      const cash = await recordCashPayment({ prisma, now: () => NOW, photographerId: world.photographerId }, booking.id, { amountRwf: 30_000, note: null });
+      expect(cash.status).toBe('ok');
+      await raw.query('DELETE FROM outbox');
+
+      const outcome = await deliver(statusDelivery(stale.ourRef, 'SUCCESSFUL', { amount: '30000', financialTransactionId: 'LATE-PROMPT' }));
+
+      expect(outcome).toMatchObject({ status: 'applied', note: 'refund_due_duplicate_payment' });
+      expect(await overpaid(stale.id)).toStrictEqual({ status: 'refund_due', overpaidRwf: 0, overpaymentRefundedAt: null });
+      expect(await earnings(stale.id)).toStrictEqual([]);
+      const rows = await outbox();
+      expect(rows.map((row) => row.dedupe_key)).toEqual([`email:photographer_alert:refund_due:${stale.id}`]);
+      expect(rows[0]?.payload).toMatchObject({ variant: 'refund_due', reason: 'duplicate_payment', paymentKind: 'session_fee', amountRwf: 30_000 });
+      const email = renderEmail('photographer_alert', rows[0]?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
+      expect(email.text).toContain('already been paid in full');
+      expect(email.text).not.toContain('booking fee twice');
+      // Listed as a full refund, and the booking still counts what was due.
+      expect(await listRefundsDue(prisma)).toMatchObject([{ paymentId: stale.id, refundKind: 'full', refundAmountRwf: 30_000, overpaidRwf: 0 }]);
+      expect(await totalsOf(booking.id)).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 30_000, outstandingRwf: 0 });
+    });
+
+    it('is refund_due when another online fee already cleared the balance, and earns nothing', async () => {
+      const { booking, sessionFee } = await askedFor(30_000);
+      const again = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000 });
+      await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+      const outcome = await deliver(statusDelivery(again.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+      expect(outcome).toMatchObject({ status: 'applied', note: 'refund_due_duplicate_payment' });
+      expect(await overpaid(again.id)).toMatchObject({ status: 'refund_due', overpaidRwf: 0 });
+      expect(await earnings(again.id)).toStrictEqual([]);
+      expect((await outbox()).filter((row) => row.template === 'payment_receipt')).toHaveLength(1);
+    });
+
+    it('is still an overpayment, not a duplicate, while a single franc of it was due', async () => {
+      const { sessionFee } = await askedFor(30_001);
+      await deliver(statusDelivery(sessionFee.ourRef, 'SUCCESSFUL', { amount: '30001' }));
+
+      // 30,000 was due: 1 is extra.
+      expect(await overpaid(sessionFee.id)).toMatchObject({ status: 'succeeded', overpaidRwf: 1 });
+      expect(await earnings(sessionFee.id)).toStrictEqual([{ kind: 'earning', amountRwf: 30_000 }]);
+    });
+  });
+});
+
+// --- A session-fee success racing a cash recording (the lock order) --------------------------------
+
+/**
+ * Both write a booking's money, so both take the booking row and then its
+ * payment rows: the lock order in `applyEvent`. Before it, a success locked its
+ * payment row first and the booking second, while cash locks the booking first
+ * and then voids the open ask -- the same payment row -- so each could hold
+ * what the other waited for, and PostgreSQL would abort one (40P01): a 500 for
+ * the photographer. Now they queue on the booking row, and whichever goes first
+ * the other sees what it did.
+ *
+ * "No 500" is asserted where the routes decide it: `recordCashPayment` throwing
+ * is the studio route's 500, and a webhook outcome of `failed` is
+ * routes/payment-webhooks.ts's 500 (the provider retries).
+ */
+describe('a session-fee success racing a cash recording for the same booking', () => {
+  /**
+   * How long the cash waits before starting, round by round. Started together,
+   * the cash nearly always reaches the booking row first (the webhook stores
+   * its event before it locks anything), so later starts make the success win
+   * too: each test sees both orders, and `winners` says it did.
+   */
+  const CASH_DELAYS_MS = [0, 0, 0, 2, 5, 10, 20, 40, 80, 120, 0, 160];
+  const later = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** A completed shoot: 50,000 owed, 20,000 booking fee collected, 30,000 asked for online in a row old enough that cash may be recorded. */
+  async function race(seed: { status: 'initiated' | 'pending'; ageSeconds: number }, cashRwf: number, cashDelayMs: number) {
+    const booking = await insertBooking(prisma, world, { status: 'completed' });
+    await insertPayment(prisma, booking.id, { status: 'succeeded' });
+    const online = await insertPayment(prisma, booking.id, { kind: 'session_fee', amountRwf: 30_000, ...seed });
+
+    const [cash, webhook] = await Promise.all([
+      later(cashDelayMs)
+        .then(() => recordCashPayment({ prisma, now: () => NOW, photographerId: world.photographerId }, booking.id, { amountRwf: cashRwf, note: null }))
+        .then(
+        (result) => ({ status: result.status }),
+        (error: unknown) => ({ status: 'threw', error: String(error) }),
+      ),
+      deliver(statusDelivery(online.ourRef, 'SUCCESSFUL', { amount: '30000' })),
+    ]);
+
+    const payments = await prisma.payment.findMany({ where: { bookingId: booking.id } });
+    const sessionFee = payments.find((row) => row.id === online.id);
+    const cashRow = payments.find((row) => row.provider === 'cash');
+    const items = await prisma.payoutItem.findMany({ where: { paymentId: online.id } });
+    const full = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id }, include: { addons: true, payments: true } });
+    return { cash, webhook, sessionFee, cashRow, items, totals: bookingTotals(full, full.addons, full.payments) };
+  }
+
+  it('never fails either side when cash voids the open attempt the success is for, and the money is owed back', async () => {
+    const winners = new Set<string>();
+    for (const delay of CASH_DELAYS_MS) {
+      // An attempt whose provider call is long over: cash may void it (`superseded_by_cash`).
+      const r = await race({ status: 'initiated', ageSeconds: CALL_IN_FLIGHT_SECONDS + 60 }, 30_000, delay);
+      winners.add(r.cash.status === 'ok' ? 'cash' : 'webhook');
+
+      expect(r.cash.status, JSON.stringify(r.cash)).not.toBe('threw');
+      expect(r.webhook.status, r.webhook.note).not.toBe('failed');
+      if (r.cash.status === 'ok') {
+        // Cash first: the attempt was voided, and then the client paid it anyway.
+        // None of it was due, so it is owed back whole and never earns.
+        expect(r.webhook).toMatchObject({ status: 'applied', note: 'refund_due_duplicate_payment' });
+        expect(r.sessionFee).toMatchObject({ status: 'refund_due', settledAt: NOW, overpaidRwf: 0 });
+        expect(r.items).toEqual([]);
+        expect((await listRefundsDue(prisma)).filter((row) => row.paymentId === r.sessionFee?.id)).toMatchObject([{ refundKind: 'full', refundAmountRwf: 30_000 }]);
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, outstandingRwf: 0, refundDueRwf: 30_000 });
+      } else {
+        // The success first: paid exactly, so the cash finds nothing left to record.
+        expect(r.cash.status).toBe('nothing_to_pay');
+        expect(r.sessionFee).toMatchObject({ status: 'succeeded', overpaidRwf: 0 });
+        expect(r.cashRow).toBeUndefined();
+        expect(r.items.map((item) => item.amountRwf)).toEqual([30_000]);
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, outstandingRwf: 0, refundDueRwf: 0 });
+      }
+    }
+    expect([...winners].sort()).toEqual(['cash', 'webhook']);
+  });
+
+  it('keeps what was still due when cash voided the attempt but covered only part of the balance', async () => {
+    const winners = new Set<string>();
+    for (const delay of CASH_DELAYS_MS) {
+      const r = await race({ status: 'initiated', ageSeconds: CALL_IN_FLIGHT_SECONDS + 60 }, 20_000, delay);
+      winners.add(r.cash.status === 'ok' ? 'cash' : 'webhook');
+
+      expect(r.cash.status, JSON.stringify(r.cash)).not.toBe('threw');
+      expect(r.webhook.status, r.webhook.note).toBe('applied');
+      if (r.cash.status === 'ok') {
+        // Cash first: 10,000 of the voided 30,000 was still due, 20,000 is extra.
+        expect(r.sessionFee).toMatchObject({ status: 'succeeded', overpaidRwf: 20_000 });
+        expect(r.items.map((item) => item.amountRwf)).toEqual([10_000]);
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 20_000, outstandingRwf: 0 });
+      } else {
+        expect(r.cash.status).toBe('nothing_to_pay');
+        expect(r.sessionFee).toMatchObject({ status: 'succeeded', overpaidRwf: 0 });
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 0, outstandingRwf: 0 });
+      }
+    }
+    expect([...winners].sort()).toEqual(['cash', 'webhook']);
+  });
+
+  it('accounts for the overpayment whichever wins, when the cash covers part of the balance', async () => {
+    const winners = new Set<string>();
+    for (const delay of CASH_DELAYS_MS) {
+      // A prompt older than the attempt window: no longer money moving, so cash is allowed.
+      const r = await race({ status: 'pending', ageSeconds: PAYMENT_ATTEMPT_WINDOW_SECONDS + 60 }, 20_000, delay);
+      winners.add(r.cash.status === 'ok' ? 'cash' : 'webhook');
+
+      expect(r.cash.status, JSON.stringify(r.cash)).not.toBe('threw');
+      expect(r.webhook.status, r.webhook.note).toBe('applied');
+      if (r.cash.status === 'ok') {
+        // Cash first: 20,000 of the 30,000 arriving online is extra.
+        expect(r.sessionFee).toMatchObject({ status: 'succeeded', overpaidRwf: 20_000 });
+        expect(r.items.map((item) => item.amountRwf)).toEqual([10_000]);
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 20_000, outstandingRwf: 0 });
+      } else {
+        expect(r.cash.status).toBe('nothing_to_pay');
+        expect(r.sessionFee).toMatchObject({ status: 'succeeded', overpaidRwf: 0 });
+        expect(r.items.map((item) => item.amountRwf)).toEqual([30_000]);
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 0, outstandingRwf: 0 });
+      }
+    }
+    expect([...winners].sort()).toEqual(['cash', 'webhook']);
+  });
+
+  it('accounts for a wholly extra fee whichever wins, when the cash covers all of it', async () => {
+    const winners = new Set<string>();
+    for (const delay of CASH_DELAYS_MS) {
+      const r = await race({ status: 'pending', ageSeconds: PAYMENT_ATTEMPT_WINDOW_SECONDS + 60 }, 30_000, delay);
+      winners.add(r.cash.status === 'ok' ? 'cash' : 'webhook');
+
+      expect(r.cash.status, JSON.stringify(r.cash)).not.toBe('threw');
+      expect(r.webhook.status, r.webhook.note).toBe('applied');
+      if (r.cash.status === 'ok') {
+        // Cash first: none of the online fee was due. Owed back whole, never earned.
+        expect(r.webhook.note).toBe('refund_due_duplicate_payment');
+        expect(r.sessionFee).toMatchObject({ status: 'refund_due', overpaidRwf: 0 });
+        expect(r.items).toEqual([]);
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 30_000, outstandingRwf: 0 });
+      } else {
+        expect(r.cash.status).toBe('nothing_to_pay');
+        expect(r.sessionFee).toMatchObject({ status: 'succeeded', overpaidRwf: 0 });
+        expect(r.items.map((item) => item.amountRwf)).toEqual([30_000]);
+        expect(r.totals).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 0, outstandingRwf: 0 });
+      }
+    }
+    expect([...winners].sort()).toEqual(['cash', 'webhook']);
+  });
+});
+
+// --- A success for a session fee we voided for cash ---------------------------------------------
+
+/**
+ * Cash voids an open session-fee ask (`superseded_by_cash`) so its link cannot
+ * collect the same balance twice. If the client pays it anyway, the provider's
+ * success is the only record that the money moved into the platform's account,
+ * so it is revived and measured like any success: wholly extra, `refund_due`
+ * with no earning and listed for the platform to send back. Only that reason of
+ * ours is revived; a failure the provider reported, or an attempt of ours that
+ * timed out, stays ignored (forward-only).
+ */
+describe('a success for a session fee voided by cash', () => {
+  const CASH = { amountRwf: 30_000, note: null };
+
+  /** A completed shoot: 50,000 owed, 20,000 collected, a 30,000 ask voided by 30,000 (or `cashRwf`) in cash. */
+  async function voidedByCash(cashRwf = 30_000) {
+    const booking = await insertBooking(prisma, world, { status: 'completed' });
+    await insertPayment(prisma, booking.id, { status: 'succeeded' });
+    const ask = await insertPayment(prisma, booking.id, { status: 'initiated', kind: 'session_fee', amountRwf: 30_000, ageSeconds: CALL_IN_FLIGHT_SECONDS + 60 });
+    const cash = await recordCashPayment({ prisma, now: () => NOW, photographerId: world.photographerId }, booking.id, { ...CASH, amountRwf: cashRwf });
+    expect(cash.status).toBe('ok');
+    expect(await paymentRow(ask.id)).toMatchObject({ status: 'failed', failure_reason: 'superseded_by_cash' });
+    await raw.query('DELETE FROM outbox');
+    return { booking, ask };
+  }
+
+  const earnings = async (paymentId: string) => prisma.payoutItem.count({ where: { paymentId } });
+
+  it('moves it to refund_due as a duplicate payment, settled, with the provider reference, and no earning', async () => {
+    const { ask } = await voidedByCash();
+
+    const outcome = await deliver(statusDelivery(ask.ourRef, 'SUCCESSFUL', { amount: '30000', financialTransactionId: 'LATE-1' }));
+
+    expect(outcome).toMatchObject({ status: 'applied', note: 'refund_due_duplicate_payment' });
+    expect(await paymentRow(ask.id)).toMatchObject({ status: 'refund_due', settled_at: NOW, provider_ref: 'LATE-1', amount_rwf: 30_000 });
+    expect(await earnings(ask.id)).toBe(0);
+    expect(sink.entries).toContainEqual(expect.objectContaining({ level: 'warn', event: 'webhook_success_for_locally_failed_payment', paymentId: ask.id, failureReason: 'superseded_by_cash' }));
+    expect(sink.entries).not.toContainEqual(expect.objectContaining({ event: 'webhook_success_for_failed_payment' }));
+  });
+
+  it('alerts the photographer with the duplicate session-fee wording, and sends the client no receipt', async () => {
+    const { ask } = await voidedByCash();
+    await deliver(statusDelivery(ask.ourRef, 'SUCCESSFUL', { amount: '30000', financialTransactionId: 'LATE-1' }));
+
+    const rows = await outbox();
+    expect(rows.map((row) => row.dedupe_key)).toEqual([`email:photographer_alert:refund_due:${ask.id}`]);
+    expect(rows[0]).toMatchObject({ recipient: PHOTOGRAPHER_EMAIL, payload: { reason: 'duplicate_payment', paymentKind: 'session_fee', amountRwf: 30_000, paymentReference: 'LATE-1' } });
+    const email = renderEmail('photographer_alert', rows[0]?.payload, { webOrigin: WEB_ORIGIN, locale: 'en' });
+    expect(email.text).toContain('already been paid in full');
+    expect(email.text).toContain('the platform refunds them');
+  });
+
+  it('is listed on the platform refunds as a full refund, and the platform can record it', async () => {
+    const { booking, ask } = await voidedByCash();
+    await deliver(statusDelivery(ask.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+    expect(await listRefundsDue(prisma)).toMatchObject([{ paymentId: ask.id, refundKind: 'full', refundAmountRwf: 30_000, booking: { id: booking.id } }]);
+
+    const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
+    const recorded = await recordRefund({ prisma, now: () => NOW, actor: { area: 'platform', userId: admin.id } }, ask.id, { reference: 'MTN-BACK-1' });
+
+    expect(recorded).toMatchObject({ status: 'recorded', refundKind: 'full', payment: { status: 'refunded', refundReference: 'MTN-BACK-1' } });
+    expect(await listRefundsDue(prisma)).toEqual([]);
+  });
+
+  it('does nothing on a duplicate delivery or a later event for the same success', async () => {
+    const { ask } = await voidedByCash();
+    const delivery = statusDelivery(ask.ourRef, 'SUCCESSFUL', { amount: '30000' });
+    await deliver(delivery);
+    const once = await rowJson('payment', ask.id);
+    const messages = await outbox();
+
+    const again = await deliver(delivery);
+    const later = await recordEvent(deps(), 'mtn_momo_direct', {
+      signatureValid: true,
+      event: event({ ourRef: ask.ourRef, reportedStatus: 'succeeded', amount: 30_000 }),
+      payload: null,
+    });
+
+    expect([again.status, later.status]).toEqual(['ignored', 'ignored']);
+    expect(later.note).toBe('payment_refund_due');
+    expect(await rowJson('payment', ask.id)).toBe(once);
+    expect(await outbox()).toStrictEqual(messages);
+    expect(await earnings(ask.id)).toBe(0);
+  });
+
+  it.each([
+    ['amount', { amount: '29000' }, 'amount_mismatch'],
+    ['currency', { amount: '30000', currency: 'USD' }, 'currency_mismatch'],
+  ] as const)('still ignores an %s mismatch, leaving it voided', async (_what, extra, note) => {
+    const { ask } = await voidedByCash();
+    const before = await rowJson('payment', ask.id);
+
+    const outcome = await deliver(statusDelivery(ask.ourRef, 'SUCCESSFUL', extra));
+
+    expect(outcome).toMatchObject({ status: 'ignored', note });
+    expect(await rowJson('payment', ask.id)).toBe(before);
+    expect(await outbox()).toEqual([]);
+  });
+
+  it('keeps what was still due when the cash covered only part of the balance', async () => {
+    const { booking, ask } = await voidedByCash(20_000);
+
+    const outcome = await deliver(statusDelivery(ask.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+    // 10,000 was still owed after the cash: it succeeds, earns that, and 20,000 goes back.
+    expect(outcome).toMatchObject({ status: 'applied' });
+    expect(await prisma.payment.findUniqueOrThrow({ where: { id: ask.id } })).toMatchObject({ status: 'succeeded', overpaidRwf: 20_000 });
+    expect((await prisma.payoutItem.findMany({ where: { paymentId: ask.id } })).map((item) => item.amountRwf)).toEqual([10_000]);
+    expect(await listRefundsDue(prisma)).toMatchObject([{ paymentId: ask.id, refundKind: 'overpayment', refundAmountRwf: 20_000 }]);
+    const full = await prisma.booking.findUniqueOrThrow({ where: { id: booking.id }, include: { addons: true, payments: true } });
+    expect(bookingTotals(full, full.addons, full.payments)).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 20_000, outstandingRwf: 0 });
+  });
+
+  describe('forward-only, for every failure that is not ours to revive', () => {
+    async function askedFor() {
+      const booking = await insertBooking(prisma, world, { status: 'completed' });
+      await insertPayment(prisma, booking.id, { status: 'succeeded' });
+      return insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000 });
+    }
+
+    it('ignores a success after the provider itself reported the payment failed, as today', async () => {
+      const ask = await askedFor();
+      await deliver(statusDelivery(ask.ourRef, 'FAILED', { amount: '30000', reason: 'PAYER_LIMIT_REACHED' }));
+      const before = await rowJson('payment', ask.id);
+      const messages = await outbox();
+
+      const outcome = await deliver(statusDelivery(ask.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+      expect(outcome).toMatchObject({ status: 'ignored', note: 'payment_failed' });
+      expect(await rowJson('payment', ask.id)).toBe(before);
+      expect(await outbox()).toStrictEqual(messages);
+      expect(sink.entries).toContainEqual(expect.objectContaining({ level: 'error', event: 'webhook_success_for_failed_payment', paymentId: ask.id }));
+    });
+
+    it.each(['http_400', 'http_409', 'RESOURCE_ALREADY_EXIST', 'redirect_required', 'method_unavailable', 'phone_not_rwandan_mobile'])(
+      'ignores a success for an attempt refused at initiation as %s',
+      async (reason) => {
+      const booking = await insertBooking(prisma, world, { status: 'completed' });
+      await insertPayment(prisma, booking.id, { status: 'succeeded' });
+      const attempt = await insertPayment(prisma, booking.id, { status: 'failed', kind: 'session_fee', amountRwf: 30_000, failureReason: reason });
+      const before = await rowJson('payment', attempt.id);
+
+      const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+      expect(outcome).toMatchObject({ status: 'ignored', note: 'payment_failed' });
+      expect(await rowJson('payment', attempt.id)).toBe(before);
+      expect(await prisma.payoutItem.count({ where: { paymentId: attempt.id } })).toBe(0);
+      },
+    );
+
+    it('ignores a FAILED event for a payment voided by cash: it is already failed', async () => {
+      const { ask } = await voidedByCash();
+      const before = await rowJson('payment', ask.id);
+
+      const outcome = await deliver(statusDelivery(ask.ourRef, 'FAILED', { amount: '30000' }));
+
+      expect(outcome).toMatchObject({ status: 'ignored', note: 'payment_failed' });
+      expect(await rowJson('payment', ask.id)).toBe(before);
+    });
+  });
+});
+
+// --- A late success for an attempt whose provider call failed on our side ----------------------
+
+/**
+ * "Count it, refund only if extra" (Phase 4). An attempt we marked `failed`
+ * ourselves because the call to the provider failed (`provider_timeout`,
+ * `provider_unavailable: ...`) may still have reached the payer, who approved
+ * it. A verified success then takes the success path exactly as a pending
+ * payment would: a booking fee confirms its booking if the slot is free, else it
+ * is owed back; a session fee pays what is still owed, with the overpayment
+ * split, or is owed back whole. A failure the provider reported never revives.
+ */
+describe('a late success for an attempt whose provider call failed on our side', () => {
+  const REASONS = ['provider_timeout', 'provider_unavailable: MTN MoMo answered 503'] as const;
+  const at = () => new Date(NOW.getTime() + 2 * DAY_MS);
+
+  async function earned(paymentId: string) {
+    return (await prisma.payoutItem.findMany({ where: { paymentId } })).map((item) => item.amountRwf);
+  }
+
+  async function totalsOf(bookingId: string) {
+    const full = await prisma.booking.findUniqueOrThrow({ where: { id: bookingId }, include: { addons: true, payments: true } });
+    return bookingTotals(full, full.addons, full.payments);
+  }
+
+  describe('a booking fee', () => {
+    it.each(REASONS)('confirms the booking when the slot is still free (%s)', async (reason) => {
+      const booking = await insertBooking(prisma, world, { startsAt: at() });
+      const attempt = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: reason });
+
+      const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL', { financialTransactionId: 'LATE-FEE' }));
+
+      expect(outcome).toMatchObject({ status: 'applied', note: 'booking_confirmed' });
+      expect(await paymentRow(attempt.id)).toMatchObject({ status: 'succeeded', settled_at: NOW, provider_ref: 'LATE-FEE', failure_reason: reason });
+      expect(await bookingRow(booking.id)).toMatchObject({ status: 'confirmed', confirmed_at: NOW, hold_expires_at: null });
+      expect(await earned(attempt.id)).toEqual([20_000]);
+      expect((await outbox()).map((row) => row.template).sort()).toEqual(['booking_confirmation', 'photographer_new_booking']);
+      expect(tokens).toHaveLength(1);
+      expect(sink.entries).toContainEqual(expect.objectContaining({ level: 'warn', event: 'webhook_success_for_locally_failed_payment', failureReason: reason }));
+    });
+
+    it('re-confirms an expired booking whose slot is still free', async () => {
+      const booking = await insertBooking(prisma, world, { status: 'expired', startsAt: at() });
+      const attempt = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'provider_timeout' });
+
+      const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL'));
+
+      expect(outcome).toMatchObject({ status: 'applied', note: 'booking_reconfirmed' });
+      expect(await bookingRow(booking.id)).toMatchObject({ status: 'confirmed' });
+    });
+
+    it('is refund_due as late_payment_slot_taken when the slot has gone, with no earning', async () => {
+      const booking = await insertBooking(prisma, world, { status: 'expired', startsAt: at() });
+      const attempt = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'provider_timeout' });
+      await insertBooking(prisma, world, { status: 'confirmed', startsAt: at() });
+
+      const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL'));
+
+      expect(outcome).toMatchObject({ status: 'applied', note: 'refund_due_slot_taken' });
+      expect(await paymentRow(attempt.id)).toMatchObject({ status: 'refund_due', settled_at: NOW });
+      expect(await bookingRow(booking.id)).toMatchObject({ status: 'expired', confirmed_at: null });
+      expect(await earned(attempt.id)).toEqual([]);
+      expect((await outbox()).map((row) => row.payload.reason)).toEqual(['late_payment_slot_taken']);
+      expect(await listRefundsDue(prisma)).toMatchObject([{ paymentId: attempt.id, refundKind: 'full', refundAmountRwf: 20_000 }]);
+    });
+
+    it('is refund_due as duplicate_payment when a retry already paid the fee, and the booking is left as it was', async () => {
+      const booking = await insertBooking(prisma, world, { status: 'confirmed', startsAt: at() });
+      const attempt = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'provider_unavailable: MTN MoMo could not be reached: TypeError', ageSeconds: 600 });
+      await insertPayment(prisma, booking.id, { status: 'succeeded' });
+      const before = await rowJson('booking', booking.id);
+
+      const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL'));
+
+      expect(outcome).toMatchObject({ status: 'applied', note: 'refund_due_duplicate_payment' });
+      expect(await paymentRow(attempt.id)).toMatchObject({ status: 'refund_due' });
+      expect(await rowJson('booking', booking.id)).toBe(before);
+      expect(await earned(attempt.id)).toEqual([]);
+      const alert = (await outbox()).find((row) => row.template === 'photographer_alert');
+      expect(alert?.payload).toMatchObject({ reason: 'duplicate_payment' });
+      expect(alert?.payload).not.toHaveProperty('paymentKind');
+    });
+  });
+
+  describe('a session fee', () => {
+    /** A completed shoot: 50,000 owed, 20,000 booking fee collected, a 30,000 attempt failed on our side. */
+    async function timedOut() {
+      const booking = await insertBooking(prisma, world, { status: 'completed' });
+      await insertPayment(prisma, booking.id, { status: 'succeeded' });
+      const attempt = await insertPayment(prisma, booking.id, { status: 'failed', kind: 'session_fee', amountRwf: 30_000, failureReason: 'provider_timeout' });
+      return { booking, attempt };
+    }
+
+    it('pays what is still owed: succeeded, earned in full, receipted', async () => {
+      const { booking, attempt } = await timedOut();
+
+      const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+      expect(outcome).toMatchObject({ status: 'applied' });
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: attempt.id } })).toMatchObject({ status: 'succeeded', overpaidRwf: 0 });
+      expect(await earned(attempt.id)).toEqual([30_000]);
+      expect((await outbox()).map((row) => row.template).sort()).toEqual(['payment_receipt', 'photographer_alert']);
+      expect(await totalsOf(booking.id)).toMatchObject({ collectedRwf: 50_000, outstandingRwf: 0, refundDueRwf: 0 });
+    });
+
+    it('splits a partly extra payment: what was still owed is earned, the rest is listed for refund', async () => {
+      const { booking, attempt } = await timedOut();
+      // Meanwhile 20,000 of the balance was paid another way.
+      await insertPayment(prisma, booking.id, { status: 'succeeded', kind: 'session_fee', provider: 'cash', amountRwf: 20_000 });
+
+      await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: attempt.id } })).toMatchObject({ status: 'succeeded', overpaidRwf: 20_000 });
+      expect(await earned(attempt.id)).toEqual([10_000]);
+      expect(await listRefundsDue(prisma)).toMatchObject([{ paymentId: attempt.id, refundKind: 'overpayment', refundAmountRwf: 20_000 }]);
+      expect(await totalsOf(booking.id)).toMatchObject({ collectedRwf: 50_000, refundDueRwf: 20_000, outstandingRwf: 0 });
+    });
+
+    it('is refund_due as duplicate_payment when a retry already paid the balance', async () => {
+      const { booking, attempt } = await timedOut();
+      await insertPayment(prisma, booking.id, { status: 'succeeded', kind: 'session_fee', amountRwf: 30_000 });
+
+      const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL', { amount: '30000' }));
+
+      expect(outcome).toMatchObject({ status: 'applied', note: 'refund_due_duplicate_payment' });
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: attempt.id } })).toMatchObject({ status: 'refund_due', overpaidRwf: 0 });
+      expect(await earned(attempt.id)).toEqual([]);
+      expect((await outbox()).find((row) => row.template === 'photographer_alert')?.payload).toMatchObject({ reason: 'duplicate_payment', paymentKind: 'session_fee' });
+      expect(await listRefundsDue(prisma)).toMatchObject([{ paymentId: attempt.id, refundKind: 'full', refundAmountRwf: 30_000 }]);
+    });
+  });
+
+  it('does nothing on a replay or a later event once revived', async () => {
+    const booking = await insertBooking(prisma, world, { startsAt: at() });
+    const attempt = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'provider_timeout' });
+    const delivery = statusDelivery(attempt.ourRef, 'SUCCESSFUL');
+    await deliver(delivery);
+    const payment = await rowJson('payment', attempt.id);
+    const confirmed = await rowJson('booking', booking.id);
+    const messages = await outbox();
+
+    const again = await deliver(delivery);
+    const later = await recordEvent(deps(), 'mtn_momo_direct', { signatureValid: true, event: event({ ourRef: attempt.ourRef, amount: 20_000 }), payload: null });
+
+    expect([again.status, later.status]).toEqual(['ignored', 'ignored']);
+    expect(await rowJson('payment', attempt.id)).toBe(payment);
+    expect(await rowJson('booking', booking.id)).toBe(confirmed);
+    expect(await outbox()).toStrictEqual(messages);
+    expect(await earned(attempt.id)).toEqual([20_000]);
+    expect(tokens).toHaveLength(1);
+  });
+
+  it.each([
+    ['amount', { amount: '19000' }, 'amount_mismatch'],
+    ['currency', { currency: 'USD' }, 'currency_mismatch'],
+  ] as const)('still ignores an %s mismatch, leaving it failed', async (_what, extra, note) => {
+    const booking = await insertBooking(prisma, world, { startsAt: at() });
+    const attempt = await insertPayment(prisma, booking.id, { status: 'failed', failureReason: 'provider_timeout' });
+    const before = await rowJson('payment', attempt.id);
+
+    const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL', extra));
+
+    expect(outcome).toMatchObject({ status: 'ignored', note });
+    expect(await rowJson('payment', attempt.id)).toBe(before);
+    expect(await bookingRow(booking.id)).toMatchObject({ status: 'pending_payment' });
+  });
+
+  it('ignores a success after the provider reported FAILED, even if its reason reads like one of ours', async () => {
+    const booking = await insertBooking(prisma, world, { startsAt: at() });
+    const attempt = await insertPayment(prisma, booking.id, { status: 'pending' });
+    await deliver(statusDelivery(attempt.ourRef, 'FAILED', { reason: 'PAYER_LIMIT_REACHED' }));
+    // A provider reason that happens to match: the applied FAILED verdict still decides.
+    await raw.query(`UPDATE payment SET failure_reason = 'provider_timeout' WHERE id = $1`, [attempt.id]);
+    const before = await rowJson('payment', attempt.id);
+
+    const outcome = await deliver(statusDelivery(attempt.ourRef, 'SUCCESSFUL'));
+
+    expect(outcome).toMatchObject({ status: 'ignored', note: 'payment_failed' });
+    expect(await rowJson('payment', attempt.id)).toBe(before);
+    expect(await bookingRow(booking.id)).toMatchObject({ status: 'pending_payment', confirmed_at: null });
+    expect(sink.entries).toContainEqual(expect.objectContaining({ level: 'error', event: 'webhook_success_for_failed_payment', paymentId: attempt.id }));
+  });
+
+  it('classifies exactly our own provider-call failures as revivable', () => {
+    for (const reason of ['superseded_by_cash', 'provider_timeout', 'provider_unavailable: MTN MoMo answered 503', 'provider_unavailable: Error']) {
+      expect([reason, locallyFailed(reason)]).toEqual([reason, true]);
+    }
+    for (const reason of [null, 'http_400', 'http_409', 'redirect_required', 'method_unavailable', 'phone_not_rwandan_mobile', 'PAYER_LIMIT_REACHED', 'failed', 'provider_unavailable', 'provider_timeout ']) {
+      expect([reason, locallyFailed(reason)]).toEqual([reason, false]);
+    }
   });
 });

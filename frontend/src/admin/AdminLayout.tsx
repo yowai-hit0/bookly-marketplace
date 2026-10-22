@@ -1,7 +1,7 @@
 import { CalendarCheck, CircleX, Clock, LogOut } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet, useLocation } from 'react-router'
+import { Link, Outlet, useLocation } from 'react-router'
 import { RequireSession } from '@/auth/RequireSession'
 import { useSignOut } from '@/auth/useSignOut'
 import { Button } from '@/components/ui/button'
@@ -11,7 +11,7 @@ import { StatusBadgeVariantContext } from '@/components/ui/status-badge-context'
 import { cn } from '@/lib/utils'
 import { BreadcrumbTailContext, useBreadcrumbTailState } from './breadcrumb-tail'
 import { Breadcrumbs } from './breadcrumbs'
-import { NAV_ITEMS } from './nav'
+import { NAV_ITEMS, navItemFor } from './nav'
 import { adminFetch } from './api'
 import { ThemeToggle } from './ThemeToggle'
 import { useAdminTheme } from './theme'
@@ -49,7 +49,7 @@ function StudioShell() {
   const { pathname } = useLocation()
   const { preference, setPreference } = useAdminTheme()
   const [tail, setTail] = useBreadcrumbTailState()
-
+  const current = navItemFor(pathname)?.page ?? null
 
   return (
     <div className="bg-background text-foreground min-h-svh lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[3.5rem_1fr]">
@@ -82,23 +82,27 @@ function StudioShell() {
             aria-label={t('admin:nav.label')}
             className="order-3 flex w-full basis-full flex-wrap gap-1 lg:order-2 lg:w-auto lg:flex-1 lg:basis-auto lg:flex-col lg:flex-nowrap"
           >
-            {NAV_ITEMS.map(({ page, icon: Icon }) => (
-              <NavLink
-                key={page}
-                to={`/studio/${page}`}
-                className={({ isActive }) =>
-                  cn(
+            {NAV_ITEMS.map(({ page, icon: Icon }) => {
+              // The section the path is in, so a page with no link of its own
+              // (one payout, the payout method) still marks Earnings current.
+              const isActive = current === page
+              return (
+                <Link
+                  key={page}
+                  to={`/studio/${page}`}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
                     'flex min-h-11 items-center gap-3 rounded-xs px-3.5 text-base motion-safe:transition-colors motion-safe:duration-150',
                     isActive
                       ? 'bg-sidebar-primary text-sidebar-primary-foreground font-medium'
                       : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                  )
-                }
-              >
-                <Icon aria-hidden="true" className="size-4.5 shrink-0" />
-                {t(`admin:nav.${page}`)}
-              </NavLink>
-            ))}
+                  )}
+                >
+                  <Icon aria-hidden="true" className="size-4.5 shrink-0" />
+                  {t(`admin:nav.${page}`)}
+                </Link>
+              )
+            })}
           </nav>
 
           <div className="order-2 ml-auto lg:order-3 lg:mt-auto lg:ml-0 lg:border-t lg:pt-3">

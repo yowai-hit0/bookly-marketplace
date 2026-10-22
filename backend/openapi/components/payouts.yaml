@@ -1,0 +1,473 @@
+# Payouts (marketplace-spec.md Phase 4, R4.1-R4.6): where a photographer is
+# paid, what they have earned, the payouts the platform makes by hand, and the
+# refunds of money paid online that the platform records.
+
+schemas:
+  PayoutMethodKind:
+    type: string
+    enum: [momo, bank]
+
+  MomoNetwork:
+    type: string
+    enum: [mtn, airtel]
+
+  PayoutMethod:
+    type: object
+    description: |
+      Where the photographer is paid. Immutable: saving a new one retires this
+      row and creates another, so `id` changes on every save.
+    required: [id, kind, momoNetwork, momoNumber, bankName, bankAccountNumber, accountName, createdAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { $ref: '#/schemas/PayoutMethodKind' }
+      momoNetwork:
+        oneOf:
+          - $ref: '#/schemas/MomoNetwork'
+          - type: 'null'
+        description: Set for `momo` only.
+      momoNumber:
+        type: [string, 'null']
+        pattern: '^\+2507[2389][0-9]{7}$'
+        description: E.164. Set for `momo` only.
+      bankName: { type: [string, 'null'], description: Set for `bank` only. }
+      bankAccountNumber: { type: [string, 'null'], description: Set for `bank` only. }
+      accountName: { type: string, minLength: 1, maxLength: 120, description: The name the account is registered to. }
+      createdAt:
+        $ref: 'common.yaml#/schemas/Instant'
+        description: When this destination was saved.
+
+  PlatformPayoutMethod:
+    type: object
+    description: A payout method as the platform sees it, with when it was replaced.
+    required: [id, kind, momoNetwork, momoNumber, bankName, bankAccountNumber, accountName, createdAt, retiredAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { $ref: '#/schemas/PayoutMethodKind' }
+      momoNetwork:
+        oneOf:
+          - $ref: '#/schemas/MomoNetwork'
+          - type: 'null'
+      momoNumber: { type: [string, 'null'] }
+      bankName: { type: [string, 'null'] }
+      bankAccountNumber: { type: [string, 'null'] }
+      accountName: { type: string }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      retiredAt:
+        type: [string, 'null']
+        format: date-time
+        description: When the photographer replaced it; null while current.
+
+  PayoutMethodCurrent:
+    type: object
+    required: [payoutMethod]
+    additionalProperties: false
+    properties:
+      payoutMethod:
+        description: The current destination, or null if none has been saved.
+        oneOf:
+          - $ref: '#/schemas/PayoutMethod'
+          - type: 'null'
+
+  PayoutMethodEnvelope:
+    type: object
+    required: [payoutMethod]
+    additionalProperties: false
+    properties:
+      payoutMethod: { $ref: '#/schemas/PayoutMethod' }
+
+  PayoutMethodRequest:
+    description: |
+      One of two shapes, by `kind`; a field of the other shape is a `400`.
+      `currentPassword` is the account's password: without it, or wrong, the
+      change is a `403`.
+    oneOf:
+      - type: object
+        title: MoMo
+        required: [kind, momoNetwork, momoNumber, accountName]
+        additionalProperties: false
+        properties:
+          kind: { const: momo }
+          momoNetwork: { $ref: '#/schemas/MomoNetwork' }
+          momoNumber:
+            type: string
+            maxLength: 32
+            description: |
+              A Rwandan mobile number, typed any usual way (`0788 123 456`,
+              `+250 788 123 456`); stored as E.164. It must be on the network's
+              own prefixes (MTN 078/079, Airtel 072/073), or it is a `422`.
+          accountName: { type: string, minLength: 1, maxLength: 120 }
+          currentPassword: { type: string, maxLength: 1024 }
+      - type: object
+        title: Bank
+        required: [kind, bankName, bankAccountNumber, accountName]
+        additionalProperties: false
+        properties:
+          kind: { const: bank }
+          bankName: { type: string, minLength: 1, maxLength: 100 }
+          bankAccountNumber:
+            type: string
+            minLength: 5
+            maxLength: 40
+            description: Letters, digits, spaces and dashes, with at least one digit.
+          accountName: { type: string, minLength: 1, maxLength: 120 }
+          currentPassword: { type: string, maxLength: 1024 }
+
+  PayoutItemState:
+    type: string
+    enum: [pending, payable, in_draft, paid, voided]
+    description: |
+      `pending`: succeeded but not payable yet (a session fee before its shoot
+      has ended). `payable`: payable now, in no payout. `in_draft`: in a payout
+      being prepared. `paid`: in a payout marked paid. `voided`: refunded before
+      any payout, so it no longer counts.
+
+  PayoutItem:
+    type: object
+    description: |
+      One line of what the photographer is owed: an `earning` (a succeeded booking
+      or session fee paid online, its full amount: no commission) or a
+      `reversal` (the negative of an earning already paid out, after its payment
+      was refunded). Cash never has a line.
+    required: [id, kind, amountRwf, state, payoutId, createdAt, voidedAt, payment, booking]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { type: string, enum: [earning, reversal] }
+      amountRwf: { type: integer, description: 'Positive for an earning, negative for a reversal.' }
+      state: { $ref: '#/schemas/PayoutItemState' }
+      payoutId:
+        oneOf:
+          - $ref: 'common.yaml#/schemas/Uuid'
+          - type: 'null'
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      voidedAt: { type: [string, 'null'], format: date-time }
+      payment:
+        type: object
+        required: [id, kind, provider, status, amountRwf, settledAt]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          kind: { $ref: 'common.yaml#/schemas/PaymentKind' }
+          provider: { type: string, examples: [mtn_momo_direct, flutterwave] }
+          status: { $ref: 'common.yaml#/schemas/PaymentStatus' }
+          amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          settledAt: { type: [string, 'null'], format: date-time }
+      booking:
+        type: object
+        description: The booking the line is for. `id` opens it in the studio.
+        required: [id, reference, status, startsAt, endsAt]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+          status: { $ref: 'common.yaml#/schemas/BookingStatus' }
+          startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+
+  StudioPayout:
+    type: object
+    required: [id, status, amountRwf, itemCount, transferReference, createdAt, paidAt, payoutMethod]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      status: { type: string, enum: [draft, paid] }
+      amountRwf: { type: integer, minimum: 1 }
+      itemCount: { type: integer, minimum: 0 }
+      transferReference: { type: [string, 'null'], description: The MoMo or bank transaction id, once paid. }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      paidAt: { type: [string, 'null'], format: date-time }
+      payoutMethod:
+        $ref: '#/schemas/PayoutMethod'
+        description: The destination it was sent, or is being sent, to.
+
+  StudioPayoutDetail:
+    type: object
+    required: [payout]
+    additionalProperties: false
+    properties:
+      payout:
+        type: object
+        required: [id, status, amountRwf, itemCount, transferReference, createdAt, paidAt, payoutMethod, items]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          status: { type: string, enum: [draft, paid] }
+          amountRwf: { type: integer, minimum: 1 }
+          itemCount: { type: integer, minimum: 0 }
+          transferReference: { type: [string, 'null'] }
+          createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+          paidAt: { type: [string, 'null'], format: date-time }
+          payoutMethod: { $ref: '#/schemas/PayoutMethod' }
+          items:
+            type: array
+            items: { $ref: '#/schemas/PayoutItem' }
+
+  StudioEarnings:
+    type: object
+    required: [totals, items, payouts]
+    additionalProperties: false
+    properties:
+      totals:
+        type: object
+        description: Sums of the lines in each state. `payableRwf` may be nought or negative when reversals outweigh new earnings.
+        required: [pendingRwf, payableRwf, inDraftRwf, paidRwf]
+        additionalProperties: false
+        properties:
+          pendingRwf: { type: integer }
+          payableRwf: { type: integer }
+          inDraftRwf: { type: integer }
+          paidRwf: { type: integer }
+      items:
+        type: array
+        description: Every line, voided ones included, newest first.
+        items: { $ref: '#/schemas/PayoutItem' }
+      payouts:
+        type: array
+        description: The draft being prepared, if any, and every paid payout, newest first. Cancelled drafts are not shown.
+        items: { $ref: '#/schemas/StudioPayout' }
+
+  PhotographerSummary:
+    type: object
+    required: [id, handle, displayName, email, status]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      handle: { type: string }
+      displayName: { type: string }
+      email: { type: string, format: email, description: The photographer's login address. }
+      status: { $ref: 'platform.yaml#/schemas/PhotographerStatus' }
+
+  UserSummary:
+    type: object
+    required: [id, email, fullName]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      email: { type: string, format: email }
+      fullName: { type: [string, 'null'] }
+
+  NullableUserSummary:
+    oneOf:
+      - $ref: '#/schemas/UserSummary'
+      - type: 'null'
+
+  PayoutStatus:
+    type: string
+    enum: [draft, paid, cancelled]
+
+  PlatformPayout:
+    type: object
+    required:
+      [id, status, amountRwf, itemCount, photographer, payoutMethod, payoutMethodIsCurrent, methodChangedRecently, transferReference, note, createdAt, createdBy, paidAt, paidBy, cancelledAt, cancelledBy]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      status: { $ref: '#/schemas/PayoutStatus' }
+      amountRwf: { type: integer, minimum: 1, description: The items' total when the draft was built. }
+      itemCount: { type: integer, minimum: 0, description: Nought once a draft is cancelled, which releases its items. }
+      photographer: { $ref: '#/schemas/PhotographerSummary' }
+      payoutMethod:
+        $ref: '#/schemas/PlatformPayoutMethod'
+        description: The destination the draft was built for.
+      payoutMethodIsCurrent:
+        type: boolean
+        description: False once the photographer has saved another destination since the draft was built. Check before transferring.
+      methodChangedRecently:
+        type: boolean
+        description: The photographer's current destination was saved within the last 72 hours (R4.1).
+      transferReference: { type: [string, 'null'] }
+      note: { type: [string, 'null'], description: What the admin typed when marking it paid. Platform-internal. }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      createdBy: { $ref: '#/schemas/UserSummary' }
+      paidAt: { type: [string, 'null'], format: date-time }
+      paidBy: { $ref: '#/schemas/NullableUserSummary' }
+      cancelledAt: { type: [string, 'null'], format: date-time }
+      cancelledBy: { $ref: '#/schemas/NullableUserSummary' }
+
+  PlatformPayoutDetail:
+    type: object
+    required:
+      [id, status, amountRwf, itemCount, photographer, payoutMethod, payoutMethodIsCurrent, methodChangedRecently, transferReference, note, createdAt, createdBy, paidAt, paidBy, cancelledAt, cancelledBy, items]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      status: { $ref: '#/schemas/PayoutStatus' }
+      amountRwf: { type: integer, minimum: 1 }
+      itemCount: { type: integer, minimum: 0 }
+      photographer: { $ref: '#/schemas/PhotographerSummary' }
+      payoutMethod: { $ref: '#/schemas/PlatformPayoutMethod' }
+      payoutMethodIsCurrent: { type: boolean }
+      methodChangedRecently: { type: boolean }
+      transferReference: { type: [string, 'null'] }
+      note: { type: [string, 'null'] }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      createdBy: { $ref: '#/schemas/UserSummary' }
+      paidAt: { type: [string, 'null'], format: date-time }
+      paidBy: { $ref: '#/schemas/NullableUserSummary' }
+      cancelledAt: { type: [string, 'null'], format: date-time }
+      cancelledBy: { $ref: '#/schemas/NullableUserSummary' }
+      items:
+        type: array
+        items: { $ref: '#/schemas/PayoutItem' }
+
+  PlatformPayoutEnvelope:
+    type: object
+    required: [payout]
+    additionalProperties: false
+    properties:
+      payout: { $ref: '#/schemas/PlatformPayoutDetail' }
+
+  PlatformPayoutList:
+    type: object
+    required: [payouts]
+    additionalProperties: false
+    properties:
+      payouts:
+        type: array
+        description: Newest first.
+        items: { $ref: '#/schemas/PlatformPayout' }
+
+  PayoutsDue:
+    type: object
+    required: [due]
+    additionalProperties: false
+    properties:
+      due:
+        type: array
+        description: Photographers whose payable balance is above nought, largest first.
+        items:
+          type: object
+          required: [photographer, payableRwf, itemCount, payoutMethod, methodChangedRecently, draftPayoutId]
+          additionalProperties: false
+          properties:
+            photographer: { $ref: '#/schemas/PhotographerSummary' }
+            payableRwf: { type: integer, minimum: 1 }
+            itemCount: { type: integer, minimum: 1 }
+            payoutMethod:
+              description: The current destination; null when none is saved (a draft cannot be built).
+              oneOf:
+                - $ref: '#/schemas/PlatformPayoutMethod'
+                - type: 'null'
+            methodChangedRecently:
+              type: boolean
+              description: The destination was saved within the last 72 hours (R4.1). A takeover would aim here; confirm with the photographer before sending.
+            draftPayoutId:
+              description: A draft already being prepared, which must be paid or cancelled before another is built.
+              oneOf:
+                - $ref: 'common.yaml#/schemas/Uuid'
+                - type: 'null'
+
+  BuildRefused:
+    type: object
+    description: |
+      `no_payout_method`: the photographer has no destination saved.
+      `draft_exists`: a draft is already being prepared (`payoutId` names it).
+      `nothing_payable`: the payable total is nought or less (`payableRwf`);
+      nothing was created and the balance carries forward.
+    required: [error]
+    additionalProperties: false
+    properties:
+      error: { type: string, enum: [no_payout_method, draft_exists, nothing_payable] }
+      payoutId: { $ref: 'common.yaml#/schemas/Uuid' }
+      payableRwf: { type: integer, maximum: 0 }
+
+  PayoutNotDraft:
+    type: object
+    description: Only a draft can be marked paid or cancelled. The payout as it now stands.
+    required: [error, payout]
+    additionalProperties: false
+    properties:
+      error: { const: not_draft }
+      payout: { $ref: '#/schemas/PlatformPayoutDetail' }
+
+  RefundDue:
+    type: object
+    required: [paymentId, kind, provider, method, amountRwf, ourRef, providerRef, settledAt, refundKind, refundAmountRwf, overpaidRwf, booking, photographer]
+    additionalProperties: false
+    properties:
+      paymentId: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { $ref: 'common.yaml#/schemas/PaymentKind' }
+      provider: { type: string, enum: [mtn_momo_direct, flutterwave] }
+      method: { type: [string, 'null'] }
+      amountRwf: { $ref: 'common.yaml#/schemas/Rwf', description: The whole payment, as it was paid. }
+      ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+      providerRef: { type: [string, 'null'], description: The provider's transaction id, to refund against. }
+      settledAt: { type: [string, 'null'], format: date-time }
+      refundKind: { $ref: '#/schemas/RefundKind' }
+      refundAmountRwf:
+        $ref: 'common.yaml#/schemas/Rwf'
+        description: |
+          What to send back. `full`: the whole amount, less an overpaid part the
+          platform already returned. `overpayment`: the overpaid part.
+      overpaidRwf:
+        type: integer
+        minimum: 0
+        description: The payment's overpaid part, returned or not; 0 when it was not overpaid.
+      booking:
+        type: object
+        required: [id, reference, status, startsAt, contactName, contactEmail, contactPhone]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+          status: { $ref: 'common.yaml#/schemas/BookingStatus' }
+          startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          contactName: { type: string }
+          contactEmail: { type: string }
+          contactPhone: { type: string }
+      photographer:
+        type: object
+        required: [id, handle, displayName]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          handle: { type: string }
+          displayName: { type: string }
+
+  RefundsDue:
+    type: object
+    required: [refunds]
+    additionalProperties: false
+    properties:
+      refunds:
+        type: array
+        description: Oldest first.
+        items: { $ref: '#/schemas/RefundDue' }
+
+  RefundKind:
+    type: string
+    enum: [full, overpayment]
+    description: |
+      `full`: the payment is owed back whole (`refund_due`). `overpayment`: a
+      session fee paid online for more than the booking was worth; it stays
+      `succeeded`, and only the overpaid part goes back (Phase 4 overpayment
+      decision). A payment is listed once: a full refund covers its overpaid part.
+
+  RecordedRefund:
+    type: object
+    required: [refund]
+    additionalProperties: false
+    properties:
+      refund:
+        type: object
+        required: [paymentId, kind, provider, amountRwf, status, refundKind, refundAmountRwf, overpaidRwf, refundedAt, refundReference, refundedByUserId]
+        additionalProperties: false
+        properties:
+          paymentId: { $ref: 'common.yaml#/schemas/Uuid' }
+          kind: { $ref: 'common.yaml#/schemas/PaymentKind' }
+          provider: { type: string }
+          amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          status:
+            type: string
+            enum: [refunded, succeeded]
+            description: A full refund leaves the payment `refunded`; an overpayment refund leaves it `succeeded`.
+          refundKind: { $ref: '#/schemas/RefundKind' }
+          refundAmountRwf: { $ref: 'common.yaml#/schemas/Rwf', description: What was sent back. }
+          overpaidRwf: { type: integer, minimum: 0 }
+          refundedAt:
+            $ref: 'common.yaml#/schemas/Instant'
+            description: When that refund was sent (`refunded_at`, or `overpayment_refunded_at`).
+          refundReference: { type: string }
+          refundedByUserId: { $ref: 'common.yaml#/schemas/Uuid' }

@@ -494,8 +494,15 @@ refund:
     tags: [Studio payments]
     summary: Record a refund
     description: |
-      Records that the photographer refunded a payment by hand (the system
-      never moves money). Needs the MoMo or bank reference it was sent with.
+      Records that the photographer gave back **cash** he was handed (the
+      system never moves money). Needs the reference or note it was given back
+      with.
+
+      Cash only (Phase 4 refund decision). A payment made online sits in the
+      platform's account, so a platform admin refunds and records it
+      (`POST /api/platform/refunds/{paymentId}`); here it is
+      `409 refund_with_platform`, and the booking shows it with
+      `refundPendingWithPlatform`.
     parameters:
       - $ref: ../components/common.yaml#/parameters/RowId
     requestBody:
@@ -522,11 +529,14 @@ refund:
       '404':
         $ref: ../components/common.yaml#/responses/NotFound
       '409':
-        description: The payment is not in a state that can be refunded.
+        description: |
+          `not_refundable`: the cash payment is not owed back.
+          `refund_with_platform`: the payment was made online; the platform refunds it.
+          The booking as it now stands is included.
         content:
           application/json:
             schema: { $ref: ../components/studio.yaml#/schemas/AdminBookingConflict }
-            example: { error: not_refundable, booking: null }
+            example: { error: refund_with_platform, booking: null }
       '422':
         description: A malformed reference or timestamp.
         content:

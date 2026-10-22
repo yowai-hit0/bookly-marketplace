@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import type { Booking, Prisma, PrismaClient } from '@prisma/client';
+import { type Booking, Prisma, type PrismaClient } from '@prisma/client';
 import { type AccessToken, accessTokenExpiry, generateAccessToken } from '../booking/access-token.js';
 import { completeIfSettled } from '../booking/auto-complete.js';
 import { expireOverlappingStaleHolds, lockPhotographerCalendar } from '../booking/claim.js';
-import { bookingTotals } from '../booking/totals.js';
+import { bookingTotals, overpaymentHeldRwf } from '../booking/totals.js';
 import { isSlotTaken, isTransactionConflict } from '../db/errors.js';
 import { OCCUPYING_STATUSES } from '../db/statuses.js';
 import { enqueue } from '../outbox/enqueue.js';
 import { bookingPhotographerRecipient } from '../outbox/recipients.js';
+import { recordEarning, recordRefundDue } from '../payouts/ledger.js';
+import { SUPERSEDED_BY_CASH } from './cash.js';
 import {
   type PaymentProvider,
   type PaymentProviderId,
@@ -46,6 +48,22 @@ import {
  * booking stays `expired`, the payment is `refund_due`, and the photographer is
  * told at once. A second fee for a booking that already has one is the same
  * kind of money: owed back, and flagged.
+ *
+ * Every success writes the payment's earning to the payout ledger in the same
+ * transaction (payouts/ledger.ts; marketplace-spec.md R4.2, T4.1), so the
+ * reconciler, which applies through this same path, earns too; a replay never
+ * reaches it (step 4), and the ledger's unique (payment, kind) would refuse a
+ * second earning anyway.
+ *
+ * A session fee that brings in more than the booking is worth (Phase 4
+ * overpayment decision) is measured under the booking's row lock, against what
+ * was due before it -- earlier overpaid parts never count towards that, so two
+ * overpayments do not double-count (booking/totals.ts). Some of it due: it
+ * succeeds with `overpaid_rwf` set in the same update, earns only the part that
+ * was due, and the platform returns the rest (`/api/platform/refunds`). None of
+ * it due -- a prompt approved after the balance was cleared another way -- it
+ * is `refund_due` whole, `duplicate_payment`, like a second booking fee. Set
+ * once, as the payment settles, so a replay cannot add to it (step 4).
  */
 
 export type WebhookDeps = {
@@ -209,6 +227,8 @@ type PaymentRecord = {
   provider_ref: string | null;
   method: string | null;
   amount_rwf: number;
+  /** Why a `failed` payment failed: a provider's verdict, or a reason of ours (`revivable`). */
+  failure_reason: string | null;
 };
 
 async function applyEvent(
@@ -233,22 +253,51 @@ async function applyEvent(
     SELECT status FROM webhook_event WHERE id = ${eventRowId}::uuid FOR UPDATE`;
   if (held[0]?.status !== 'received') return { status: 'ignored', note: 'already_processed', logs };
 
-  // Step 3. The payment row is locked first: it names the booking, and so the
-  // photographer, whose lock comes next.
-  const payment = await matchPayment(tx, providerId, event);
-  if (payment === null) return finish('ignored', 'no_matching_payment');
+  // Step 3. Matched without a lock: the match only names the booking and the
+  // photographer (a payment's booking never changes), so the locks below can be
+  // taken in the canonical order, and the payment is read again once held.
+  const matched = await matchPayment(tx, providerId, event);
+  if (matched === null) return finish('ignored', 'no_matching_payment');
 
-  // A success may confirm a booking into its slot, so it queues behind that
-  // photographer's slot claims -- the claim's own lock (R1.3). The order is
-  // always payment row, then photographer lock, then booking row. A claim never
-  // touches a payment row, so it can never hold the lock while waiting on one.
-  if (event.reportedStatus === 'succeeded') await lockPhotographerCalendar(tx, payment.photographer_id);
+  // THE LOCK ORDER (every writer of a booking's money, so no two can deadlock):
+  //
+  //   1. the photographer's calendar lock (booking/claim.ts), when slots matter
+  //   2. the booking row (FOR UPDATE, or an UPDATE of it)
+  //   3. its payment rows
+  //   4. their payout items (payouts/ledger.ts)
+  //
+  // Each path takes a prefix of that, in that order, and nothing after it:
+  // claims and reschedules take 1-2; cash (payments/cash.ts), session-fee asks
+  // (payments/session-fee.ts), attempts (payments/initiate.ts), add-ons and
+  // both cancellations (booking/cancel.ts, booking/admin-actions.ts) take 2-4;
+  // a refund recording (payments/refund.ts) takes 3 alone, then a per-reference
+  // lock that guards no row. A success here takes 1-4, since it may confirm a
+  // booking into its slot and must measure what the booking has collected
+  // (R1.3, Phase 4 overpayment decision). A pending or failed event takes 3
+  // alone: it moves no money towards the booking.
+  if (event.reportedStatus === 'succeeded') {
+    await lockPhotographerCalendar(tx, matched.photographer_id);
+    await tx.$queryRaw`SELECT id FROM booking WHERE id = ${matched.booking_id}::uuid FOR UPDATE`;
+  }
+  const payment = await lockPayment(tx, matched.id);
 
-  // Step 4.
-  if ((SETTLED_PAYMENT_STATUSES as readonly string[]).includes(payment.status)) {
+  // Step 4. One exception to forward-only: a payment WE marked `failed` with no
+  // provider verdict behind it (`revivable`), which the provider now reports
+  // paid. The money is in the platform's account, so it is counted, and refunded
+  // only if extra ("count it, refund only if extra", Phase 4): it takes the
+  // success path below exactly as a pending payment would -- a booking fee
+  // confirms its booking if the slot is free, else `refund_due`
+  // (`late_payment_slot_taken`, `duplicate_payment`); a session fee pays what is
+  // still owed, with the overpayment split, or is `refund_due` if wholly extra.
+  // Amount and currency are still checked first, and a replay finds it settled
+  // and is ignored. Its `failure_reason` is kept: the record of why it was
+  // marked failed. The locks are the success path's, in the lock order above:
+  // calendar, booking, then this payment.
+  const revived = event.reportedStatus === 'succeeded' && (await revivable(tx, payment));
+  if ((SETTLED_PAYMENT_STATUSES as readonly string[]).includes(payment.status) && !revived) {
     if (payment.status === 'failed' && event.reportedStatus === 'succeeded') {
-      // Ignored by the rule, but money may have moved: a request we recorded as
-      // timed out can still be approved on the payer's phone.
+      // Ignored by the rule, but money may have moved: the provider's own
+      // verdict was a failure, and forward-only stands.
       logs.push({ level: 'error', event: 'webhook_success_for_failed_payment', provider: providerId, paymentId: payment.id, eventRowId });
     }
     return finish('ignored', `payment_${payment.status}`);
@@ -288,10 +337,26 @@ async function applyEvent(
   }
 
   const settledAt = (deps.now ?? (() => new Date()))();
+  if (revived) {
+    logs.push({ level: 'warn', event: 'webhook_success_for_locally_failed_payment', provider: providerId, paymentId: payment.id, failureReason: payment.failure_reason, eventRowId });
+  }
   if (payment.kind !== 'booking_fee') {
     // A session fee (Task 20): recorded, receipted, and the photographer told.
-    await tx.payment.update({ where: { id: payment.id }, data: { status: 'succeeded', settledAt, ...reported } });
-    await flagOverpayment(tx, logs, payment);
+    // The booking row is held (the lock order above), and cash, add-ons and new
+    // asks all take it: what the booking is worth and what it has collected
+    // cannot move while the overpayment is measured.
+    const overpaidRwf = await overpaymentOf(tx, payment);
+    if (overpaidRwf >= payment.amount_rwf) {
+      // None of it was due: owed back whole, and it never earns (CHECK payment_overpaid_range).
+      const booking = await tx.booking.findUniqueOrThrow({ where: { id: payment.booking_id } });
+      await refundDue(tx, logs, booking, payment, reported, settledAt, 'duplicate_payment');
+      return finish('applied', 'refund_due_duplicate_payment');
+    }
+    await tx.payment.update({ where: { id: payment.id }, data: { status: 'succeeded', settledAt, overpaidRwf, ...reported } });
+    // Its earning, in this transaction (R4.2, T4.1): payable once the shoot has
+    // ended, and only the part that was due.
+    await recordEarning(tx, payment.id);
+    if (overpaidRwf > 0) await flagOverpayment(tx, logs, payment, overpaidRwf);
     await receipt(tx, logs, payment, reported, settledAt);
     // Paid in full after the shoot has begun: the booking completes itself, in
     // this same transaction (item 6, 2026-09-27). A replay never gets here --
@@ -300,7 +365,7 @@ async function applyEvent(
     return finish('applied', 'payment_succeeded');
   }
 
-  await tx.$queryRaw`SELECT id FROM booking WHERE id = ${payment.booking_id}::uuid FOR UPDATE`;
+  // The booking row is already held (the lock order above).
   const booking = await tx.booking.findUniqueOrThrow({ where: { id: payment.booking_id } });
 
   const otherFee = await tx.payment.count({
@@ -333,34 +398,111 @@ async function applyEvent(
   // own: nothing in the system makes one today. The money is recorded; the
   // photographer decides.
   await tx.payment.update({ where: { id: payment.id }, data: { status: 'succeeded', settledAt, ...reported } });
+  // Succeeded money earns like any other (R4.2); a refund the photographer
+  // decides on later takes it back through the ledger.
+  await recordEarning(tx, payment.id);
   logs.push({ level: 'error', event: 'webhook_fee_for_unexpected_booking', paymentId: payment.id, bookingStatus: booking.status, eventRowId });
   return finish('applied', 'payment_succeeded');
 }
 
+/**
+ * The payment an event names, read WITHOUT a lock: its booking and
+ * photographer are all the caller needs from it, to take the booking-side locks
+ * first (the lock order in `applyEvent`). `lockPayment` then reads it again,
+ * held, and nothing decided here is trusted beyond the ids.
+ */
 async function matchPayment(tx: Prisma.TransactionClient, providerId: PaymentProviderId, event: ProviderEvent): Promise<PaymentRecord | null> {
-  // `FOR UPDATE OF p`: the payment row only. The booking is read for its
-  // photographer here and locked later, after that photographer's lock.
   if (event.ourRef !== null && UUID.test(event.ourRef)) {
     const byOurRef = await tx.$queryRaw<PaymentRecord[]>`
-      SELECT p.id::text AS id, p.booking_id::text AS booking_id, b.photographer_id::text AS photographer_id, p.provider, p.kind,
-             p.status, p.our_ref::text AS our_ref, p.provider_ref, p.method, p.amount_rwf
+      SELECT ${PAYMENT_RECORD_COLUMNS}
         FROM payment p
         JOIN booking b ON b.id = p.booking_id
-       WHERE p.our_ref = ${event.ourRef}::uuid AND p.provider = ${providerId}
-         FOR UPDATE OF p`;
+       WHERE p.our_ref = ${event.ourRef}::uuid AND p.provider = ${providerId}`;
     if (byOurRef[0] !== undefined) return byOurRef[0];
   }
   if (event.providerRef !== null) {
     const byProviderRef = await tx.$queryRaw<PaymentRecord[]>`
-      SELECT p.id::text AS id, p.booking_id::text AS booking_id, b.photographer_id::text AS photographer_id, p.provider, p.kind,
-             p.status, p.our_ref::text AS our_ref, p.provider_ref, p.method, p.amount_rwf
+      SELECT ${PAYMENT_RECORD_COLUMNS}
         FROM payment p
         JOIN booking b ON b.id = p.booking_id
-       WHERE p.provider_ref = ${event.providerRef} AND p.provider = ${providerId}
-         FOR UPDATE OF p`;
+       WHERE p.provider_ref = ${event.providerRef} AND p.provider = ${providerId}`;
     if (byProviderRef[0] !== undefined) return byProviderRef[0];
   }
   return null;
+}
+
+const PAYMENT_RECORD_COLUMNS = Prisma.sql`
+  p.id::text AS id, p.booking_id::text AS booking_id, b.photographer_id::text AS photographer_id, p.provider, p.kind,
+  p.status, p.our_ref::text AS our_ref, p.provider_ref, p.method, p.amount_rwf, p.failure_reason`;
+
+/**
+ * Whether a `failed` payment is one a verified success may revive: failed by
+ * US, with no provider verdict behind it, so that a success can only mean the
+ * money moved. Every writer of `failure_reason` and what it means:
+ *
+ *   superseded_by_cash          payments/cash.ts. The photographer recorded cash
+ *                               and we voided the open ask. Revived.
+ *   provider_timeout            payments/initiate.ts. Our call to the provider
+ *                               did not answer within the deadline; the prompt may
+ *                               still have reached the payer. Revived.
+ *   provider_unavailable: ...   payments/initiate.ts. The call errored without a
+ *                               verdict: unreachable, an answer we could not read
+ *                               (5xx, no id, no charge), a token or configuration
+ *                               failure. Revived. Where the request never left us
+ *                               no success can arrive, so including those is
+ *                               harmless.
+ *   anything else from          A REJECTION: the provider answered the initiation
+ *   initiate.ts                 with a refusal (MTN 400/409 as its code or
+ *                               `http_400`/`http_409`, Flutterwave's failure codes,
+ *                               `redirect_required`), or our own pre-check refused
+ *                               before calling (`method_unavailable`,
+ *                               `phone_not_rwandan_mobile`). Not revived.
+ *   a FAILED event's reason     payments/webhooks.ts. The provider's verdict. Never
+ *                               revived: forward-only stands.
+ *
+ * The reason is matched exactly (or by the `provider_unavailable: ` prefix), and
+ * as a second guard the payment must have no FAILED verdict applied from the
+ * provider: a provider reason that happened to read `provider_timeout` could
+ * otherwise pass for one of ours. One writer ever sets a payment `failed` (each
+ * is guarded on a status not yet settled), so the guard costs nothing in the
+ * cases it does not catch.
+ */
+const REVIVABLE_FAILURE_REASONS: ReadonlySet<string> = new Set([SUPERSEDED_BY_CASH, 'provider_timeout']);
+const REVIVABLE_FAILURE_PREFIX = 'provider_unavailable: ';
+
+export function locallyFailed(reason: string | null): boolean {
+  return reason !== null && (REVIVABLE_FAILURE_REASONS.has(reason) || reason.startsWith(REVIVABLE_FAILURE_PREFIX));
+}
+
+async function revivable(tx: Prisma.TransactionClient, payment: PaymentRecord): Promise<boolean> {
+  if (payment.status !== 'failed' || !locallyFailed(payment.failure_reason)) return false;
+  const verdicts = await tx.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n
+      FROM webhook_event
+     WHERE provider = ${payment.provider}
+       AND status = 'applied'
+       AND reported_status = 'failed'
+       AND (our_ref = ${payment.our_ref}::uuid OR (${payment.provider_ref}::text IS NOT NULL AND provider_ref = ${payment.provider_ref}))`;
+  return verdicts[0]?.n === 0;
+}
+
+/**
+ * The matched payment, locked and read afresh: its status may have moved while
+ * this waited for the booking-side locks (cash voiding an open ask, a
+ * cancellation flagging it), and step 4 must judge what it is now. `FOR UPDATE
+ * OF p`: the payment row only; the booking row, when needed, is already held.
+ */
+async function lockPayment(tx: Prisma.TransactionClient, paymentId: string): Promise<PaymentRecord> {
+  const rows = await tx.$queryRaw<PaymentRecord[]>`
+    SELECT ${PAYMENT_RECORD_COLUMNS}
+      FROM payment p
+      JOIN booking b ON b.id = p.booking_id
+     WHERE p.id = ${paymentId}::uuid
+       FOR UPDATE OF p`;
+  const row = rows[0];
+  // Payments are never deleted (RESTRICT everywhere), so a matched one is still there.
+  if (row === undefined) throw new Error(`Payment ${paymentId} vanished between match and lock`);
+  return row;
 }
 
 /**
@@ -396,6 +538,8 @@ async function confirm(
   const { token, hash } = (deps.newAccessToken ?? generateAccessToken)();
 
   await tx.payment.update({ where: { id: payment.id }, data: { status: 'succeeded', settledAt: confirmedAt, ...reported } });
+  // The booking fee is payable to the photographer from now on (R4.2, T4.1).
+  await recordEarning(tx, payment.id);
   // Raises 23P01 if a writer outside the claim lock took the slot meanwhile;
   // the retry then finds it occupied.
   const confirmed = await tx.booking.update({
@@ -467,24 +611,36 @@ async function confirm(
 }
 
 /**
- * Money over what the booking is worth -- a second payment for a fee already
- * settled, or one that arrived after the amount was collected another way --
- * is owed back. The payment itself stays `succeeded`: it is the difference
- * that is owed, not the whole of it, and only the photographer can send it
- * (spec §6.16).
+ * How much of a session fee about to succeed is over what the booking is worth:
+ * what was due before it (`collectedRwf`, which counts earlier payments only for
+ * the part that was due) plus this amount, less the grand total. Read under the
+ * booking's row lock, which the caller holds.
+ */
+async function overpaymentOf(tx: Prisma.TransactionClient, payment: PaymentRecord): Promise<number> {
+  const booking = await tx.booking.findUniqueOrThrow({
+    where: { id: payment.booking_id },
+    include: { addons: true, payments: true },
+  });
+  // Not `succeeded` yet, so not counted; left out all the same, so it can never count twice.
+  const others = booking.payments.filter((row) => row.id !== payment.id);
+  const totals = bookingTotals(booking, booking.addons, others);
+  return Math.max(totals.collectedRwf + payment.amount_rwf - totals.grandTotalRwf, 0);
+}
+
+/**
+ * Part of a session fee over what the booking is worth (Phase 4 overpayment
+ * decision). The payment stays `succeeded` with `overpaid_rwf` set: it is the
+ * difference that is owed, not the whole of it. The money is in the platform's
+ * account, so the platform sends it back and records it
+ * (`/api/platform/refunds`); the photographer is told, with nothing to do.
  */
 async function flagOverpayment(
   tx: Prisma.TransactionClient,
   logs: Record<string, unknown>[],
   payment: PaymentRecord,
+  overpaidRwf: number,
 ): Promise<void> {
-  const booking = await tx.booking.findUniqueOrThrow({
-    where: { id: payment.booking_id },
-    include: { addons: true, payments: true },
-  });
-  const totals = bookingTotals(booking, booking.addons, booking.payments);
-  const overpaidRwf = totals.collectedRwf - totals.grandTotalRwf;
-  if (overpaidRwf <= 0) return;
+  const booking = await tx.booking.findUniqueOrThrow({ where: { id: payment.booking_id } });
 
   logs.push({ level: 'error', event: 'booking_overpaid', paymentId: payment.id, bookingId: booking.id, overpaidRwf });
   await enqueue(tx, {
@@ -523,6 +679,9 @@ async function refundDue(
     data: { status: 'refund_due', settledAt, ...reported },
     select: { providerRef: true, ourRef: true },
   });
+  // Never succeeded, so it never earned: the ledger finds nothing to undo. Called
+  // all the same, so every path into refund_due goes through it (R4.2).
+  await recordRefundDue(tx, payment.id, settledAt);
 
   await enqueue(tx, {
     kind: 'email',
@@ -539,6 +698,8 @@ async function refundDue(
       // The provider that took the money, not the one configured now (spec §6.18).
       provider: payment.provider,
       startsAt: booking.startsAt.toISOString(),
+      // A duplicate session fee is told apart from a second booking fee (absent, as before, for a booking fee).
+      ...(payment.kind === 'session_fee' ? { paymentKind: 'session_fee' } : {}),
     },
   });
 }
@@ -568,6 +729,9 @@ async function receipt(
     include: { addons: true, payments: true },
   });
   const totals = bookingTotals(booking, booking.addons, booking.payments);
+  // `collectedRwf` counts only what was due; an overpaid part still held is
+  // money the client paid too, and the receipt says what they actually paid.
+  const heldRwf = booking.payments.filter((row) => row.status === 'succeeded').reduce((total, row) => total + overpaymentHeldRwf(row), 0);
   const paymentReference = reported.providerRef ?? payment.provider_ref ?? payment.our_ref;
 
   await enqueue(tx, {
@@ -589,12 +753,12 @@ async function receipt(
       paidAt: paidAt.toISOString(),
       paymentReference,
       totalRwf: totals.grandTotalRwf,
-      paidRwf: totals.collectedRwf,
+      paidRwf: totals.collectedRwf + heldRwf,
       outstandingRwf: totals.outstandingRwf,
       // `outstandingRwf` is floored at nought, so money over the total would
       // otherwise read as "paid in full" with nothing said about the
-      // difference the photographer has just been told to refund (§6.16).
-      overpaidRwf: Math.max(totals.collectedRwf - totals.grandTotalRwf, 0),
+      // difference the platform will refund (§6.16, Phase 4 overpayment decision).
+      overpaidRwf: heldRwf,
       accessToken: null,
     },
   });

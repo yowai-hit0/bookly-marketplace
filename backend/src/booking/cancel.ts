@@ -1,8 +1,10 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { enqueue } from '../outbox/enqueue.js';
 import { bookingPhotographerRecipient } from '../outbox/recipients.js';
+import { recordRefundDue } from '../payouts/ledger.js';
 import { type AccessedBooking, cancellationPolicyOf, findBookingByToken } from './access.js';
 import { canCancel } from './client-view.js';
+import { refundAmountRwf } from './totals.js';
 
 /**
  * A client cancelling their own booking (plan.md Task 18; spec §3.6, §6.10).
@@ -56,7 +58,7 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
     });
     if (count === 0) return null;
 
-    const refunded = await flagRefunds(tx, booking);
+    const refunded = await flagRefunds(tx, booking, now);
     const bookingFeeRefunded = refunded.some((payment) => payment.kind === 'booking_fee');
 
     await enqueue(tx, {
@@ -78,7 +80,8 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
         bookingFeeRwf: booking.bookingFeeRwf,
         // What the client is owed back: a session fee they had already paid,
         // and the booking fee only where the photographer's policy refunds it.
-        refundRwf: refunded.reduce((total, payment) => total + payment.amountRwf, 0),
+        // Less any overpaid part the platform already sent back (`refundAmountRwf`).
+        refundRwf: refunded.reduce((total, payment) => total + refundAmountRwf(payment), 0),
         bookingFeeRefunded,
       },
     });
@@ -111,7 +114,7 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
           variant: 'refund_due',
           reference: booking.reference,
           clientName: booking.contactName,
-          amountRwf: payment.amountRwf,
+          amountRwf: refundAmountRwf(payment),
           reason: payment.kind === 'booking_fee' ? 'booking_fee_after_client_cancel' : 'session_fee_after_client_cancel',
           paymentReference: payment.providerRef ?? payment.ourRef,
           provider: payment.provider,
@@ -136,8 +139,11 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
  * Session fees already collected are owed back; the booking fee only when the
  * policy the booking was made under refunds it on a client's cancellation
  * (spec §6.10, R1.8).
+ *
+ * Called after the booking row is updated (so held): booking row, then payment
+ * rows, then payout items -- the lock order in payments/webhooks.ts `applyEvent`.
  */
-async function flagRefunds(tx: Prisma.TransactionClient, booking: AccessedBooking): Promise<AccessedBooking['payments']> {
+async function flagRefunds(tx: Prisma.TransactionClient, booking: AccessedBooking, now: Date): Promise<AccessedBooking['payments']> {
   const refundsBookingFee = cancellationPolicyOf(booking).bookingFeeRefundableOnClientCancel;
   const paid = booking.payments.filter(
     (payment) => payment.status === 'succeeded' && (payment.kind === 'session_fee' || (refundsBookingFee && payment.kind === 'booking_fee')),
@@ -148,7 +154,12 @@ async function flagRefunds(tx: Prisma.TransactionClient, booking: AccessedBookin
       where: { id: payment.id, status: 'succeeded' },
       data: { status: 'refund_due' },
     });
-    if (count === 1) refunded.push(payment);
+    if (count !== 1) continue;
+    // Its earning is voided, or reversed if already in a payout (R4.2, T4.2).
+    await recordRefundDue(tx, payment.id, now);
+    // Re-read under the row lock the update took: an overpayment refund the
+    // platform recorded since the booking was read changes what is owed back.
+    refunded.push(await tx.payment.findUniqueOrThrow({ where: { id: payment.id } }));
   }
   return refunded;
 }

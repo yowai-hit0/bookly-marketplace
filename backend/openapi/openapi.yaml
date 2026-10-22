@@ -65,10 +65,16 @@ tags:
   - name: Studio payments
   - name: Studio catalogue
     description: Services, packages and add-ons.
+  - name: Studio earnings
+    description: What the photographer has earned and been paid, and where payouts go (Phase 4).
   - name: Platform auth
     description: Login, email verification and password reset for a platform admin.
   - name: Platform photographers
     description: Listing photographers, and approving, suspending and reactivating them.
+  - name: Platform payouts
+    description: Payouts due, building a draft, marking it paid with the transfer reference, or cancelling it (Phase 4).
+  - name: Platform refunds
+    description: Refunds of money paid online, which sits in the platform's account (Phase 4).
   - name: Account auth
     description: Signup, login, email verification, password reset and Google sign-in for a client.
   - name: Account
@@ -191,6 +197,13 @@ paths:
     $ref: paths/studio-catalogue.yaml#/addons
   /api/studio/addons/{id}:
     $ref: paths/studio-catalogue.yaml#/addonItem
+  # --- Studio earnings (Phase 4) ---------------------------------------------
+  /api/studio/earnings:
+    $ref: paths/studio-payouts.yaml#/earnings
+  /api/studio/payouts/{id}:
+    $ref: paths/studio-payouts.yaml#/payout
+  /api/studio/payout-method:
+    $ref: paths/studio-payouts.yaml#/payoutMethod
   # --- Platform -------------------------------------------------------------
   /api/platform/auth/login:
     $ref: paths/platform.yaml#/login
@@ -212,6 +225,20 @@ paths:
     $ref: paths/platform.yaml#/suspend
   /api/platform/photographers/{id}/reactivate:
     $ref: paths/platform.yaml#/reactivate
+  /api/platform/payouts/due:
+    $ref: paths/platform-payouts.yaml#/due
+  /api/platform/payouts:
+    $ref: paths/platform-payouts.yaml#/payouts
+  /api/platform/payouts/{id}:
+    $ref: paths/platform-payouts.yaml#/payout
+  /api/platform/payouts/{id}/mark-paid:
+    $ref: paths/platform-payouts.yaml#/markPaid
+  /api/platform/payouts/{id}/cancel:
+    $ref: paths/platform-payouts.yaml#/cancel
+  /api/platform/refunds:
+    $ref: paths/platform-payouts.yaml#/refunds
+  /api/platform/refunds/{paymentId}:
+    $ref: paths/platform-payouts.yaml#/refund
   # --- Account --------------------------------------------------------------
   /api/account/auth/login:
     $ref: paths/account.yaml#/login

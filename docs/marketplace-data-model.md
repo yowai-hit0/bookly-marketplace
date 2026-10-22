@@ -551,7 +551,7 @@ model PayoutItem {
 ```
 
 Lifecycle, all in the transaction that changes the payment:
-- **Payment succeeds** (booking or session fee, not cash): insert an `earning`.
+- **Payment succeeds** (booking or session fee, not cash): insert an `earning` of `amount_rwf - overpaid_rwf` (the full amount unless the session fee was overpaid; see the overpayment refinements below).
 - **Payment becomes `refund_due`:** set `voided_at` if the earning has no `payout_id`, otherwise insert a `reversal`.
 
 "Payable now" is calculated each time:
@@ -569,6 +569,53 @@ SELECT pi.* FROM payout_item pi
 - **Build:** lock the items, create a draft with the total, and set `payout_id`. If the total is ≤ 0, no payout is created.
 - **Mark paid:** set the reference, paid time and paid-by user, then enqueue `payout_sent`.
 - **Cancel a draft:** clear `payout_id` on its items.
+
+**Phase 4 refinements (as built, migration `20261017172827_payouts`):**
+- **Who did what** on every row of money out:
+  - `payout.cancelled_by_user_id` (RESTRICT → `app_user`), required once cancelled (CHECK `payout_cancelled_has_user`).
+  - `payment.refunded_by_user_id` (RESTRICT → `app_user`), set only on a refunded payment (CHECK `payment_refunded_by_when_refunded`). It is the photographer for cash and a platform admin for money paid online (marketplace-spec.md Phase 4 refund decision).
+- **`payout → payout_method` is a composite foreign key** `(payout_method_id, photographer_id) → payout_method (id, photographer_id)`, with `@@unique([id, photographerId])` on `PayoutMethod`, so a payout can only name its own photographer's destination. `payout_item → payout` stays a simple key: Prisma refuses a composite relation mixing the optional `payout_id` with the required `photographer_id`. The ledger and the build scope it in code.
+- **Extra CHECKs** beyond §3.11:
+  - `payout_method_momo_number_e164`: `^\+2507[2389][0-9]{7}$`.
+  - `payout_method_bank_fields_length`: bank name 1-100, account number 1-40.
+  - `payout_unpaid_has_no_transfer`: only a paid payout carries a reference, a paid time or a paid-by user.
+  - `payout_transfer_reference_length` (1-100) and `payout_note_length` (1-500).
+- **Refund while the earning is in a draft:** the earning gets a reversal (the rule above), so the draft's amount stays true. **Cancelling that draft voids the earning and its reversal together**: otherwise the earning, no longer `succeeded`, would never be payable while its reversal always is (`releaseDraftItems`, payouts/ledger.ts).
+- **"Payable now"** binds the app's injected clock where the SQL above says `now()`.
+- **No backfill:** payments that succeeded before the migration have no earning.
+- **`payout_sent`** is sendable (it has a renderer); `RESERVED_EMAIL_TEMPLATES` now holds only the three `subscription_*` names. `account_security_alert` gains the `payout_method_changed` variant.
+
+**Phase 4 overpayment refinements (as built, migration `20261017193312_payment_overpayment`; marketplace-spec.md Phase 4 overpayment decision):**
+
+```prisma
+model Payment {
+  // ...
+  overpaidRwf                 Int       @default(0) @map("overpaid_rwf")
+  overpaymentRefundedAt       DateTime? @map("overpayment_refunded_at") @db.Timestamptz(6)
+  overpaymentRefundReference  String?   @map("overpayment_refund_reference")
+  overpaymentRefundedByUserId String?   @map("overpayment_refunded_by_user_id") @db.Uuid
+  overpaymentRefundedBy AppUser? @relation("PaymentOverpaymentRefundedBy", fields: [overpaymentRefundedByUserId], references: [id], onDelete: Restrict)
+}
+```
+
+- **Columns on `payment`, not a table.** A payment has at most one overpayment, fixed as it succeeds, and the full refund it might later need is already on the same row.
+- **`overpaid_rwf`** is the part of an online session fee over what the booking was worth when it succeeded. It is set in the update that sets `succeeded`, under the booking's row lock, and measured against what was due before it (earlier overpaid parts excluded). The payment stays `succeeded`, and its earning is `amount_rwf - overpaid_rwf`. A fee that is wholly extra (`overpaid >= amount`) is `refund_due` instead (`duplicate_payment`), and earns nothing.
+- **Derived totals** (§6.1 of data-model_v2.md, `booking/totals.ts`):
+  - `collectedRwf` sums each succeeded payment's `amount_rwf - overpaid_rwf`.
+  - `refundDueRwf` adds overpaid parts not yet returned. A `refund_due` payment counts as its `amount_rwf`, less `overpaid_rwf` when the overpayment was already returned (`refundAmountRwf`).
+- **CHECKs:**
+  - `payment_overpaid_range`: `overpaid_rwf >= 0 AND overpaid_rwf < amount_rwf`.
+  - `payment_overpaid_online_session_fee`: only a non-cash session fee is ever overpaid.
+  - `payment_overpayment_refund_complete`: the three `overpayment_*` columns are all set or all null, and set only when `overpaid_rwf > 0`.
+  - `payment_overpayment_refund_reference_length`: 1-100.
+- **`overpayment_refunded_by_user_id`** is RESTRICT → `app_user`: the platform admin who recorded it.
+- **Online refund references are used once**, across both columns:
+  - `payment_refund_reference_online_unique` on `(refund_reference) WHERE refund_reference IS NOT NULL AND provider <> 'cash'`;
+  - `payment_overpayment_refund_reference_unique` on `(overpayment_refund_reference) WHERE overpayment_refund_reference IS NOT NULL`;
+  - the check across the two columns is in code, under a per-reference advisory lock (`payments/refund.ts`), with `23505` mapped to `duplicate_refund_reference`.
+
+  Cash references are the photographer's own words and stay outside the rule. If a database already holds two online refunds with one reference, the first index refuses to build: resolve them by hand before migrating.
+- **No backfill:** an overpayment taken before this migration has `overpaid_rwf = 0` and its earning at the full amount.
 
 ### 3.10 Referential behaviour
 | Relationship | On delete |
@@ -832,7 +879,18 @@ Paths are relative to `backend/src/`.
 - **Slugs and working hours** are unique per photographer.
 - **Payment CHECKs:** subject exactly one, kind/plan agreement, cash is a session fee only, https `checkout_url`. `payment_one_succeeded_booking_fee` still holds.
 - **Subscription periods:** overlap `23P01`, a voided period frees the range, one trial only, the shape CHECK, unique `payment_id`.
-- **Payout items, payouts and payout methods:** sign/kind, one earning per payment, void-or-paid, paid requires a reference, one draft, one current method, the shape CHECK.
+- **Payout items, payouts and payout methods:** sign/kind, one earning per payment, void-or-paid, paid requires a reference, one draft, one current method, the shape CHECK. Built in Phase 4, plus:
+  - the index predicates;
+  - a unique transfer reference across photographers;
+  - cancelled requires its date and user;
+  - the MoMo number format;
+  - the composite payout → method key;
+  - `refunded_by_user_id` only when refunded;
+  - the RESTRICT deletes;
+  - the overpayment CHECKs: range, online session fee only, refund recorded whole and only when overpaid;
+  - both refund-reference partial uniques (and cash left free), and RESTRICT on the admin who recorded an overpayment refund.
+  
+  `test/database.ts` truncates the three tables first.
 - **Photographer:** handle format, approved/suspended dates, https cover image.
 - **Settings:** single row, positive prices, reminder days, fee rate range.
 - **Districts:** 30 rows, FK enforced. `test/database.ts` must not truncate `district`.

@@ -15,9 +15,9 @@
 //      you they went missing; a query against pg_constraint can.
 //
 // Phase 1 (marketplace-spec.md) models the photographer and the per-photographer
-// separation. Subscriptions, payouts and the subscription payment columns are
-// NOT here yet: later phases add them as incremental migrations
-// (marketplace-data-model.md §5).
+// separation; Phase 4 adds payouts (payout_method, payout, payout_item).
+// Subscriptions and the subscription payment columns are NOT here yet: Phase 5
+// adds them as an incremental migration (marketplace-data-model.md §5).
 
 generator client {
   provider = "prisma-client-js"
@@ -74,6 +74,12 @@ model AppUser {
   photographer          Photographer?  @relation("PhotographerOwner")
   approvedPhotographers Photographer[] @relation("PhotographerApprovedBy")
   clients               Client[]
+  /// Who did what on every payout and refund (marketplace-spec.md, Security: money out).
+  payoutsCreated        Payout[]       @relation("PayoutCreatedBy")
+  payoutsPaid           Payout[]       @relation("PayoutPaidBy")
+  payoutsCancelled      Payout[]       @relation("PayoutCancelledBy")
+  paymentsRefunded      Payment[]      @relation("PaymentRefundedBy")
+  overpaymentsRefunded  Payment[]      @relation("PaymentOverpaymentRefundedBy")
 
   @@map("app_user")
 }
@@ -183,6 +189,9 @@ model Photographer {
   addons             Addon[]
   bookings           Booking[]
   outbox             Outbox[]
+  payoutMethods      PayoutMethod[]
+  payouts            Payout[]
+  payoutItems        PayoutItem[]
 
   @@index([status])
   @@map("photographer")
@@ -625,17 +634,143 @@ model Payment {
   initiatedAt     DateTime  @default(now()) @map("initiated_at") @db.Timestamptz(6)
   settledAt       DateTime? @map("settled_at") @db.Timestamptz(6)
   refundedAt      DateTime? @map("refunded_at") @db.Timestamptz(6)
-  /// MoMo/bank reference typed in by the photographer (spec §6.16).
+  /// The MoMo or bank reference the refund was sent with (spec §6.16): typed by
+  /// the photographer for cash, by a platform admin for money paid online
+  /// (marketplace-spec.md R4.6, Phase 4 refund decision).
   refundReference String?   @map("refund_reference")
+  /// Who recorded the refund (Phase 4: who did what). Null until refunded, and
+  /// for a refund recorded before Phase 4.
+  refundedByUserId String?  @map("refunded_by_user_id") @db.Uuid
   /// What the photographer typed with a cash payment (1-500 characters).
   note            String?
+  /// The part of an online session fee over what the booking was worth when it
+  /// succeeded (Phase 4 overpayment decision). The payment stays `succeeded`;
+  /// its earning is `amount_rwf - overpaid_rwf`, and the platform sends the
+  /// difference back. Always below `amount_rwf` (CHECK payment_overpaid_range):
+  /// a fee that is wholly extra is `refund_due` instead (payments/webhooks.ts).
+  overpaidRwf     Int       @default(0) @map("overpaid_rwf")
+  /// The platform admin's record of sending the overpaid part back: all three or
+  /// none, and only on an overpaid payment (CHECK payment_overpayment_refund_complete).
+  overpaymentRefundedAt DateTime? @map("overpayment_refunded_at") @db.Timestamptz(6)
+  /// Unique across both refund-reference columns of online payments (partial
+  /// uniques plus a locked check in payments/refund.ts).
+  overpaymentRefundReference String? @map("overpayment_refund_reference")
+  overpaymentRefundedByUserId String? @map("overpayment_refunded_by_user_id") @db.Uuid
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  booking     Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  refundedBy  AppUser?     @relation("PaymentRefundedBy", fields: [refundedByUserId], references: [id], onDelete: Restrict)
+  overpaymentRefundedBy AppUser? @relation("PaymentOverpaymentRefundedBy", fields: [overpaymentRefundedByUserId], references: [id], onDelete: Restrict)
+  /// Its earning and, when a refund came too late to void that, its reversal (payouts/ledger.ts).
+  payoutItems PayoutItem[]
 
   @@index([bookingId, kind, status])
   @@map("payment")
+}
+
+// --- Payouts (Phase 4) ---------------------------------------------------------
+
+/// Where a photographer is paid (marketplace-data-model.md §3.8). IMMUTABLE: a
+/// change retires the current row and inserts a new one in one transaction
+/// (payouts/method.ts), so a payout always names the destination it was built
+/// for. At most one current row per photographer (partial unique
+/// payout_method_one_current); the shape per kind is CHECK payout_method_shape.
+model PayoutMethod {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId    String    @map("photographer_id") @db.Uuid
+  /// momo | bank
+  kind              String
+  /// mtn | airtel. Set for momo only.
+  momoNetwork       String?   @map("momo_network")
+  /// E.164, Rwandan (+2507...). Set for momo only.
+  momoNumber        String?   @map("momo_number")
+  bankName          String?   @map("bank_name")
+  bankAccountNumber String?   @map("bank_account_number")
+  /// The name the account is registered to: what the transfer is checked against.
+  accountName       String    @map("account_name")
+  /// Set when a newer row replaced this one. Never cleared.
+  retiredAt         DateTime? @map("retired_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  payouts      Payout[]
+
+  /// The target of payout's composite foreign key: a payout is always paid to its own photographer's method.
+  @@unique([id, photographerId])
+  @@index([photographerId, createdAt])
+  @@map("payout_method")
+}
+
+/// One manual transfer to a photographer (marketplace-data-model.md §3.9;
+/// marketplace-spec.md R4.4). Built as a `draft` from the payable items, then
+/// `paid` with the transfer reference, or `cancelled`, which releases the items.
+/// At most one draft per photographer (payout_one_draft); a transfer reference
+/// is used once (payout_transfer_reference_unique). Who built, paid and
+/// cancelled it is recorded on the row.
+model Payout {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId    String    @map("photographer_id") @db.Uuid
+  /// draft | paid | cancelled
+  status            String    @default("draft")
+  /// The items' total when the draft was built. Always > 0: nothing is built otherwise.
+  amountRwf         Int       @map("amount_rwf")
+  /// The destination current when the draft was built.
+  payoutMethodId    String    @map("payout_method_id") @db.Uuid
+  /// The MoMo or bank transaction id of the transfer. Required once paid.
+  transferReference String?   @map("transfer_reference")
+  /// What the platform admin typed when marking it paid. Platform-internal.
+  note              String?
+  createdByUserId   String    @map("created_by_user_id") @db.Uuid
+  paidByUserId      String?   @map("paid_by_user_id") @db.Uuid
+  paidAt            DateTime? @map("paid_at") @db.Timestamptz(6)
+  /// Who cancelled the draft (Phase 4 refinement of §3.9: who did what, on every payout).
+  cancelledByUserId String?   @map("cancelled_by_user_id") @db.Uuid
+  cancelledAt       DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  /// Composite: the method must be this payout's photographer's.
+  payoutMethod PayoutMethod @relation(fields: [payoutMethodId, photographerId], references: [id, photographerId], onDelete: Restrict)
+  createdBy    AppUser      @relation("PayoutCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  paidBy       AppUser?     @relation("PayoutPaidBy", fields: [paidByUserId], references: [id], onDelete: Restrict)
+  cancelledBy  AppUser?     @relation("PayoutCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+  items        PayoutItem[]
+
+  @@index([photographerId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("payout")
+}
+
+/// One line of what a photographer is owed (marketplace-data-model.md §3.9;
+/// marketplace-spec.md R4.2): an `earning` for a succeeded non-cash booking or
+/// session fee (the payment's amount: no commission), and a `reversal` (the
+/// negative of it) when that payment became `refund_due` after its earning was
+/// already in a payout. Written only by payouts/ledger.ts, in the transaction
+/// that changes the payment. One of each kind per payment, at most.
+model PayoutItem {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  photographerId String    @map("photographer_id") @db.Uuid
+  paymentId      String    @map("payment_id") @db.Uuid
+  /// earning | reversal
+  kind           String
+  /// earning > 0, reversal < 0 (CHECK payout_item_sign_matches_kind).
+  amountRwf      Int       @map("amount_rwf")
+  /// The payout it is in, draft or paid. Cleared when a draft is cancelled.
+  payoutId       String?   @map("payout_id") @db.Uuid
+  /// A refund came before any payout: the earning no longer counts. Never with a payout (CHECK).
+  voidedAt       DateTime? @map("voided_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  photographer Photographer @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  payment      Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  payout       Payout?      @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+
+  /// What makes a replayed webhook harmless: one earning, one reversal, per payment.
+  @@unique([paymentId, kind])
+  @@index([payoutId])
+  @@map("payout_item")
 }
 
 /// Every inbound provider callback, stored BEFORE it is interpreted. Matched to

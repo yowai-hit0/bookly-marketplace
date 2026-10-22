@@ -303,11 +303,14 @@ export type PaymentSeed = {
   status?: string;
   kind?: 'booking_fee' | 'session_fee';
   amountRwf?: number;
-  provider?: PaymentProviderId;
+  /** `cash` is a session fee only (CHECK payment_cash_is_session_fee), and has no method. */
+  provider?: PaymentProviderId | 'cash';
   providerRef?: string | null;
   failureReason?: string | null;
   /** How long ago it was initiated, on the database clock. */
   ageSeconds?: number;
+  /** The overpaid part of an online session fee (Phase 4 overpayment decision; CHECK payment_overpaid_range). */
+  overpaidRwf?: number;
 };
 
 export type SeededPayment = { id: string; ourRef: string };
@@ -326,11 +329,11 @@ export async function insertPayment(prisma: PrismaClient, bookingId: string, see
   // one stays on the database clock, where the reconciler measures its age.
   const initiatedAt = settled ? new Date(SETTLED_AT.getTime() - SETTLED_PAYMENT_AGE_MS - (seed.ageSeconds ?? 0) * 1000) : null;
   const rows = await prisma.$queryRaw<{ id: string; our_ref: string }[]>`
-    INSERT INTO payment (booking_id, kind, provider, amount_rwf, status, provider_ref, failure_reason, initiated_at, settled_at, method)
-    VALUES (${bookingId}::uuid, ${seed.kind ?? 'booking_fee'}, ${seed.provider ?? 'mtn_momo_direct'}, ${seed.amountRwf ?? 20_000},
+    INSERT INTO payment (booking_id, kind, provider, amount_rwf, overpaid_rwf, status, provider_ref, failure_reason, initiated_at, settled_at, method)
+    VALUES (${bookingId}::uuid, ${seed.kind ?? 'booking_fee'}, ${seed.provider ?? 'mtn_momo_direct'}, ${seed.amountRwf ?? 20_000}, ${seed.overpaidRwf ?? 0},
             ${status}, ${seed.providerRef ?? null}, ${seed.failureReason ?? null},
             COALESCE(${initiatedAt}::timestamptz, now() - make_interval(secs => ${seed.ageSeconds ?? 0}::double precision)),
-            ${settled ? SETTLED_AT : null}::timestamptz, ${settled ? 'momo_mtn' : null})
+            ${settled ? SETTLED_AT : null}::timestamptz, ${settled && seed.provider !== 'cash' ? 'momo_mtn' : null})
     RETURNING id::text AS id, our_ref::text AS our_ref`;
   const row = rows[0];
   if (row === undefined) throw new Error('The payment insert returned no row');

@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { bookingTotals } from './totals.js';
+import { bookingTotals, TOTALS_PAYMENT_SELECT } from './totals.js';
 
 /**
  * "Completed" means paid (admin console fixes, item 6; user decision
@@ -26,7 +26,7 @@ export async function completeIfSettled(tx: Prisma.TransactionClient, bookingId:
 
   const [addons, payments] = await Promise.all([
     tx.bookingAddon.findMany({ where: { bookingId }, select: { stage: true, amountRwf: true } }),
-    tx.payment.findMany({ where: { bookingId }, select: { status: true, amountRwf: true } }),
+    tx.payment.findMany({ where: { bookingId }, select: TOTALS_PAYMENT_SELECT }),
   ]);
   const { outstandingRwf } = bookingTotals({ status: booking.status, packagePriceRwf: booking.package_price_rwf }, addons, payments);
   if (outstandingRwf > 0) return false;

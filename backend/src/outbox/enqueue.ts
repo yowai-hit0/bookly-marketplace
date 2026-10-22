@@ -36,7 +36,6 @@ export const RESERVED_EMAIL_TEMPLATES = [
   'subscription_reminder',
   'subscription_receipt',
   'subscription_expired',
-  'payout_sent',
 ] as const;
 export type ReservedEmailTemplate = (typeof RESERVED_EMAIL_TEMPLATES)[number];
 
@@ -73,6 +72,8 @@ export const EMAIL_TEMPLATES = [
   /** To a photographer: a platform admin approved or suspended their studio (Phase 2 decision 7). */
   'photographer_approved',
   'photographer_suspended',
+  /** To a photographer: a platform admin marked their payout paid (Phase 4, R4.4). */
+  'payout_sent',
   ...RESERVED_EMAIL_TEMPLATES,
 ] as const;
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];

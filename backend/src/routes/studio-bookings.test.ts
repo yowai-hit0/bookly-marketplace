@@ -11,6 +11,7 @@ import { clientBookingView } from '../booking/client-view.js';
 import { type AdminBooking, adminBookingView, findAdminBooking } from '../booking/admin-view.js';
 import { createPrismaClient } from '../db/client.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
+import { expectMatchesSpec } from '../test/openapi.js';
 import {
   type PaymentWorld,
   CLIENT,
@@ -526,7 +527,8 @@ describe('POST /bookings/:id/cancel', () => {
       lifecycle: { cancelledAt: START.toISOString(), cancellationReason: 'The photographer is unwell.' },
       money: { totals: { collectedRwf: 0, refundDueRwf: 20_000, outstandingRwf: 0 } },
     });
-    expect(res.body.booking.payments[0]).toMatchObject({ status: 'refund_due', canRecordRefund: true });
+    // Paid online, so the platform refunds it (Phase 4 refund decision): pending with the platform, nothing to record here.
+    expect(res.body.booking.payments[0]).toMatchObject({ status: 'refund_due', canRecordRefund: false, refundPendingWithPlatform: true });
   });
 
   it('cancels with no reason at all', async () => {
@@ -713,9 +715,16 @@ describe('POST /bookings/:id/resend-link', () => {
 // --- Recording a refund --------------------------------------------------------------------
 
 describe('POST /payments/:id/refund', () => {
-  /** A cancelled booking whose booking fee is flagged for refund. */
+  /** A confirmed booking whose session fee the photographer was paid in cash: the only refund he records (Phase 4). */
+  async function cashBooking() {
+    const { booking } = await insertBookingWithToken(prisma, world, { startsAt: WEDNESDAY_0900 });
+    const payment = await insertPayment(prisma, booking.id, { status: 'succeeded', kind: 'session_fee', provider: 'cash', amountRwf: 20_000 });
+    return { booking, payment };
+  }
+
+  /** A cancelled booking whose cash is flagged for refund. */
   async function flagged() {
-    const { booking, payment } = await confirmedBooking();
+    const { booking, payment } = await cashBooking();
     await post(`${BOOKINGS}/${booking.id}/cancel`, { reason: 'Studio flooded.' });
     return { booking, payment };
   }
@@ -748,7 +757,7 @@ describe('POST /payments/:id/refund', () => {
   });
 
   it('answers 409 not_refundable carrying the booking, for a payment that is not flagged', async () => {
-    const { booking, payment } = await confirmedBooking();
+    const { booking, payment } = await cashBooking();
 
     const res = await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
 
@@ -765,6 +774,38 @@ describe('POST /payments/:id/refund', () => {
 
     expect([res.status, res.body.error]).toEqual([409, 'not_refundable']);
     expect(res.body.booking.payments[0].refundReference).toBe('MOMO-REF-7781');
+  });
+
+  it.each(['mtn_momo_direct', 'flutterwave'] as const)(
+    'answers 409 refund_with_platform for a %s payment owed back: the platform refunds money paid online, and nothing is written',
+    async (provider) => {
+      const { booking } = await insertBookingWithToken(prisma, world, { startsAt: WEDNESDAY_0900 });
+      const payment = await insertPayment(prisma, booking.id, { status: 'refund_due', provider, amountRwf: 20_000 });
+
+      const res = await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
+
+      expect([res.status, res.body.error]).toEqual([409, 'refund_with_platform']);
+      await expectMatchesSpec(res, 'recordRefund', 409);
+      expect(res.body.booking).toStrictEqual(await renderedBooking(booking.id));
+      expect(res.body.booking.payments[0]).toMatchObject({ status: 'refund_due', canRecordRefund: false, refundPendingWithPlatform: true });
+      expect(await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).toMatchObject({ status: 'refund_due', refundReference: null, refundedAt: null });
+    },
+  );
+
+  it('answers 409 refund_with_platform for an online payment in any status', async () => {
+    const { payment } = await confirmedBooking();
+
+    const res = await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'MOMO-REF-7781' });
+
+    expect([res.status, res.body.error]).toEqual([409, 'refund_with_platform']);
+  });
+
+  it('a cash refund records who did it', async () => {
+    const { payment } = await flagged();
+
+    await post(`/api/studio/payments/${payment.id}/refund`, { reference: 'Handed back at the studio' });
+
+    expect((await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).refundedByUserId).toBe(world.photographerUserId);
   });
 
   it('answers 404 for a payment that does not exist', async () => {

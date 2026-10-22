@@ -90,7 +90,20 @@ export type AdminPayment = {
   refundReference: string | null
   /** What the photographer typed with a cash payment (item 7, 2026-09-27). */
   note: string | null
+  /** Cash in `refund_due` only (Phase 4 refund decision): money paid online is refunded by the platform. */
   canRecordRefund: boolean
+  /** An online payment in `refund_due`: the platform refunds and records it, not the photographer. */
+  refundPendingWithPlatform: boolean
+  /**
+   * The part of a session fee paid online over what the booking was worth
+   * (Phase 4 overpayment decision); 0 when it was not overpaid. The payment
+   * stays `succeeded`; the booking's totals count only the rest.
+   */
+  overpaidRwf: number
+  /** That overpaid part is still to go back: the platform returns it, not him. */
+  overpaymentRefundPendingWithPlatform: boolean
+  overpaymentRefundedAt: string | null
+  overpaymentRefundReference: string | null
 }
 
 export type AdminBooking = {
@@ -251,6 +264,10 @@ export const bookingsApi = {
     return post(`/studio/bookings/${bookingId}/payments/cash`, { amountRwf, note })
   },
 
+  /**
+   * Records the refund of cash he was handed, once he has given it back. A
+   * payment made online is the platform's to refund: `409 refund_with_platform`.
+   */
   recordRefund(paymentId: string, reference: string): Promise<{ booking: AdminBooking }> {
     return post(`/studio/payments/${paymentId}/refund`, { reference })
   },

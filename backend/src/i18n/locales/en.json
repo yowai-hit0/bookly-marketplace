@@ -219,12 +219,16 @@
           "admin_cancelled": "You cancelled this booking, so the client is owed a full refund.",
           "late_payment_slot_taken": "The client's payment arrived after their hold had expired and the time had been booked by someone else.",
           "duplicate_payment": "The client paid the booking fee twice. The booking stands on the first payment; this one is owed back.",
+          "duplicate_session_fee": "This payment arrived after the booking had already been paid in full, so all of it is owed back.",
           "session_fee_after_client_cancel": "The client cancelled after paying the session fee, which is refunded.",
           "overpayment": "This booking has been paid more than it is worth, so the difference is owed back.",
           "booking_fee_after_client_cancel": "The client cancelled, and your cancellation policy refunds the booking fee."
         },
         "howTo": "The system does not move money. Refund the client through {{provider}}, then record the refund on the booking.",
-        "howToCash": "The system does not move money. This was paid in cash: give it back to the client, then record the refund on the booking."
+        "howToCash": "The system does not move money. This was paid in cash: give it back to the client, then record the refund on the booking.",
+        "preheaderPlatform": "The client paid online, so the platform refunds them.",
+        "howToPlatform": "The client paid online, into the platform's account, so the platform refunds them and records it: there is nothing for you to send. If this payment's earning was already paid out to you, it comes off your next payout.",
+        "howToPlatformOverpayment": "The client paid online, into the platform's account, so the platform will return the difference to the client and record it: there is nothing for you to do. Your earnings count only what was due."
       },
       "bookingCancelled": {
         "subject": "Booking cancelled: {{client}}, {{date}} ({{reference}})",
@@ -303,6 +307,23 @@
         "forgot": "Sign in with your existing password. If you have forgotten it, use “Forgot password” on the sign-in page to choose a new one.",
         "ifNotYou": "If this was not you, you can ignore this email: your account and your password stay as they are.",
         "signIn": "Go to the sign-in page"
+      },
+      "payoutMethodChanged": {
+        "changed": {
+          "subject": "Your payout method was changed",
+          "heading": "Your payout method was changed",
+          "intro": "On {{when}} (Kigali time), your payouts were redirected to your {{destination}}."
+        },
+        "added": {
+          "subject": "A payout method was added to your studio",
+          "heading": "A payout method was added",
+          "intro": "On {{when}} (Kigali time), your {{destination}} was saved as where your payouts go."
+        },
+        "preheader": "Payouts now go to your {{destination}}.",
+        "destinationMomo": "{{network}} MoMo number ending {{last4}}",
+        "destinationBank": "{{bank}} account ending {{last4}}",
+        "ifNotYou": "If this was not you, someone else knows your password. Reset it now, then contact the platform so that no payout is sent to this destination.",
+        "button": "Review your payout method"
       }
     },
     "accountVerifyEmail": {
@@ -341,6 +362,19 @@
       "existingBookings": "Bookings you already have are not affected: they carry on as planned, and you can still sign in to manage them.",
       "questions": "If you have questions, or think this is a mistake, reply to this email.",
       "button": "Open your studio"
+    },
+    "payoutSent": {
+      "subject": "Payout sent: {{amount}}",
+      "preheader": "Sent to your {{destination}}.",
+      "heading": "Your payout has been sent",
+      "intro": "We have sent you {{amount}}, to your {{destination}}.",
+      "amountLabel": "Amount",
+      "destinationLabel": "Sent to",
+      "referenceLabel": "Transfer reference",
+      "paidAtLabel": "Sent on",
+      "linesLabel": "Earnings lines",
+      "feeNote": "No commission is taken. The transfer fee is deducted by the provider, so the amount that arrives may be slightly less.",
+      "button": "See your earnings"
     }
   }
 }

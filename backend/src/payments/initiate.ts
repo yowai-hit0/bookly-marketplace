@@ -1,5 +1,5 @@
 import { type Photographer, Prisma, type PrismaClient } from '@prisma/client';
-import { bookingTotals } from '../booking/totals.js';
+import { bookingTotals, TOTALS_PAYMENT_SELECT } from '../booking/totals.js';
 import { isBookable } from '../photographers/bookable.js';
 import { type PaymentMethod, type PaymentProvider, PaymentProviderError } from './provider.js';
 
@@ -206,7 +206,7 @@ export async function startSessionFeePayment(
       tx.bookingAddon.findMany({ where: { bookingId: booking.id }, select: { stage: true, amountRwf: true } }),
       tx.payment.findMany({
         where: { bookingId: booking.id },
-        select: { kind: true, status: true, amountRwf: true },
+        select: { kind: true, ...TOTALS_PAYMENT_SELECT },
       }),
     ]);
     const { outstandingRwf } = bookingTotals({ ...booking, packagePriceRwf: booking.package_price_rwf }, addons, payments);

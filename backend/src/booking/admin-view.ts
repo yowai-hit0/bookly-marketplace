@@ -93,8 +93,25 @@ export type AdminPaymentView = {
   refundReference: string | null;
   /** What the photographer typed with a cash payment (item 7, 2026-09-27). */
   note: string | null;
-  /** Refunding is recording what the photographer paid back by hand (spec §6.16). */
+  /**
+   * Refunding is recording what the photographer paid back by hand (spec §6.16):
+   * since Phase 4, cash only. Money paid online sits in the platform's account,
+   * so a platform admin refunds and records it (R4.6, Phase 4 refund decision).
+   */
   canRecordRefund: boolean;
+  /** An online payment owed back: pending with the platform, which refunds it. Nothing for the photographer to do. */
+  refundPendingWithPlatform: boolean;
+  /**
+   * The part of an online session fee over what the booking was worth (Phase 4
+   * overpayment decision); 0 when it was not overpaid. The payment stays
+   * `succeeded`, and its earning is `amountRwf - overpaidRwf`.
+   */
+  overpaidRwf: number;
+  /** That part is still to go back to the client, from the platform. Nothing for the photographer to do. */
+  overpaymentRefundPendingWithPlatform: boolean;
+  /** When the platform sent it back, and the reference it went with; null until then. */
+  overpaymentRefundedAt: string | null;
+  overpaymentRefundReference: string | null;
 };
 
 /**
@@ -225,6 +242,12 @@ function adminPaymentView(payment: AdminBooking['payments'][number]): AdminPayme
     refundedAt: payment.refundedAt?.toISOString() ?? null,
     refundReference: payment.refundReference,
     note: payment.note,
-    canRecordRefund: payment.status === 'refund_due',
+    canRecordRefund: payment.status === 'refund_due' && payment.provider === 'cash',
+    refundPendingWithPlatform: payment.status === 'refund_due' && payment.provider !== 'cash',
+    overpaidRwf: payment.overpaidRwf,
+    // A full refund covers the overpaid part, so only a payment still `succeeded` has one pending.
+    overpaymentRefundPendingWithPlatform: payment.status === 'succeeded' && payment.overpaidRwf > 0 && payment.overpaymentRefundedAt === null,
+    overpaymentRefundedAt: payment.overpaymentRefundedAt?.toISOString() ?? null,
+    overpaymentRefundReference: payment.overpaymentRefundReference,
   };
 }

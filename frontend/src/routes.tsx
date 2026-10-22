@@ -10,6 +10,9 @@ import { AdminAvailability } from '@/pages/admin/AdminAvailability'
 import { AdminBookingDetail } from '@/pages/admin/AdminBookingDetail'
 import { AdminBookings } from '@/pages/admin/AdminBookings'
 import { AdminCatalogue } from '@/pages/admin/AdminCatalogue'
+import { AdminEarnings } from '@/pages/admin/AdminEarnings'
+import { AdminPayoutDetail } from '@/pages/admin/AdminPayoutDetail'
+import { AdminPayoutMethod } from '@/pages/admin/AdminPayoutMethod'
 import { AdminSettings } from '@/pages/admin/AdminSettings'
 import { AccountHome } from '@/pages/account/AccountHome'
 import { GoogleCallbackPage } from '@/pages/auth/GoogleCallbackPage'
@@ -23,7 +26,10 @@ import { MyBookingPage } from '@/pages/booking/MyBookingPage'
 import { CheckoutPage } from '@/pages/checkout/CheckoutPage'
 import { PaymentProgressPage } from '@/pages/checkout/PaymentProgressPage'
 import { PhotographerList } from '@/pages/photographers/PhotographerList'
+import { PlatformPayoutDetail } from '@/pages/platform/PlatformPayoutDetail'
+import { PlatformPayouts } from '@/pages/platform/PlatformPayouts'
 import { PlatformPhotographers } from '@/pages/platform/PlatformPhotographers'
+import { PlatformRefunds } from '@/pages/platform/PlatformRefunds'
 import { ServiceDetail } from '@/pages/services/ServiceDetail'
 import { ServiceList } from '@/pages/services/ServiceList'
 
@@ -105,6 +111,11 @@ export const routes: RouteObject[] = [
       // Working hours and blocks together (plan.md Task 8): one screen, because
       // between them they answer when a client can book.
       { path: 'availability', element: <AdminAvailability /> },
+      // Money out (Phase 4, R4.1, R4.5): what he earned and was paid, one
+      // payout, and where the platform sends it.
+      { path: 'earnings', element: <AdminEarnings /> },
+      { path: 'payouts/:id', element: <AdminPayoutDetail /> },
+      { path: 'payout-method', element: <AdminPayoutMethod /> },
       { path: 'settings', element: <AdminSettings /> },
     ],
   },
@@ -125,6 +136,10 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="photographers" replace /> },
       { path: 'photographers', element: <PlatformPhotographers /> },
+      // Payouts by hand and refunds of money paid online (Phase 4, R4.4, R4.6).
+      { path: 'payouts', element: <PlatformPayouts /> },
+      { path: 'payouts/:id', element: <PlatformPayoutDetail /> },
+      { path: 'refunds', element: <PlatformRefunds /> },
     ],
   },
 ]

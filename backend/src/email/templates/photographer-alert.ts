@@ -26,7 +26,13 @@ import {
  *
  *   payment_received    a payment arrived (Tasks 17, 20)
  *   retries_exhausted   the outbox gave up on a message of theirs (Task 14)
- *   refund_due          money is owed back, and only they can send it (Tasks 17-19)
+ *   refund_due          money is owed back (Tasks 17-19). Cash is theirs to give
+ *                       back and record; since Phase 4 money paid online is in
+ *                       the platform's account, so the platform refunds it and
+ *                       the email says there is nothing for them to send (R4.6).
+ *                       An overpayment says the platform will return the
+ *                       difference, and nothing comes off a payout: the earning
+ *                       was only ever what was due (Phase 4 overpayment decision)
  *   booking_cancelled   a client cancelled (Task 18)
  *
  * This is the photographer's half of the old `admin_alert`
@@ -76,6 +82,12 @@ const refundDue = z.object({
   paymentReference: text(100),
   provider: paymentProvider,
   startsAt: instant,
+  /**
+   * Which fee is owed back, where the reason alone does not say: a
+   * `duplicate_payment` session fee arrived after the booking was paid in full
+   * (Phase 4 overpayment decision). Absent on older rows, read as a booking fee.
+   */
+  paymentKind: z.enum(['booking_fee', 'session_fee']).optional(),
 });
 
 const bookingCancelled = z.object({
@@ -169,12 +181,17 @@ export function composeRetriesExhausted(
 function composeRefundDue(p: z.infer<typeof refundDue>, ctx: EmailContext): ComposedEmail {
   const amount = money(p.amountRwf);
   const provider = tr(ctx, `email:common.providers.${p.provider}`);
+  // Paid online, the money is in the platform's account: the platform refunds it (Phase 4 refund decision).
+  const online = p.provider !== 'cash';
+  const reasonKey = p.reason === 'duplicate_payment' && p.paymentKind === 'session_fee' ? 'duplicate_session_fee' : p.reason;
+  // An overpayment's earning was never more than what was due, so nothing comes off a payout: the platform returns the difference.
+  const howToPlatform = p.reason === 'overpayment' ? 'email:adminAlert.refundDue.howToPlatformOverpayment' : 'email:adminAlert.refundDue.howToPlatform';
   return {
     subject: tr(ctx, 'email:adminAlert.refundDue.subject', { amount, client: p.clientName, reference: p.reference }),
-    preheader: tr(ctx, 'email:adminAlert.refundDue.preheader'),
+    preheader: tr(ctx, online ? 'email:adminAlert.refundDue.preheaderPlatform' : 'email:adminAlert.refundDue.preheader'),
     blocks: [
       { type: 'heading', text: tr(ctx, 'email:adminAlert.refundDue.heading') },
-      { type: 'paragraph', text: tr(ctx, `email:adminAlert.refundDue.reasons.${p.reason}`) },
+      { type: 'paragraph', text: tr(ctx, `email:adminAlert.refundDue.reasons.${reasonKey}`) },
       {
         type: 'details',
         rows: [
@@ -185,11 +202,9 @@ function composeRefundDue(p: z.infer<typeof refundDue>, ctx: EmailContext): Comp
           { label: tr(ctx, 'email:common.labels.provider'), value: provider },
         ],
       },
-      // Cash goes back as cash: there is no provider to refund it through.
-      {
-        type: 'note',
-        text: p.provider === 'cash' ? tr(ctx, 'email:adminAlert.refundDue.howToCash') : tr(ctx, 'email:adminAlert.refundDue.howTo', { provider }),
-      },
+      // Cash goes back as cash, from the photographer; money paid online goes
+      // back from the platform's account, which records it (R4.6).
+      { type: 'note', text: online ? tr(ctx, howToPlatform) : tr(ctx, 'email:adminAlert.refundDue.howToCash') },
       {
         type: 'button',
         label: tr(ctx, 'email:adminAlert.paymentReceived.openCalendar'),

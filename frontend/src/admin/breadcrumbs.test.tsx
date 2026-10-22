@@ -47,6 +47,9 @@ function renderAt(path: string) {
           { path: 'bookings/:id', element: <FakeBookingPage /> },
           { path: 'catalogue', element: page('Catalogue') },
           { path: 'availability', element: page('Availability') },
+          { path: 'earnings', element: page('Earnings') },
+          { path: 'payouts/:id', element: <FakeBookingPage /> },
+          { path: 'payout-method', element: page('Payout method') },
           { path: 'settings', element: page('Settings') },
         ],
       },
@@ -76,6 +79,7 @@ describe('the admin breadcrumb', () => {
     ['/studio/bookings', 'Bookings'],
     ['/studio/catalogue', 'Catalogue'],
     ['/studio/availability', 'Availability'],
+    ['/studio/earnings', 'Earnings'],
     ['/studio/settings', 'Settings'],
   ])('on %s reads Admin > %s, with the section as the current page', (path, section) => {
     renderAt(path)
@@ -108,6 +112,25 @@ describe('the admin breadcrumb', () => {
     expect(within(items[1] as HTMLElement).getByRole('link', { name: 'Bookings' })).toHaveAttribute('href', '/studio/bookings')
     expect(items[2]?.querySelector('[aria-current="page"]')).toHaveTextContent('BKY-2610-00042')
     expect(items[1]?.querySelector('[aria-current]')).toBeNull()
+  })
+
+  it('puts one payout under Earnings, with the label its page reports (Phase 4)', () => {
+    renderAt('/studio/payouts/p1')
+
+    act(() => finishLoad('Payout 10 Oct 2026, 10:00'))
+
+    const items = crumbs()
+    expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Earnings', 'Payout 10 Oct 2026, 10:00'])
+    expect(within(items[1] as HTMLElement).getByRole('link', { name: 'Earnings' })).toHaveAttribute('href', '/studio/earnings')
+  })
+
+  it('puts the payout method under Earnings', () => {
+    renderAt('/studio/payout-method')
+
+    const items = crumbs()
+    // The page reports its own name as the tail; rendered alone here it reports none.
+    expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Earnings'])
+    expect(items[1]?.querySelector('[aria-current="page"]')).toHaveTextContent('Earnings')
   })
 
   it('drops the reference crumb when the booking fails to load', () => {

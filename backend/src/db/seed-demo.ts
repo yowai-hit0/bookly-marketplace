@@ -3,6 +3,7 @@ import { hashPassword } from '../auth/password.js';
 import { accessTokenExpiry, generateAccessToken } from '../booking/access-token.js';
 import { generateReference } from '../booking/reference.js';
 import { quoteBasket } from '../catalogue/quote.js';
+import { recordEarning } from '../payouts/ledger.js';
 import { isSlotTaken } from './errors.js';
 
 /**
@@ -319,7 +320,7 @@ async function seedDemoBooking(prisma: PrismaClient, now: Date): Promise<DemoSum
         await tx.bookingAddon.create({
           data: { bookingId: booking.id, addonId: rush.id, nameSnapshot: rush.nameEn, unitPriceRwf: rush.priceRwf, amountRwf: rush.priceRwf, stage: 'at_booking' },
         });
-        await tx.payment.create({
+        const payment = await tx.payment.create({
           data: {
             bookingId: booking.id,
             kind: 'booking_fee',
@@ -332,6 +333,8 @@ async function seedDemoBooking(prisma: PrismaClient, now: Date): Promise<DemoSum
             settledAt: now,
           },
         });
+        // A succeeded online fee earns, as every success does (R4.2), so the demo studio's earnings page has a line.
+        await recordEarning(tx, payment.id);
         return booking.reference;
       });
       return { reference, created: true, accessToken: token };

@@ -1,0 +1,113 @@
+# The studio's money pages (marketplace-spec.md Phase 4: R4.1, R4.5, T4.4). All
+# require the studio bearer token and are the signed-in photographer's own:
+# another photographer's earnings and payout method cannot be named at all, and
+# another photographer's payout id is a 404, exactly like one that names nothing.
+
+earnings:
+  get:
+    operationId: getEarnings
+    tags: [Studio earnings]
+    summary: Earnings, payouts and totals
+    description: |
+      What the photographer is owed and has been paid. The platform holds every
+      payment made online and pays it out by hand, with **no commission**; cash
+      the photographer was handed never appears here.
+
+      - A booking fee is payable as soon as it succeeds.
+      - A session fee is `pending` until the shoot has ended, then payable,
+        unless the booking was cancelled.
+      - A refund before any payout voids the line; a refund after one adds a
+        negative `reversal` that the next payout subtracts.
+
+      Each line carries its booking's id and reference, to link to it.
+    responses:
+      '200':
+        description: Totals, every line, and the payout history.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/StudioEarnings }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+
+payout:
+  get:
+    operationId: getStudioPayout
+    tags: [Studio earnings]
+    summary: One payout, with its lines
+    description: A draft being prepared or a paid payout of the signed-in photographer's. A cancelled draft, or another photographer's payout, is a 404.
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        description: The payout and its lines.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/StudioPayoutDetail }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+payoutMethod:
+  get:
+    operationId: getPayoutMethod
+    tags: [Studio earnings]
+    summary: The current payout method
+    description: Where payouts go now, or `null` if none has been saved. The page shows the transfer-fee banner (R4.5).
+    responses:
+      '200':
+        description: The current method, or null.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PayoutMethodCurrent }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  put:
+    operationId: setPayoutMethod
+    tags: [Studio earnings]
+    summary: Save the payout method
+    description: |
+      Saves where payouts go (MoMo or bank). The previous method is retired, not
+      edited, so payouts already built keep naming the destination they were
+      built for (R4.1).
+
+      **Requires the current password.** Without it, or with the wrong one, the
+      answer is `403 invalid_password` and nothing changes; a wrong password
+      counts toward the account's sign-in lockout exactly like a failed login,
+      and once locked the answer is `403 password_locked` until the lock ends.
+      On success an `account_security_alert` email (payout method changed) goes
+      to the login address, and the platform's payout screen flags the change
+      for 72 hours.
+
+      Rate-limited per address (`429`).
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/payouts.yaml#/schemas/PayoutMethodRequest }
+    responses:
+      '200':
+        description: The new current method.
+        content:
+          application/json:
+            schema: { $ref: ../components/payouts.yaml#/schemas/PayoutMethodEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '403':
+        description: The current password was missing or wrong (`invalid_password`), or the account is locked by failed attempts (`password_locked`).
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [error]
+              additionalProperties: false
+              properties:
+                error: { type: string, enum: [invalid_password, password_locked] }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited

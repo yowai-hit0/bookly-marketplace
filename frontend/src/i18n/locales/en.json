@@ -162,7 +162,8 @@
       "signOut": "Sign out",
       "bookings": "Bookings",
       "availability": "Availability",
-      "settings": "Settings"
+      "settings": "Settings",
+      "earnings": "Earnings"
     },
     "theme": {
       "label": "Theme",
@@ -625,7 +626,8 @@
         "too_large": "That would make the booking worth more than the system can hold.",
         "no_link": "Save a link to the photos first.",
         "balance_due": "The client still owes money on this booking. It completes by itself once it is paid in full.",
-        "over_outstanding": "That is more than the client owes. Enter the amount you were paid, up to what is still owed."
+        "over_outstanding": "That is more than the client owes. Enter the amount you were paid, up to what is still owed.",
+        "refund_with_platform": "This payment was made online, so Bookly refunds it, not you. The booking below is up to date."
       },
       "addons": {
         "title": "Add-ons from the shoot",
@@ -695,7 +697,143 @@
         "label": "Cash",
         "refs": "cash · our ref {{ourRef}}",
         "replaced": "Replaced by cash"
+      },
+      "refundWithPlatform": "Refund pending with the platform",
+      "refundWithPlatformNote": "The client paid online, so the money is in Bookly's account: Bookly sends the refund and records it. There is nothing for you to do.",
+      "overpaymentPending": "The client paid {{overpaid}} more than was due; the platform will return it to them. You earn only what was due.",
+      "overpaymentRefunded": "The client paid {{overpaid}} more than was due. The platform returned it on {{date}}, reference {{reference}}. You earn only what was due."
+    },
+    "earnings": {
+      "title": "Earnings",
+      "intro": "Clients' online payments go into Bookly's account, and Bookly pays you what you earned by manual transfer, with no commission. Cash you were handed never appears here.",
+      "loading": "Loading earnings…",
+      "loadFailed": "Could not load your earnings. Check your connection and try again.",
+      "retry": "Try again",
+      "payoutMethod": "Payout method",
+      "totals": {
+        "pending": "Pending",
+        "payable": "Payable now",
+        "inDraft": "Being paid out",
+        "paid": "Paid to you"
+      },
+      "payableNegative": "Refunds made after a payout outweigh your new earnings by {{amount}}. The next payout subtracts this first.",
+      "items": {
+        "title": "Lines",
+        "empty": "No earnings yet. Every booking or session fee a client pays online appears here, one line each.",
+        "columns": {
+          "booking": "Booking",
+          "line": "Line",
+          "state": "State",
+          "amount": "Amount",
+          "date": "Added"
+        },
+        "reversal": "Refunded after payout: {{kind}}",
+        "shoot": "Shoot {{date}}"
+      },
+      "states": {
+        "pending": "Pending",
+        "payable": "Payable",
+        "in_draft": "Being paid out",
+        "paid": "Paid",
+        "voided": "Voided"
+      },
+      "payouts": {
+        "title": "Payouts",
+        "empty": "No payouts yet.",
+        "columns": {
+          "created": "Created",
+          "amount": "Amount",
+          "status": "Status",
+          "destination": "Sent to",
+          "reference": "Transfer reference"
+        },
+        "lines_one": "{{count}} line",
+        "lines_other": "{{count}} lines",
+        "status": {
+          "draft": "Being prepared",
+          "paid": "Paid",
+          "cancelled": "Cancelled"
+        },
+        "noReference": "Not sent yet"
       }
+    },
+    "payout": {
+      "title": "Payout of {{amount}}",
+      "crumb": "Payout {{date}}",
+      "loading": "Loading payout…",
+      "loadFailed": "Could not load this payout. Check your connection and try again.",
+      "retry": "Try again",
+      "missing": "This payout does not exist.",
+      "back": "Back to earnings",
+      "created": "Created {{date}}",
+      "paid": "Paid {{date}}",
+      "reference": "Transfer reference {{reference}}",
+      "draftNote": "Bookly is preparing this payout. It is marked paid once the transfer has been made.",
+      "destination": "Sent to",
+      "items": "Lines"
+    },
+    "payoutMethod": {
+      "title": "Payout method",
+      "intro": "Where Bookly sends what you earn. You have one at a time: saving a new one replaces it for every payout from then on.",
+      "transferFee": "Bookly sends your payouts by manual transfer. The transfer fee is deducted from what you receive, so you may want to include it in your prices.",
+      "loading": "Loading your payout method…",
+      "loadFailed": "Could not load your payout method. Check your connection and try again.",
+      "retry": "Try again",
+      "none": "You have no payout method yet. Add one so Bookly can pay you.",
+      "current": "Current payout method",
+      "savedOn": "Saved {{date}}",
+      "add": "Add a payout method",
+      "change": "Change payout method",
+      "saved": "Payout method saved. We've emailed your sign-in address about the change, so you'll know if it wasn't you.",
+      "kinds": {
+        "momo": "Mobile money",
+        "bank": "Bank account"
+      },
+      "networks": {
+        "mtn": "MTN MoMo",
+        "airtel": "Airtel Money"
+      },
+      "summary": {
+        "accountName": "Name on the account: {{name}}"
+      },
+      "fields": {
+        "kind": "Paid to",
+        "momoNetwork": "Network",
+        "momoNumber": "Mobile number",
+        "bankName": "Bank",
+        "bankAccountNumber": "Account number",
+        "accountName": "Name on the account",
+        "currentPassword": "Your password"
+      },
+      "hints": {
+        "momoNumber": {
+          "mtn": "An MTN number starts 078 or 079, such as 0788 123 456.",
+          "airtel": "An Airtel number starts 072 or 073, such as 0722 123 456."
+        },
+        "accountName": "Exactly as the account is registered, or the transfer can be refused.",
+        "bankAccountNumber": "Letters, digits, spaces and dashes.",
+        "currentPassword": "Changing where you are paid needs your password. We email you whenever it changes."
+      },
+      "invalid": {
+        "momoNumber": {
+          "mtn": "Enter an MTN number: 10 digits starting 078 or 079.",
+          "airtel": "Enter an Airtel number: 10 digits starting 072 or 073."
+        },
+        "accountName": "Enter the name on the account, up to 120 characters.",
+        "bankName": "Enter the bank's name, up to 100 characters.",
+        "bankAccountNumber": "Enter the account number: 5 to 40 letters, digits, spaces or dashes, with at least one digit.",
+        "currentPassword": "Enter your password.",
+        "wrongPassword": "That password is not right. Too many wrong tries lock your account for a while."
+      },
+      "errors": {
+        "password_locked": "Too many wrong passwords: your account is locked for a few minutes. Wait, then try again.",
+        "rate_limited": "Too many changes from here. Wait a while and try again.",
+        "invalid_request": "Check what you entered and try again.",
+        "failed": "Could not save your payout method. Check your connection and try again."
+      },
+      "save": "Save payout method",
+      "saving": "Saving…",
+      "cancel": "Cancel"
     }
   },
   "checkout": {
@@ -1175,7 +1313,9 @@
     "nav": {
       "label": "Platform",
       "photographers": "Photographers",
-      "signOut": "Sign out"
+      "signOut": "Sign out",
+      "payouts": "Payouts",
+      "refunds": "Refunds"
     },
     "photographers": {
       "title": "Photographers",
@@ -1225,6 +1365,185 @@
       "stale": "That change no longer applies: {{name}} is now {{status}}.",
       "notFound": "That photographer no longer exists.",
       "failed": "Could not save the change. Check your connection and try again."
+    },
+    "payouts": {
+      "title": "Payouts",
+      "intro": "Payouts are made by hand. Create a draft, make the transfer outside Bookly, then mark the draft paid with the transfer reference.",
+      "views": {
+        "label": "Show",
+        "due": "Due",
+        "draft": "Drafts",
+        "paid": "Paid",
+        "cancelled": "Cancelled"
+      },
+      "loading": "Loading payouts…",
+      "loadFailed": "Could not load the payouts. Check your connection and try again.",
+      "retry": "Try again",
+      "empty": {
+        "due": "No photographer is owed a payout right now.",
+        "draft": "No draft payouts.",
+        "paid": "No payouts have been paid yet.",
+        "cancelled": "No cancelled payouts."
+      },
+      "columns": {
+        "photographer": "Photographer",
+        "balance": "Payable",
+        "method": "Payout method",
+        "actions": "Actions",
+        "amount": "Amount",
+        "created": "Created",
+        "paid": "Paid",
+        "cancelled": "Cancelled"
+      },
+      "lines_one": "{{count}} line",
+      "lines_other": "{{count}} lines",
+      "by": "by {{name}}",
+      "someone": "an admin",
+      "noMethod": "No payout method saved. A payout can't be created until they add one.",
+      "changedRecently": "Payout method changed in the last 72 hours. Confirm it with the photographer before sending money.",
+      "notCurrent": "No longer their payout method: they saved a new one after this payout was created.",
+      "create": "Create payout",
+      "createNamed": "Create payout for {{name}}",
+      "openDraft": "Open the draft",
+      "openDraftNamed": "Open the draft for {{name}}",
+      "open": "Open",
+      "openNamed": "Open the payout to {{name}} of {{amount}}",
+      "status": {
+        "draft": "Draft",
+        "paid": "Paid",
+        "cancelled": "Cancelled"
+      },
+      "confirm": {
+        "title": "Create a payout for {{name}}?",
+        "body": "This puts every line payable now into a draft of {{amount}} ({{lines}}). Nothing is sent: you make the transfer yourself, then mark the draft paid.",
+        "destination": "Send to",
+        "changedRecently": "This payout method was saved in the last 72 hours. Redirecting payouts is what an account takeover aims for: confirm the destination with the photographer, through a channel you already trust, before you send money.",
+        "submit": "Create draft",
+        "working": "Creating…",
+        "cancel": "Cancel"
+      },
+      "errors": {
+        "draft_exists": "A draft payout for this photographer already exists. Pay or cancel it before creating another.",
+        "nothing_payable": "Nothing is payable: their balance is {{amount}}. No payout was created, and the balance carries forward.",
+        "no_payout_method": "This photographer has no payout method saved, so no payout can be created.",
+        "not_found": "That photographer no longer exists.",
+        "failed": "Could not create the payout. Check your connection and try again."
+      }
+    },
+    "payout": {
+      "title": "Payout to {{name}}",
+      "loading": "Loading payout…",
+      "loadFailed": "Could not load this payout. Check your connection and try again.",
+      "retry": "Try again",
+      "missing": "This payout does not exist.",
+      "back": "All payouts",
+      "created": "Created {{date}} by {{name}}",
+      "paid": "Paid {{date}} by {{name}}",
+      "cancelled": "Cancelled {{date}} by {{name}}",
+      "destination": "Destination",
+      "replaced": "Since replaced by a new payout method.",
+      "reference": "Transfer reference",
+      "note": "Note",
+      "items": "Lines",
+      "noItems": "No lines: a cancelled draft gives its lines back to the photographer's balance.",
+      "notCurrent": "The photographer has saved a new payout method since this draft was created. Don't send money to the destination below: cancel this draft and create a new one.",
+      "changedRecently": "The photographer's payout method was changed in the last 72 hours. Confirm the destination with them, through a channel you already trust, before you send money.",
+      "markPaid": "Mark paid",
+      "cancelDraft": "Cancel draft",
+      "markPaidDialog": {
+        "title": "Mark this payout paid",
+        "body": "Make the transfer of {{amount}} first. The photographer is emailed that it was sent.",
+        "reference": "Transfer reference",
+        "referenceHint": "The MoMo or bank transaction ID. Each reference can be recorded once.",
+        "note": "Note (optional)",
+        "noteHint": "Only platform admins see this. Up to 500 characters.",
+        "submit": "Mark paid",
+        "working": "Saving…",
+        "cancel": "Cancel"
+      },
+      "cancelDialog": {
+        "title": "Cancel this draft?",
+        "body": "Its lines go back to the photographer's balance, for a later payout. Do this only if you have not made the transfer.",
+        "submit": "Cancel the draft",
+        "keep": "Keep the draft",
+        "working": "Cancelling…"
+      },
+      "invalid": {
+        "transferReference": "Enter the transfer reference, up to 100 characters.",
+        "duplicate": "That reference is already recorded on another payout. Check it and try again.",
+        "note": "Keep the note to 500 characters or fewer."
+      },
+      "done": {
+        "paid": "Marked paid. The photographer has been emailed.",
+        "cancelled": "Draft cancelled. Its lines are back in the photographer's balance."
+      },
+      "stale": "This payout is no longer a draft: it is {{status}} now. The page shows it as it stands.",
+      "gone": "This payout no longer exists.",
+      "invalidRequest": "Check what you entered and try again.",
+      "failed": "Could not save the change. Check your connection and try again."
+    },
+    "refunds": {
+      "title": "Refunds",
+      "intro": "Money clients paid online that is owed back. It is in Bookly's account, so refund it from there, then record it here. Cash refunds are the photographer's to make and record.",
+      "loading": "Loading refunds…",
+      "loadFailed": "Could not load the refunds. Check your connection and try again.",
+      "retry": "Try again",
+      "empty": "No refunds are owed.",
+      "columns": {
+        "booking": "Booking",
+        "client": "Client",
+        "photographer": "Photographer",
+        "amount": "Amount",
+        "payment": "Paid with",
+        "actions": "Actions",
+        "kind": "Refund",
+        "toSend": "To send"
+      },
+      "providers": {
+        "mtn_momo_direct": "MTN MoMo",
+        "flutterwave": "Flutterwave"
+      },
+      "refs": "provider ref {{providerRef}} · our ref {{ourRef}}",
+      "shoot": "Shoot {{date}}",
+      "record": "Record refund",
+      "recordNamed": "Record refund for {{reference}}",
+      "dialog": {
+        "title": "Record the refund for {{reference}}",
+        "body": "The system moves no money. Refund {{amount}} to {{name}} from Bookly's {{provider}} account first, then record it here.",
+        "reference": "Refund reference",
+        "referenceHint": "The transaction ID the refund went out with.",
+        "refundedAt": "Refunded at (Kigali time, optional)",
+        "refundedAtHint": "Leave it blank if you sent the refund just now.",
+        "submit": "Record refund",
+        "working": "Saving…",
+        "cancel": "Cancel",
+        "bodyOverpayment": "The system moves no money. Return {{amount}} to {{name}} from Bookly's {{provider}} account first, then record it here. Only the extra goes back: the payment itself stands."
+      },
+      "invalid": {
+        "reference": "Enter the refund reference, up to 100 characters.",
+        "refundedAt": "Enter a time that is not in the future, or leave it blank.",
+        "duplicateReference": "That reference is already recorded for another online refund. Check it and try again."
+      },
+      "errors": {
+        "cash_payment": "This was a cash payment: the photographer refunds it and records it in their studio.",
+        "not_refundable": "That payment is no longer owed back. It may have been recorded already.",
+        "not_found": "That payment no longer exists.",
+        "invalid_request": "Check what you entered and try again.",
+        "failed": "Could not record the refund. Check your connection and try again.",
+        "refund_kind_mismatch": {
+          "full": "That refund changed since the list was loaded: the whole payment is now owed back, as a full refund. The list below is up to date.",
+          "overpayment": "That refund changed since the list was loaded: only the overpaid part is now owed back. The list below is up to date."
+        },
+        "refund_kind_changed": "That refund changed since the list was loaded. The list below is up to date."
+      },
+      "done": "Refund of {{amount}} for {{reference}} recorded.",
+      "kinds": {
+        "full": "Full refund",
+        "overpayment": "Return the extra (overpayment)"
+      },
+      "paidOf": "of {{amount}} paid",
+      "overpaymentNote": "The client paid {{overpaid}} more than was due; the photographer earns only what was due.",
+      "reducedNote": "{{overpaid}} of this payment was already returned as an overpayment, so the amount to send is reduced."
     }
   },
   "account": {

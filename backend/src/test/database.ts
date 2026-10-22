@@ -43,6 +43,11 @@ export function databaseName(databaseUrl: string): string {
  * calendar and bookings all reference them (marketplace-data-model.md §3.10).
  */
 export const APPLICATION_TABLES = [
+  // Payouts (Phase 4): items reference payments and payouts, payouts their
+  // method, and all three their photographer and the admins who acted.
+  'payout_item',
+  'payout',
+  'payout_method',
   // A booking's notes to its client (2026-09-25).
   'booking_note',
   'booking_addon',

@@ -264,7 +264,7 @@ schemas:
 
   AdminPayment:
     type: object
-    required: [id, kind, provider, ourRef, providerRef, method, amountRwf, status, failureReason, initiatedAt, settledAt, refundedAt, refundReference, note, canRecordRefund]
+    required: [id, kind, provider, ourRef, providerRef, method, amountRwf, status, failureReason, initiatedAt, settledAt, refundedAt, refundReference, note, canRecordRefund, refundPendingWithPlatform, overpaidRwf, overpaymentRefundPendingWithPlatform, overpaymentRefundedAt, overpaymentRefundReference]
     additionalProperties: false
     properties:
       id: { $ref: 'common.yaml#/schemas/Uuid' }
@@ -281,7 +281,32 @@ schemas:
       refundedAt: { type: [string, 'null'], format: date-time }
       refundReference: { type: [string, 'null'] }
       note: { type: [string, 'null'], description: What was typed with a cash payment. }
-      canRecordRefund: { type: boolean }
+      canRecordRefund:
+        type: boolean
+        description: A cash payment owed back, which the photographer records once he has given it back (`POST /api/studio/payments/{id}/refund`). Always false for a payment made online.
+      refundPendingWithPlatform:
+        type: boolean
+        description: |
+          A payment made online that is owed back. The money is in the platform's
+          account, so a platform admin refunds the client and records it; the
+          studio shows it as pending with the platform (Phase 4 refund decision).
+      overpaidRwf:
+        type: integer
+        minimum: 0
+        description: |
+          The part of a session fee paid online over what the booking was worth
+          (Phase 4 overpayment decision); 0 when it was not overpaid. The payment
+          stays `succeeded`; its earning, and the booking's totals, count only
+          `amountRwf - overpaidRwf`.
+      overpaymentRefundPendingWithPlatform:
+        type: boolean
+        description: |
+          That overpaid part is still to go back to the client. The money is in
+          the platform's account, so the platform returns it and records it; there
+          is nothing for the photographer to do. False once the platform records
+          it, and false once the whole payment is owed back (a full refund covers it).
+      overpaymentRefundedAt: { type: [string, 'null'], format: date-time, description: When the platform returned the overpaid part. }
+      overpaymentRefundReference: { type: [string, 'null'], description: The reference it went back with. }
 
   AdminBooking:
     type: object

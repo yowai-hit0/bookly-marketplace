@@ -538,7 +538,8 @@ describe('AdminAvailability, a block over a confirmed booking (spec §6.4)', () 
 // --- Admin navigation ------------------------------------------------------------------------------------------------
 
 describe('the admin navigation', () => {
-  it('lists the five sections, with availability and settings among them', async () => {
+  // Six since Phase 4 added Earnings (marketplace-spec.md R4.5).
+  it('lists the six sections, with availability and settings among them', async () => {
     stubApi()
     await openPage()
     const nav = screen.getByRole('navigation', { name: 'Admin' })
@@ -548,6 +549,7 @@ describe('the admin navigation', () => {
       'Bookings',
       'Catalogue',
       'Availability',
+      'Earnings',
       'Settings',
     ])
     expect(within(nav).getByRole('link', { name: 'Availability' })).toHaveAttribute('aria-current', 'page')

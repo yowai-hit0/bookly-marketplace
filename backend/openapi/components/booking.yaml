@@ -204,8 +204,15 @@ schemas:
     properties:
       quotedTotalRwf: { $ref: 'common.yaml#/schemas/Rwf', description: Package plus add-ons chosen at booking. }
       grandTotalRwf: { $ref: 'common.yaml#/schemas/Rwf', description: The quoted total plus post-shoot add-ons. }
-      collectedRwf: { $ref: 'common.yaml#/schemas/Rwf', description: Succeeded payments. }
-      refundDueRwf: { $ref: 'common.yaml#/schemas/Rwf', description: Money owed back and not yet recorded as refunded. }
+      collectedRwf:
+        $ref: 'common.yaml#/schemas/Rwf'
+        description: Succeeded payments, each for the part that was due (the amount less any overpaid part).
+      refundDueRwf:
+        $ref: 'common.yaml#/schemas/Rwf'
+        description: |
+          Money owed back and not yet recorded as refunded: payments owed back
+          whole (less an overpaid part already returned), and overpaid parts of
+          succeeded payments not yet returned.
       outstandingRwf: { $ref: 'common.yaml#/schemas/Rwf', description: Still to pay; never below nought. }
 
   ClientNotice:

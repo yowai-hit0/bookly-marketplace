@@ -13,12 +13,14 @@ import {
   suspendPhotographer,
 } from '../photographers/moderation.js';
 import { areaAuthRouter } from './area-auth.js';
+import { platformPayoutsRouter } from './platform-payouts.js';
 import { parseOrReject } from './validation.js';
 
 /**
  * `/api/platform/*`: the platform admin's console (Phase 2 decision 7, the
- * minimum of marketplace-spec.md Phase 9 that signups need). Phase 9 adds the
- * trial start, categories, payouts and the rest.
+ * minimum of marketplace-spec.md Phase 9 that signups need), plus Phase 4's
+ * payouts and refunds (routes/platform-payouts.ts). Phase 9 adds the trial
+ * start, categories and the rest.
  *
  * Order is the security model, as in the studio: the unauthenticated
  * `/auth/*` endpoints first, then `requirePlatformAdmin`, behind which every
@@ -77,6 +79,9 @@ export function platformRouter(deps: PlatformRouterDeps): Router {
     if (id === undefined) return;
     send(res, await reactivatePhotographer(moderation, { photographerId: id, adminUserId: platformAdminLocals(res).user.id }));
   });
+
+  // Payouts and refunds of money paid online (Phase 4: R4.4, R4.6).
+  router.use(platformPayoutsRouter(deps));
 
   return router;
 }

@@ -1,6 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { type AdminBooking, findAdminBooking } from './admin-view.js';
-import { bookingTotals } from './totals.js';
+import { bookingTotals, TOTALS_PAYMENT_SELECT } from './totals.js';
 
 /**
  * Post-shoot add-ons (plan.md Task 20; spec §3.5 step 2, §6.15): the extra
@@ -129,7 +129,7 @@ export async function removePostShootAddon(deps: AddonEditDeps, bookingId: strin
 
     const [addons, payments] = await Promise.all([
       tx.bookingAddon.findMany({ where: { bookingId: booking.id }, select: { stage: true, amountRwf: true } }),
-      tx.payment.findMany({ where: { bookingId: booking.id }, select: { status: true, amountRwf: true } }),
+      tx.payment.findMany({ where: { bookingId: booking.id }, select: TOTALS_PAYMENT_SELECT }),
     ]);
     const totals = bookingTotals(booking, addons, payments);
     // Money already in hand for it: dropping the line would make a payment the

@@ -1007,6 +1007,39 @@ function Payments({
                   )}
                 </p>
                 {payment.note !== null && <p className={cn(META, 'whitespace-pre-line wrap-anywhere')}>{payment.note}</p>}
+                {/* Money paid online is in the platform's account, so the platform refunds it
+                    (Phase 4 refund decision): no form here, only what is happening. */}
+                {payment.refundPendingWithPlatform && (
+                  <div data-refund="platform" className={cn(SUBPANEL, 'mt-2 gap-1.5')}>
+                    <p className="flex items-center gap-2 font-medium">
+                      <Glyph shape="waiting" />
+                      {t('admin:booking.refundWithPlatform')}
+                    </p>
+                    <p className={HINT}>{t('admin:booking.refundWithPlatformNote')}</p>
+                  </div>
+                )}
+                {/* A session fee paid for more than was due (Phase 4 overpayment decision): the
+                    extra goes back from the platform's account, and he earns only what was due. */}
+                {payment.overpaymentRefundPendingWithPlatform && (
+                  <div data-overpayment="pending" className={cn(SUBPANEL, 'mt-2 gap-1.5')}>
+                    <p className="flex items-start gap-2">
+                      <Glyph shape="waiting" className="mt-0.5" />
+                      <span>{t('admin:booking.overpaymentPending', { overpaid: formatMoney(payment.overpaidRwf) })}</span>
+                    </p>
+                  </div>
+                )}
+                {payment.overpaidRwf > 0 && payment.overpaymentRefundedAt !== null && (
+                  <p data-overpayment="refunded" className={cn(META, 'flex items-start gap-2')}>
+                    <Glyph shape="earlier" className="mt-0.5" />
+                    <span>
+                      {t('admin:booking.overpaymentRefunded', {
+                        overpaid: formatMoney(payment.overpaidRwf),
+                        date: formatDateTime(payment.overpaymentRefundedAt),
+                        reference: payment.overpaymentRefundReference ?? '—',
+                      })}
+                    </span>
+                  </p>
+                )}
                 {payment.canRecordRefund && <RefundForm payment={payment} busy={busy} onSubmit={onRefund} />}
               </li>
             )

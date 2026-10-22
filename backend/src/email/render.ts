@@ -12,6 +12,7 @@ import { emailChangedNotice } from './templates/email-changed-notice.js';
 import { cancellation } from './templates/cancellation.js';
 import { clientNote } from './templates/client-note.js';
 import { paymentReceipt } from './templates/payment-receipt.js';
+import { payoutSent } from './templates/payout-sent.js';
 import { photoDelivery } from './templates/photo-delivery.js';
 import { photographerAlert } from './templates/photographer-alert.js';
 import { photographerApplicationReceived } from './templates/photographer-application-received.js';
@@ -56,6 +57,7 @@ export const TEMPLATES: Record<SendableEmailTemplate, AnyEmailTemplate> = {
   photographer_application_received: photographerApplicationReceived,
   photographer_approved: photographerApproved,
   photographer_suspended: photographerSuspended,
+  payout_sent: payoutSent,
 };
 
 export type RenderOptions = {

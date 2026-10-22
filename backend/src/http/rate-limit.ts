@@ -63,7 +63,8 @@ export type RateLimitName =
   | 'verifyResendPerIp'
   | 'googleStartPerIp'
   | 'googleCallbackPerIp'
-  | 'emailChangePerIp';
+  | 'emailChangePerIp'
+  | 'payoutMethodPerIp';
 
 const MINUTE = 60_000;
 
@@ -94,6 +95,11 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitName, RateLimitRule> = {
   // a person who changes their mind a few times at the account chooser.
   googleStartPerIp: { limit: 20, windowMs: 15 * MINUTE },
   googleCallbackPerIp: { limit: 20, windowMs: 15 * MINUTE },
+  // Changing where payouts go checks a password (Argon2) and sends a security
+  // email (marketplace-spec.md R4.1): a person corrects a typo or two, a
+  // script holding a stolen token does not get to keep trying. The password
+  // check also counts toward the login lockout.
+  payoutMethodPerIp: { limit: 10, windowMs: 60 * MINUTE },
 };
 
 export type RateLimitOverrides = Partial<Record<RateLimitName, RateLimitRule>>;

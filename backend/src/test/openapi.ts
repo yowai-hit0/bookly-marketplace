@@ -113,6 +113,9 @@ const MOUNTS: Record<string, string | readonly string[]> = {
   calendarRouter: '/api/studio/calendar',
   studioBookingsRouter: '/api/studio',
   catalogueRouter: '/api/studio',
+  // Phase 4: earnings and the payout method (routes/studio.ts), payouts and refunds (routes/platform.ts).
+  studioPayoutsRouter: '/api/studio',
+  platformPayoutsRouter: '/api/platform',
 };
 
 /**

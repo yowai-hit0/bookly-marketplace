@@ -58,6 +58,11 @@ export function isSlotTaken(error: unknown): boolean {
   return sqlstateOf(error) === SQLSTATE.EXCLUSION_VIOLATION;
 }
 
+/** True when a unique or partial-unique index refused a duplicate (payout_one_draft, payout_transfer_reference_unique, ...). */
+export function isUniqueViolation(error: unknown): boolean {
+  return sqlstateOf(error) === SQLSTATE.UNIQUE_VIOLATION;
+}
+
 /**
  * True when the database aborted the transaction to resolve contention -- a
  * deadlock or a serialization failure -- so running it again is correct.
