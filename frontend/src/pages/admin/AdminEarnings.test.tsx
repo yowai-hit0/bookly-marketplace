@@ -88,9 +88,9 @@ describe('the earnings page', () => {
     await loaded()
 
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Earnings'])
-    expect(within(screen.getByRole('navigation', { name: 'Admin' })).getByRole('link', { name: 'Earnings' })).toHaveAttribute('aria-current', 'page')
+    expect(within(screen.getByRole('navigation', { name: 'Studio' })).getByRole('link', { name: 'Earnings' })).toHaveAttribute('aria-current', 'page')
     const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getAllByRole('listitem')
-    expect(crumbs.map((item) => item.textContent)).toEqual(['Admin', 'Earnings'])
+    expect(crumbs.map((item) => item.textContent)).toEqual(['Studio', 'Earnings'])
   })
 
   it('says the platform pays by hand with no commission, and that cash is never here', async () => {

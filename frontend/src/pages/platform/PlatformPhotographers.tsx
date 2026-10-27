@@ -1,7 +1,7 @@
-import { CircleAlert, CircleCheck, CircleX, Clock, Users } from 'lucide-react'
+import { CircleAlert, CircleCheck, CircleX, Clock, PencilLine, Users } from 'lucide-react'
 import { type FormEvent, useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { kigaliDateOf } from '@/admin/calendar-dates'
 import { ApiError, UnauthenticatedError } from '@/auth/api'
 import { Badge } from '@/components/ui/badge'
@@ -15,9 +15,17 @@ import {
   type Moderation,
   PHOTOGRAPHER_STATUSES,
   type PhotographerStatus,
+  type PhotographerFilter,
   type PlatformPhotographer,
+  REVIEW_FILTERS,
+  type ReviewFilter,
+  awaitsSubmission,
+  handleChangedSinceSubmission,
   isPhotographerStatus,
+  isReviewFilter,
+  matchesFilter,
   movesFor,
+  normalisePhotographer,
   platformApi,
 } from '@/platform/photographers'
 import { AdminField } from '@/pages/admin/AdminField'
@@ -42,12 +50,27 @@ type Pending = { photographer: PlatformPhotographer; action: Moderation }
  *
  * A change another admin made first comes back as a 409 carrying the row as
  * it now is; the row is replaced and the page says so.
+ *
+ * The review queue (Phase 7): `?review=awaiting` lists the studios submitted
+ * for review (the admins' email links there), `?review=setting_up` the pending
+ * ones still setting up; both are pending, so the status filter steps aside
+ * while either is chosen. A pending photographer who has not submitted cannot
+ * be approved: the button is disabled with the reason beside it, and the API's
+ * own 409 `not_submitted` (a race) says so and refreshes the row.
+ *
+ * A studio awaiting review whose handle changed after it was submitted is
+ * flagged under its name, with the current handle and the date (Phase 7, user
+ * decision 2026-10-27): the handle becomes its public address at approval.
  */
 export function PlatformPhotographers() {
   const { t } = useTranslation()
   const [params, setParams] = useSearchParams()
+  const rawReview = params.get('review')
+  const review = isReviewFilter(rawReview) ? rawReview : undefined
   const raw = params.get('status')
-  const status = isPhotographerStatus(raw) ? raw : undefined
+  // A review view is pending by definition: the status filter steps aside.
+  const status = review === undefined && isPhotographerStatus(raw) ? raw : undefined
+  const filter: PhotographerFilter = review === undefined ? (status === undefined ? {} : { status }) : { review }
   const filterId = useId()
 
   const [rows, setRows] = useState<{ key: string; list: PlatformPhotographer[] } | null>(null)
@@ -55,13 +78,13 @@ export function PlatformPhotographers() {
   const [attempt, setAttempt] = useState(0)
   const [pending, setPending] = useState<Pending | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
-  const key = status ?? 'all'
+  const key = review === undefined ? (status ?? 'all') : `review:${review}`
   // A failure belongs to the load that failed: another filter or a retry is a new load.
   const failed = failedFor === `${key}:${attempt}`
 
   useEffect(() => {
     let cancelled = false
-    platformApi.list(status).then(
+    platformApi.list(review === undefined ? (status === undefined ? {} : { status }) : { review }).then(
       (list) => !cancelled && setRows({ key, list }),
       (error: unknown) => {
         // A 401 has dropped the platform session; the route's guard sends him to sign in.
@@ -72,7 +95,7 @@ export function PlatformPhotographers() {
     return () => {
       cancelled = true
     }
-  }, [key, status, attempt])
+  }, [key, status, review, attempt])
 
   const current = rows !== null && rows.key === key ? rows.list : null
 
@@ -88,9 +111,7 @@ export function PlatformPhotographers() {
         ? now
         : {
             ...now,
-            list: now.list.flatMap((row) =>
-              row.id !== photographer.id ? [row] : status === undefined || photographer.status === status ? [photographer] : [],
-            ),
+            list: now.list.flatMap((row) => (row.id !== photographer.id ? [row] : matchesFilter(photographer, filter) ? [photographer] : [])),
           },
     )
   }
@@ -118,6 +139,13 @@ export function PlatformPhotographers() {
     })
   }
 
+  /** 409 `not_submitted`: the studio has not been submitted for review, so it cannot be approved yet. */
+  function onNotSubmitted(photographer: PlatformPhotographer) {
+    setPending(null)
+    showRow(photographer)
+    setNotice({ tone: 'warning', text: t('platform:photographers.notSubmittedError', { name: photographer.displayName }) })
+  }
+
   function onGone(id: string) {
     setPending(null)
     dropRow(id)
@@ -128,26 +156,33 @@ export function PlatformPhotographers() {
     <main className={cn(PAGE, 'max-w-6xl')}>
       <PageHeader eyebrow={t('platform:nav.label')} eyebrowIcon={Users} title={t('platform:photographers.title')} />
 
-      <Toolbar className="lg:self-start">
-        <ToolbarCell className="max-lg:py-2">
-          <Label htmlFor={filterId} className={cn(EYEBROW, 'shrink-0')}>
-            {t('platform:photographers.filter.label')}
-          </Label>
-          <select
-            id={filterId}
-            value={key}
-            onChange={(event) => chooseStatus(event.target.value)}
-            className={cn(SELECT, 'lg:w-48')}
-          >
-            <option value="all">{t('platform:photographers.filter.all')}</option>
-            {PHOTOGRAPHER_STATUSES.map((value) => (
-              <option key={value} value={value}>
-                {t(`platform:photographers.status.${value}`)}
-              </option>
-            ))}
-          </select>
-        </ToolbarCell>
-      </Toolbar>
+      {/* The review views and the status filter, one row from `lg`. */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
+        <ReviewViews review={review} onChoose={() => setNotice(null)} />
+
+        {review === undefined && (
+          <Toolbar>
+            <ToolbarCell className="max-lg:py-2">
+              <Label htmlFor={filterId} className={cn(EYEBROW, 'shrink-0')}>
+                {t('platform:photographers.filter.label')}
+              </Label>
+              <select
+                id={filterId}
+                value={key}
+                onChange={(event) => chooseStatus(event.target.value)}
+                className={cn(SELECT, 'lg:w-48')}
+              >
+                <option value="all">{t('platform:photographers.filter.all')}</option>
+                {PHOTOGRAPHER_STATUSES.map((value) => (
+                  <option key={value} value={value}>
+                    {t(`platform:photographers.status.${value}`)}
+                  </option>
+                ))}
+              </select>
+            </ToolbarCell>
+          </Toolbar>
+        )}
+      </div>
 
       {notice !== null && (
         <Callout
@@ -188,7 +223,15 @@ export function PlatformPhotographers() {
       )}
 
       {current !== null && current.length === 0 && (
-        <p className={META}>{status === undefined ? t('platform:photographers.empty') : t('platform:photographers.emptyFiltered')}</p>
+        <p className={META}>
+          {review === 'awaiting'
+            ? t('platform:photographers.emptyAwaiting')
+            : review === 'setting_up'
+              ? t('platform:photographers.emptySettingUp')
+              : status === undefined
+                ? t('platform:photographers.empty')
+                : t('platform:photographers.emptyFiltered')}
+        </p>
       )}
 
       {current !== null && current.length > 0 && (
@@ -197,7 +240,7 @@ export function PlatformPhotographers() {
             <caption className="sr-only">{t('platform:photographers.title')}</caption>
             <thead role="rowgroup" className="@max-[48rem]:sr-only">
               <tr role="row" className="border-b">
-                {(['photographer', 'email', 'status', 'applied', 'actions'] as const).map((column) => (
+                {(['photographer', 'email', 'status', 'applied', 'submitted', 'actions'] as const).map((column) => (
                   <th key={column} role="columnheader" scope="col" className={cn(TH, column === 'actions' && 'text-right')}>
                     {t(`platform:photographers.columns.${column}`)}
                   </th>
@@ -211,6 +254,20 @@ export function PlatformPhotographers() {
                     <div className="flex flex-col gap-1">
                       <span className="wrap-anywhere">{photographer.displayName}</span>
                       <span className={cn(META, 'font-mono')}>/p/{photographer.handle}</span>
+                      {handleChangedSinceSubmission(photographer) && (
+                        <div className="flex flex-col items-start gap-1" data-handle-changed={photographer.handleChangedAt}>
+                          <Badge variant="console" className="bg-console-warning-tint text-console-warning">
+                            <PencilLine aria-hidden="true" />
+                            {t('platform:photographers.handleChanged')}
+                          </Badge>
+                          <span className={cn(META, 'wrap-anywhere')}>
+                            {t('platform:photographers.handleChangedDetail', {
+                              handle: photographer.handle,
+                              date: formatDate(kigaliDateOf(photographer.handleChangedAt)),
+                            })}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td role="cell" className={cn(TD, 'wrap-anywhere @max-[48rem]:p-0')}>
@@ -229,23 +286,46 @@ export function PlatformPhotographers() {
                   <td role="cell" className={cn(TD, 'tabular-nums @max-[48rem]:p-0')}>
                     {formatDate(kigaliDateOf(photographer.createdAt))}
                   </td>
+                  <td role="cell" className={cn(TD, 'tabular-nums @max-[48rem]:p-0')} data-submitted={photographer.submittedAt ?? ''}>
+                    {photographer.submittedAt === null ? (
+                      <span className={META}>{t('platform:photographers.notSubmitted')}</span>
+                    ) : (
+                      <>
+                        {/* Stacked, the column header is hidden: the word says what the date is. */}
+                        <span className="text-muted-foreground mr-1.5 @min-[48rem]:sr-only">{t('platform:photographers.columns.submitted')}</span>
+                        {formatDate(kigaliDateOf(photographer.submittedAt))}
+                      </>
+                    )}
+                  </td>
                   <td role="cell" className={cn(TD, '@max-[48rem]:p-0')}>
-                    <div className="flex flex-wrap gap-2 @min-[48rem]:justify-end">
-                      {movesFor(photographer.status).map((action) => (
-                        <Button
-                          key={action}
-                          variant="console-outline"
-                          size="console-sm"
-                          // Every row has the same verbs: the name says whose, and starts with the visible word.
-                          aria-label={`${t(`platform:photographers.${action}`)} ${photographer.displayName}`}
-                          onClick={() => {
-                            setNotice(null)
-                            setPending({ photographer, action })
-                          }}
-                        >
-                          {t(`platform:photographers.${action}`)}
-                        </Button>
-                      ))}
+                    <div className="flex flex-col gap-1.5 @min-[48rem]:items-end">
+                      <div className="flex flex-wrap gap-2 @min-[48rem]:flex-nowrap @min-[48rem]:justify-end">
+                        {movesFor(photographer.status).map((action) => {
+                          const blocked = action === 'approve' && awaitsSubmission(photographer)
+                          return (
+                            <Button
+                              key={action}
+                              variant="console-outline"
+                              size="console-sm"
+                              // Every row has the same verbs: the name says whose, and starts with the visible word.
+                              aria-label={`${t(`platform:photographers.${action}`)} ${photographer.displayName}`}
+                              disabled={blocked}
+                              aria-describedby={blocked ? `${photographer.id}-not-submitted` : undefined}
+                              onClick={() => {
+                                setNotice(null)
+                                setPending({ photographer, action })
+                              }}
+                            >
+                              {t(`platform:photographers.${action}`)}
+                            </Button>
+                          )
+                        })}
+                      </div>
+                      {awaitsSubmission(photographer) && (
+                        <p id={`${photographer.id}-not-submitted`} className="text-muted-foreground text-[0.8125rem]">
+                          {t('platform:photographers.approveNeedsSubmission')}
+                        </p>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -262,10 +342,48 @@ export function PlatformPhotographers() {
           onClose={() => setPending(null)}
           onDone={onDone}
           onStale={onStale}
+          onNotSubmitted={onNotSubmitted}
           onGone={onGone}
         />
       )}
     </main>
+  )
+}
+
+/**
+ * The three views of the list as links that keep the URL in step (the
+ * admins' email opens `?review=awaiting`): every photographer, the studios
+ * awaiting review, and those still setting up. The current one is marked
+ * `aria-current`, a fill and a weight, not colour alone.
+ */
+function ReviewViews({ review, onChoose }: { review: ReviewFilter | undefined; onChoose: () => void }) {
+  const { t } = useTranslation()
+  const views: (ReviewFilter | 'all')[] = ['all', ...REVIEW_FILTERS]
+  return (
+    <nav aria-label={t('platform:photographers.review.label')} className="lg:self-start">
+      <ul className="border-input divide-input flex flex-col divide-y rounded-xs border sm:flex-row sm:divide-x sm:divide-y-0">
+        {views.map((view) => {
+          const active = (review ?? 'all') === view
+          return (
+            <li key={view} className="flex">
+              <Link
+                to={view === 'all' ? { search: '' } : { search: `?review=${view}` }}
+                replace
+                aria-current={active ? 'page' : undefined}
+                data-review-view={view}
+                onClick={onChoose}
+                className={cn(
+                  'flex min-h-11 flex-1 items-center px-4 text-[0.9375rem] motion-safe:transition-colors motion-safe:duration-150 lg:min-h-12',
+                  active ? 'bg-sidebar-primary text-sidebar-primary-foreground font-medium' : 'hover:bg-accent text-foreground',
+                )}
+              >
+                {t(`platform:photographers.review.${view}`)}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </nav>
   )
 }
 
@@ -308,12 +426,14 @@ function ConfirmDialog({
   onClose,
   onDone,
   onStale,
+  onNotSubmitted,
   onGone,
 }: {
   pending: Pending
   onClose: () => void
   onDone: (action: Moderation, photographer: PlatformPhotographer) => void
   onStale: (photographer: PlatformPhotographer) => void
+  onNotSubmitted: (photographer: PlatformPhotographer) => void
   onGone: (id: string) => void
 }) {
   const { t } = useTranslation()
@@ -347,8 +467,12 @@ function ConfirmDialog({
       if (error instanceof UnauthenticatedError) return
       if (error instanceof ApiError && error.status === 409) {
         const now = (error.body as { photographer?: PlatformPhotographer } | null)?.photographer
+        if (now !== undefined && error.message === 'not_submitted') {
+          onNotSubmitted(normalisePhotographer(now))
+          return
+        }
         if (now !== undefined) {
-          onStale(now)
+          onStale(normalisePhotographer(now))
           return
         }
       }

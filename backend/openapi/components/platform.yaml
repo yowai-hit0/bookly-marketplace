@@ -11,7 +11,7 @@ schemas:
 
   PlatformPhotographer:
     type: object
-    required: [id, handle, displayName, email, status, createdAt, approvedAt, approvedByUserId, suspendedAt, suspensionReason]
+    required: [id, handle, displayName, email, status, createdAt, submittedAt, handleChangedAt, approvedAt, approvedByUserId, suspendedAt, suspensionReason]
     additionalProperties: false
     properties:
       id: { $ref: 'common.yaml#/schemas/Uuid' }
@@ -23,6 +23,19 @@ schemas:
         description: The photographer's login address.
       status: { $ref: '#/schemas/PhotographerStatus' }
       createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      submittedAt:
+        type: [string, 'null']
+        format: date-time
+        description: When the photographer submitted the studio for review from the setup checklist (R7.3). Approval requires it.
+      handleChangedAt:
+        type: [string, 'null']
+        format: date-time
+        description: |
+          When the photographer last changed their handle after submitting the
+          studio for review and before approval (Phase 7, 2026-10-27); every
+          platform admin was emailed the old and the new handle. Null if the
+          handle has not changed since the submission. Kept after approval,
+          when the handle is locked.
       approvedAt: { type: [string, 'null'], format: date-time }
       approvedByUserId:
         description: The platform admin who approved them.
@@ -59,5 +72,18 @@ schemas:
     required: [error, photographer]
     additionalProperties: false
     properties:
-      error: { const: invalid_transition }
+      error:
+        type: string
+        enum: [invalid_transition, not_submitted]
+        description: |
+          `invalid_transition`: the status does not allow it (approving a
+          suspended photographer). `not_submitted`: approving a pending
+          photographer who has not submitted the studio for review.
       photographer: { $ref: '#/schemas/PlatformPhotographer' }
+
+  ReviewFilter:
+    type: string
+    enum: [awaiting, setting_up]
+    description: |
+      Narrows to pending photographers: `awaiting` review (submitted, the only
+      ones approval accepts) or still `setting_up` (not submitted).

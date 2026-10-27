@@ -343,7 +343,18 @@
       "displayNameLabel": "Studio name",
       "handleLabel": "Handle",
       "emailLabel": "Email",
-      "button": "Review applications"
+      "button": "Review applications",
+      "submittedSubject": "A studio is ready for review",
+      "submittedPreheader": "A photographer has finished setting up and asks to be approved.",
+      "submittedHeading": "A studio is ready for review",
+      "submittedIntro": "{{displayName}} has finished the setup checklist and submitted their studio for review. It stays pending, not listed and not bookable, until a platform admin approves it.",
+      "submittedButton": "Review submitted studios",
+      "handleChangedSubject": "A studio under review changed its handle",
+      "handleChangedPreheader": "Its public address is no longer the one it submitted.",
+      "handleChangedHeading": "A studio under review changed its handle",
+      "handleChangedIntro": "{{displayName}} changed their handle after submitting their studio for review. The handle becomes their public address, fixed for good once the studio is approved, so check the new one before you approve.",
+      "previousHandleLabel": "Previous handle",
+      "newHandleLabel": "New handle"
     },
     "photographerApproved": {
       "subject": "Your studio is approved",

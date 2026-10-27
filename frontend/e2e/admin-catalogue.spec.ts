@@ -3,7 +3,15 @@ import { type Page, expect, test } from '@playwright/test'
 /** The studio layout's status banner asks this (Phase 2); approved, so no banner shows. */
 const STUDIO_ME = {
   user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null },
-  photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status: 'approved' },
+  photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status: 'approved', submittedAt: null, suspensionReason: null },
+  // Phase 7: the subscription comes with /me. Paid far ahead, so no banner shows.
+  subscription: {
+    status: 'active',
+    currentPeriodEndsAt: '2099-01-01T00:00:00.000Z',
+    graceEndsAt: '2099-01-08T00:00:00.000Z',
+    takingBookings: true,
+    endingSoon: false,
+  },
 }
 
 /**
@@ -168,7 +176,7 @@ test('moves between Calendar and Catalogue from the admin header', async ({ page
   await mockApi(page)
   await page.goto('/studio/calendar')
 
-  const nav = page.getByRole('navigation', { name: 'Admin' })
+  const nav = page.getByRole('navigation', { name: 'Studio' })
   await expect(page.getByRole('heading', { level: 1, name: 'Calendar' })).toBeVisible()
   await expect(page.locator('.fc-toolbar-title')).toHaveText('October 2026')
   await expect(nav.getByRole('link', { name: 'Calendar' })).toHaveAttribute('aria-current', 'page')

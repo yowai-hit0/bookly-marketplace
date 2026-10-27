@@ -327,7 +327,7 @@ Geist and Geist Mono, self-hosted with `@fontsource-variable`. The page title is
 - **Icons:** lucide, drawn with a 1.5px stroke and square caps.
 
 ### Admin components
-- **Shell and breadcrumb** (`src/admin/AdminLayout.tsx`, `breadcrumbs.tsx`): the breadcrumb reads Admin › section › booking reference. The booking page reports its reference through `useBreadcrumbTail`, so nothing is fetched twice.
+- **Shell and breadcrumb** (`src/admin/AdminLayout.tsx`, `breadcrumbs.tsx`): the breadcrumb reads Studio › section › booking reference ("Admin" until Phase 7). The booking page reports its reference through `useBreadcrumbTail`, so nothing is fetched twice. The nav has nine links (Calendar, Bookings, Catalogue, Availability, Profile, Portfolio, Earnings, Subscription, Settings), with Setup first while the studio is pending, and one banner at a time above every page from `/api/studio/me` (`pages/admin-shell.md`, Phase 7 note).
 - **Shared compositions** (`src/pages/admin/console/`): `PageHeader` (a mono eyebrow, the one `h1`, badges, a meta row and actions), `StatGrid` (square icon tiles, mono labels over values), `Toolbar` (filters joined into one bordered strip), `AuthFrame` (the sign-in and reset-password panel) and `classes.ts` (shared class strings for fields, links, table cells and type roles).
 - **Opt-in variants in `components/ui`**, now shared with the client for status, badges and callouts:
   - Button: `console-outline` and `console-destructive-solid`, in sizes `console`, `console-sm` and `console-icon`.

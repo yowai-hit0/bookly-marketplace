@@ -455,7 +455,7 @@ export function AdminCatalogue() {
   return (
     <main className={cn(PAGE, 'max-w-5xl')}>
       <PageHeader
-        eyebrow={t('admin:nav.label')}
+        eyebrow={t('studio:nav.label')}
         eyebrowIcon={Package}
         title={t('admin:catalogue.title')}
         actions={

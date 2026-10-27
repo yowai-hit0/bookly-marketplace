@@ -43,7 +43,7 @@ export function ClientShell() {
 }
 
 /** The wordmark: a small inverted square with a camera, then the name. */
-function Wordmark({ size = 'md' }: { size?: 'md' | 'sm' }) {
+function Wordmark({ size = 'md', compact = false }: { size?: 'md' | 'sm'; compact?: boolean }) {
   const { t } = useTranslation()
   return (
     <>
@@ -56,7 +56,8 @@ function Wordmark({ size = 'md' }: { size?: 'md' | 'sm' }) {
       >
         <Camera />
       </span>
-      {t('common:appName')}
+      {/* `compact`: on the narrowest phones the mark alone, the name kept for assistive tech (Phase 7: the longer CTA). */}
+      {compact ? <span className="max-[25rem]:sr-only">{t('common:appName')}</span> : t('common:appName')}
     </>
   )
 }
@@ -93,10 +94,10 @@ export function ClientHeader({
           to="/"
           className="flex min-h-11 shrink-0 items-center gap-2.5 rounded-xs text-xl font-semibold tracking-[-0.02em]"
         >
-          <Wordmark />
+          <Wordmark compact />
         </Link>
 
-        {/* Below `md`, "Book now" and the Home page cover these two. */}
+        {/* Below `md`, "Find a photographer" and the Home page cover these two. */}
         <ul className="hidden flex-1 items-center gap-8 text-[0.9375rem] md:flex">
           <li>
             <Link to="/photographers" className={cn(quietLink, 'text-foreground')}>
@@ -124,16 +125,18 @@ export function ClientHeader({
             <span className="max-sm:sr-only">{t('shell:nav.myBooking')}</span>
           </Link>
           {/* The client's account (Phase 2): below `sm` the bar has no room
-              left, so it moves to the footer with the admin login. */}
+              left, so it moves to the footer with the studio link. */}
           <AccountLink className="hidden sm:inline-flex" />
           {/* Clients rarely need it: below `sm` it moves to the footer (2026-09-25). */}
           <Link to="/studio/login" className={cn(quietLink, 'text-muted-foreground hidden text-sm sm:inline-flex')}>
-            {t('shell:nav.adminLogin')}
+            {t('shell:nav.studio')}
           </Link>
           <ThemeButton preference={themePreference} onChange={onThemeChange} />
-          <Button asChild className="ml-1 sm:ml-0">
+          {/* "Find a photographer" is longer than the "Book now" it replaced (Phase 7):
+              below `sm` it sits closer and a size down, so the 343px bar still fits. */}
+          <Button asChild className="max-sm:px-3! max-sm:text-sm!">
             <Link to="/photographers">
-              {t('shell:nav.bookNow')}
+              {t('shell:nav.findPhotographer')}
               <ArrowRight aria-hidden="true" className="max-sm:hidden" />
             </Link>
           </Button>
@@ -233,7 +236,7 @@ function ClientFooter() {
               </li>
               <li className="sm:hidden">
                 <Link to="/studio/login" className={quietLink}>
-                  {t('shell:nav.adminLogin')}
+                  {t('shell:nav.studio')}
                 </Link>
               </li>
             </ul>

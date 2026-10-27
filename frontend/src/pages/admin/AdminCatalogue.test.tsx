@@ -997,7 +997,7 @@ describe('loading and auth', () => {
     stubApi({ [`GET ${CATALOGUE_API}`]: () => json({ error: 'unauthenticated' }, 401) })
     const router = renderAt()
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/studio/login')
     expect(readSession()).toBeNull()
   })
@@ -1021,7 +1021,7 @@ describe('loading and auth', () => {
 
     await act(user())
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/studio/login')
     expect(readSession()).toBeNull()
   })
@@ -1030,7 +1030,7 @@ describe('loading and auth', () => {
     const api = stubApi()
     const router = renderAt()
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/studio/login')
     expect(api.sent).toEqual([])
   })
@@ -1044,7 +1044,7 @@ describe('the admin navigation', () => {
     stubApi()
     const router = await renderLoaded()
     const u = user()
-    const nav = screen.getByRole('navigation', { name: 'Admin' })
+    const nav = screen.getByRole('navigation', { name: 'Studio' })
 
     expect(within(nav).getByRole('link', { name: 'Catalogue' })).toHaveAttribute('aria-current', 'page')
     expect(within(nav).getByRole('link', { name: 'Calendar' })).not.toHaveAttribute('aria-current')

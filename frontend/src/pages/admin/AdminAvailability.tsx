@@ -276,7 +276,7 @@ export function AdminAvailability() {
 
   return (
     <main className={cn(PAGE, 'max-w-5xl')}>
-      <PageHeader eyebrow={t('admin:nav.label')} eyebrowIcon={CalendarClock} title={t('admin:availability.title')}>
+      <PageHeader eyebrow={t('studio:nav.label')} eyebrowIcon={CalendarClock} title={t('admin:availability.title')}>
         <p className={cn(META, 'max-w-prose text-pretty')}>{t('admin:availability.intro')}</p>
       </PageHeader>
 

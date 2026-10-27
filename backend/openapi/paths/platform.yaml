@@ -161,7 +161,11 @@ photographers:
     operationId: listPlatformPhotographers
     tags: [Platform photographers]
     summary: List photographers
-    description: Every photographer, newest first, or only those in one status.
+    description: |
+      Every photographer, newest first, or only those matching the filters.
+      `review` narrows to pending photographers awaiting review or still
+      setting up; it combines with `status` by AND, so with any status but
+      `pending` the list is empty.
     security:
       - platformBearer: []
     parameters:
@@ -169,6 +173,10 @@ photographers:
         in: query
         required: false
         schema: { $ref: ../components/platform.yaml#/schemas/PhotographerStatus }
+      - name: review
+        in: query
+        required: false
+        schema: { $ref: ../components/platform.yaml#/schemas/ReviewFilter }
     responses:
       '200':
         description: The photographers.
@@ -187,10 +195,13 @@ approve:
     summary: Approve a photographer
     description: |
       `pending` → `approved`: listed and bookable from now on. Records who
-      approved and when, and emails the photographer `photographer_approved`.
+      approved and when, starts the subscription's trial, and emails the
+      photographer `photographer_approved`. Only a photographer who has
+      submitted the studio for review from the setup checklist: a pending one
+      who has not is `409 not_submitted`, changed in nothing.
       Idempotent: approving an approved photographer is a `200` that changes
       nothing and sends nothing. A suspended photographer is reactivated, not
-      approved (`409`). Takes no body.
+      approved (`409 invalid_transition`). Takes no body.
     security:
       - platformBearer: []
     parameters:
@@ -208,7 +219,7 @@ approve:
       '404':
         $ref: ../components/common.yaml#/responses/NotFound
       '409':
-        description: The photographer is suspended.
+        description: The photographer is suspended (`invalid_transition`), or pending and not submitted for review (`not_submitted`).
         content:
           application/json:
             schema: { $ref: ../components/platform.yaml#/schemas/InvalidTransition }

@@ -9,6 +9,12 @@
 > This file overrides `design-system/bookly/MASTER.md` for this page. Read MASTER's "Hand-review addendum" first.
 > **Overridden 2026-09-26 by `design-system/bookly/admin-console.md` (admin console redesign), which wins where they conflict:** Sidebar is **260px** (was 240px); the active link is the violet `--sidebar-primary` fill (was `bg-primary/10 text-primary`); a **56px top bar** is added from `lg` (mark cell, breadcrumbs, theme toggle), with a slim breadcrumb row below `lg`. *Do not*'s "no breadcrumbs" is lifted for the breadcrumbs only (the brief's one new feature); a theme toggle is added. The skip link, the one reflowing `nav`, the link order, `aria-current`, `min-w-0`, per-page widths and the red ghost Sign out all hold. See `admin-console.md` §6.1-6.2.
 
+> **Updated 2026-10-25 (Phase 7, studio onboarding).** The shell is the studio's (`/studio/*`), and its nav, label and banners are now as follows; where this note and the text below disagree, this note wins.
+> - **Label:** the nav's `aria-label`, the root breadcrumb and the page eyebrows say **"Studio"** (`studio:nav.label`), not "Admin". The e2e and unit suites find the sidebar as `navigation "Studio"`.
+> - **Links, in order (nine, ten while pending):** *Setup* (`ListChecks`, **pending only, first**), Calendar (`CalendarDays`), Bookings (`ClipboardList`), Catalogue (`Package`), Availability (`CalendarClock`), **Profile** (`UserRound`), **Portfolio** (`Images`), Earnings (`Wallet`; also payouts and the payout method), Subscription (`Repeat`), Settings (`Settings`, last). Source: `frontend/src/admin/nav.ts` (`NAV_ITEMS`, `navItemsFor(status)`). Until `/me` answers, Setup is left out, so it never appears and vanishes for an approved studio. Below `lg` the links wrap in the nav row, each 44px.
+> - **One banner at a time** above every page, from `GET /api/studio/me` (`admin/studio-me.ts` `studioBanner`), by priority: **suspended** (destructive, `CircleX`, the suspension words plus "Reason: …", the platform's text as plain text) > **pending, not submitted** (info, `ListChecks`, "Finish setting up your studio…", link "Go to setup") > **pending, submitted** (info, `Clock`, waiting for review) > **past due** (warning, `TriangleAlert`, ended + hidden-after dates, link) > **expired** (destructive) > **trial ending** (info, `Clock`, the date, link) > **period ending** (info). "Ending" is the API's `endingSoon`, no longer a seven-day rule in the browser; the subscription is no longer read separately. The subscription page drops the subscription banners and the setup page the pending ones (each says it all itself). Callout `variant="console"`, `px-4 pt-4 lg:px-12 lg:pt-6`, inside `#admin-content`; the link is underlined at rest. Any failure of `/me`: no banner.
+> - **Re-read:** a page asks the layout to read `/me` again (`useStudioRefresh`, and `useSubscriptionRefresh` for the subscription page): the setup page after a submit, the subscription page once a payment settles.
+
 ## Structure
 
 `AdminLayout.tsx` keeps one navigation element and lets it **reflow**: a sidebar from `lg` (1024px) up, a top bar below.
@@ -50,7 +56,7 @@
 
 Wordmark + three links + sign-out is too wide for one row today. Allow the nav to wrap or tighten gaps, keep each link a comfortable touch target (>= 44px tall), and at `< sm` hide the sign-out **text** visually (`sr-only sm:not-sr-only`) so only the icon remains; the accessible name stays.
 
-The nav has three links because three admin pages exist. If Availability and Settings pages are added (MASTER section 9, decision 6) it becomes five links: recheck the wrap at 375px before adding them.
+The nav has nine links (ten while pending; see the Phase 7 note at the top). Recheck the wrap at 375px whenever one is added.
 
 The same `nav`, horizontal: row 1 wordmark left and sign-out right, row 2 the links (`flex-wrap`, icon + label). Surface `bg-card`, `border-b`. Not sticky (static is the safe default: no focus-not-obscured risk over long forms and the calendar).
 

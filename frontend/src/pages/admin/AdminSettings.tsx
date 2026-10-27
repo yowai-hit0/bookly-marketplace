@@ -115,7 +115,7 @@ export function AdminSettings() {
     // 2026-09-27): the five typed fields sit three to a row from `lg`, in a
     // wider column, so they take two rows, with the refund checkbox below.
     <main className={cn(PAGE, 'max-w-5xl lg:gap-8 lg:py-8')}>
-      <PageHeader eyebrow={t('admin:nav.label')} eyebrowIcon={SettingsIcon} title={t('admin:settings.title')}>
+      <PageHeader eyebrow={t('studio:nav.label')} eyebrowIcon={SettingsIcon} title={t('admin:settings.title')}>
         <p className={cn(META, 'max-w-prose text-pretty')}>{t('admin:settings.intro')}</p>
       </PageHeader>
 

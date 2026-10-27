@@ -7,7 +7,7 @@ import { EYEBROW, META, TITLE } from './classes'
 /**
  * The frame sign in and reset password share (design-system/bookly/
  * admin-console.md 6.8): a centred 400px console panel on the canvas, with the
- * Bookly mark, a mono `ADMIN` eyebrow, the page's only `h1` and an optional
+ * Bookly mark, a mono `STUDIO` eyebrow, the page's only `h1` and an optional
  * intro, then the page's own content. One component, so the two pages cannot
  * drift apart: a photographer arriving at reset password from here must land
  * somewhere that visibly matches, not something phishing-shaped.
@@ -23,7 +23,7 @@ export function AdminAuthFrame({
 }: {
   title: string
   intro?: ReactNode
-  /** The area's mono label; `ADMIN` for the studio, `PLATFORM` for the platform console (Phase 2). */
+  /** The area's mono label; `STUDIO` for the studio, `PLATFORM` for the platform console (Phase 2). */
   eyebrow?: string
   children: ReactNode
 }) {
@@ -47,7 +47,7 @@ export function AdminAuthFrame({
           <span className="underline-offset-4 group-hover/mark:underline">{t('common:appName')}</span>
         </Link>
         <div className="flex flex-col gap-3">
-          <p className={EYEBROW}>{eyebrow ?? t('admin:nav.label')}</p>
+          <p className={EYEBROW}>{eyebrow ?? t('studio:nav.label')}</p>
           <h1 className={cn(TITLE, 'text-2xl wrap-break-word')}>{title}</h1>
           {intro !== undefined && <p className={META}>{intro}</p>}
         </div>

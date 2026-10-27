@@ -353,7 +353,8 @@ model Photographer {
   contactEmail     String?   @map("contact_email")
   coverImageUrl    String?   @map("cover_image_url")   /// pasted https URL
   status           String    @default("pending")       /// pending | approved | suspended
-  submittedAt      DateTime? @map("submitted_at") @db.Timestamptz(6)  /// set by the setup checklist (R7.3)
+  submittedAt      DateTime? @map("submitted_at") @db.Timestamptz(6)  /// set once by the setup checklist's submit (R7.3); approval requires it; kept through later edits and a suspension
+  handleChangedAt  DateTime? @map("handle_changed_at") @db.Timestamptz(6)  /// the handle's latest change while pending and submitted (Phase 7, 2026-10-27); never without submitted_at
   approvedAt       DateTime? @map("approved_at") @db.Timestamptz(6)
   approvedByUserId String?   @map("approved_by_user_id") @db.Uuid
   suspendedAt      DateTime? @map("suspended_at") @db.Timestamptz(6)
@@ -445,6 +446,11 @@ model PortfolioImage {
   @@map("portfolio_image")
 }
 ```
+**Refined in Phase 7** (no migration): the limit of 24 is held under a per-photographer advisory lock (`bookly.portfolio:<photographer_id>`) taken by every add, delete and reorder; order is `sort_order`, then `created_at`, then `id`; an add takes `max(sort_order) + 1`, a reorder rewrites 0..n-1, a delete leaves a gap. URLs are stored in their canonical WHATWG form, which always starts `https://` (the CHECK is case-sensitive).
+
+**`submitted_at` (§3.3), Phase 7:** written once, by `POST /api/studio/setup/submit` (`UPDATE … WHERE status = 'pending' AND submitted_at IS NULL`). Approval's UPDATE requires it (`AND submitted_at IS NOT NULL`). Nothing clears it: neither a later edit, nor a suspension, nor a reactivation.
+
+**`handle_changed_at` (§3.3), Phase 7 (migration `20261027090000_photographer_handle_changed_at`, user decision 2026-10-27):** the handle is the one profile detail the platform treats as crucial. `PATCH /api/studio/profile` sets this column to the save's time, in the same transaction and under the same row lock, when the handle actually changes while `status = 'pending' AND submitted_at IS NOT NULL`; the same transaction enqueues `photographer_application_received` (variant `handle_changed`, naming the old and the new handle) to every platform admin. A change before submission sets nothing; the same handle sent again is no change; after approval a different handle is `409 handle_locked` (R7.2). Each later change moves it forward; nothing clears it, approval included (it is history once the handle is locked). `GET /api/platform/photographers` shows it as `handleChangedAt`. CHECK `photographer_handle_changed_after_submission`: `handle_changed_at IS NULL OR submitted_at IS NOT NULL`.
 
 ### 3.7 `Subscription` and `SubscriptionPeriod`
 ```prisma
@@ -697,7 +703,9 @@ ALTER TABLE "photographer"
   ADD CONSTRAINT "photographer_bio_length" CHECK (bio IS NULL OR char_length(bio) <= 2000),
   ADD CONSTRAINT "photographer_cover_image_https" CHECK (cover_image_url IS NULL OR cover_image_url ~ '^https://'),
   ADD CONSTRAINT "photographer_approved_has_date" CHECK (status <> 'approved' OR approved_at IS NOT NULL),
-  ADD CONSTRAINT "photographer_suspended_has_date" CHECK (status <> 'suspended' OR suspended_at IS NOT NULL);
+  ADD CONSTRAINT "photographer_suspended_has_date" CHECK (status <> 'suspended' OR suspended_at IS NOT NULL),
+  -- Phase 7 (2026-10-27): a handle change is recorded only after a submission.
+  ADD CONSTRAINT "photographer_handle_changed_after_submission" CHECK (handle_changed_at IS NULL OR submitted_at IS NOT NULL);
 ALTER TABLE "district" ADD CONSTRAINT "district_province_allowed" CHECK (province IN ('kigali', 'eastern', 'northern', 'southern', 'western'));
 ALTER TABLE "category" ADD CONSTRAINT "category_slug_format" CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$');
 ALTER TABLE "portfolio_image"

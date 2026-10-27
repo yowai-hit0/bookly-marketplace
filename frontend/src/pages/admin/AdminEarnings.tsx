@@ -55,7 +55,7 @@ export function AdminEarnings() {
   return (
     <main className={cn(PAGE, 'max-w-6xl')}>
       <PageHeader
-        eyebrow={t('admin:nav.label')}
+        eyebrow={t('studio:nav.label')}
         eyebrowIcon={Wallet}
         title={t('admin:earnings.title')}
         actions={

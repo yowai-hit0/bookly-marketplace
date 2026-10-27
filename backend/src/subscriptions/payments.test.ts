@@ -57,7 +57,8 @@ beforeEach(async () => {
 
 /** A photographer approved through moderation at day 0: a 30-day trial ending at day 30 (R5.1). */
 async function approvedAtDayZero(handle = 'new-studio'): Promise<{ photographerId: string; subscriptionId: string }> {
-  const { photographerId } = await createPhotographer(prisma, { email: `${handle}@bookly.example`, handle, displayName: 'New Studio', status: 'pending' });
+  // Submitted for review: approval requires it (Phase 7).
+  const { photographerId } = await createPhotographer(prisma, { email: `${handle}@bookly.example`, handle, displayName: 'New Studio', status: 'pending', submittedAt: T0 });
   await approvePhotographer({ prisma, now: () => T0, log: () => undefined }, { photographerId, adminUserId: adminId });
   const subscription = await prisma.subscription.findUniqueOrThrow({ where: { photographerId } });
   return { photographerId, subscriptionId: subscription.id };

@@ -82,7 +82,7 @@ describe('the studio login', () => {
     stubLogin(() => json(LOGIN_OK))
     renderLogin()
 
-    expect(screen.getByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(screen.getByLabelText('Email')).toHaveAttribute('type', 'email')
     expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -97,8 +97,8 @@ describe('the studio login', () => {
     const { container } = render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: ['/studio/login'] })} />)
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Book now' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Admin login' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Find a photographer' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Studio' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Skip to content' })).not.toBeInTheDocument()
     expect(container.querySelectorAll('main')).toHaveLength(1)
     // No client footer: its links are for clients.
@@ -117,7 +117,7 @@ describe('the studio login', () => {
 
     const headings = screen.getAllByRole('heading', { level: 1 })
     expect(headings).toHaveLength(1)
-    expect(headings[0]).toHaveAccessibleName('Admin sign in')
+    expect(headings[0]).toHaveAccessibleName('Studio sign in')
   })
 
   it('is reached from the client top bar', async () => {
@@ -126,10 +126,10 @@ describe('the studio login', () => {
     render(<RouterProvider router={router} />)
 
     const user = userEvent.setup({ delay: null })
-    await user.click(within(screen.getByRole('banner')).getByRole('link', { name: 'Admin login' }))
+    await user.click(within(screen.getByRole('banner')).getByRole('link', { name: 'Studio' }))
 
     expect(router.state.location.pathname).toBe('/studio/login')
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
   })
 
   // The reset page is reachable only from here. The page itself is tested in

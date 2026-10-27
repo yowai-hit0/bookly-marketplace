@@ -55,7 +55,7 @@ loading (`role="status"`), load failed (destructive + Retry), idle, one form ope
 
 ## Admin nav
 
-This page is nav item **four** of five: calendar, bookings, catalogue, **availability**, settings. Icon `CalendarClock` (`size-4`, `aria-hidden`) — it is the hours-and-dates page, and it must not collide with the calendar's `CalendarDays`. Verify the five links still wrap acceptably at 375px (`pages/admin-shell.md`, "Below lg").
+This page is the nav item after catalogue (Phase 7 order: Setup while pending, calendar, bookings, catalogue, **availability**, profile, portfolio, earnings, subscription, settings; `admin-shell.md`). Icon `CalendarClock` (`size-4`, `aria-hidden`) — it is the hours-and-dates page, and it must not collide with the calendar's `CalendarDays`. Verify the five links still wrap acceptably at 375px (`pages/admin-shell.md`, "Below lg").
 
 ## Do not
 

@@ -14,6 +14,7 @@ import {
   TEST_SECRET,
   insertBooking,
   insertPayment,
+  PHOTOGRAPHER_HANDLE,
   seedSecondPhotographer,
   seedWorld,
   routeTo,
@@ -88,6 +89,8 @@ type TheirIds = {
   /** B's subscription (Phase 5), and a payment of it waiting on the payer. */
   subscriptionId: string;
   subscriptionOurRef: string;
+  /** B's portfolio image (Phase 7), and the profile text only B's rows hold. */
+  portfolioImageId: string;
   serviceId: string;
   packageId: string;
   ownAddonId: string;
@@ -165,7 +168,23 @@ async function seedTheirs(world: PaymentWorld): Promise<TheirIds> {
     payoutMethodId: payouts.methodId,
     momoNumber: '+250788000999',
     ...(await subscriptionPayment(world)),
+    ...(await theirProfile(world)),
   };
+}
+
+/** B's profile text, a district, a category and a portfolio image (Phase 7): what A's profile, portfolio and setup must never show. */
+async function theirProfile(world: PaymentWorld): Promise<{ portfolioImageId: string }> {
+  await prisma.photographer.update({
+    where: { id: world.photographerId },
+    data: { bio: 'THEIR-BIO', contactPhone: '+250788000998', contactEmail: 'their.contact@example.com', coverImageUrl: 'https://img.example/their-cover.jpg' },
+  });
+  const category = await prisma.category.create({ data: { slug: 'their-category', nameEn: 'THEIR-CATEGORY' } });
+  await prisma.photographerCategory.create({ data: { photographerId: world.photographerId, categoryId: category.id } });
+  await prisma.photographerDistrict.create({ data: { photographerId: world.photographerId, districtCode: 'rusizi' } });
+  const image = await prisma.portfolioImage.create({
+    data: { photographerId: world.photographerId, url: 'https://img.example/their-portfolio.jpg', caption: 'THEIR-CAPTION' },
+  });
+  return { portfolioImageId: image.id };
 }
 
 /** The world's subscription (the fixture's trial) and a pending payment of it. */
@@ -241,6 +260,11 @@ async function rowsOf(photographerId: string): Promise<Record<string, unknown[]>
     subscription: owned('subscription'),
     subscription_period: `SELECT t.* FROM subscription_period t JOIN subscription s ON s.id = t.subscription_id WHERE s.photographer_id = $1 ORDER BY t.id`,
     subscription_payment: `SELECT t.* FROM payment t JOIN subscription s ON s.id = t.subscription_id WHERE s.photographer_id = $1 ORDER BY t.id`,
+    // Phase 7: the profile, where they work, what they shoot, the portfolio.
+    photographer: 'SELECT * FROM photographer WHERE id = $1',
+    photographer_district: 'SELECT * FROM photographer_district WHERE photographer_id = $1 ORDER BY district_code',
+    photographer_category: 'SELECT * FROM photographer_category WHERE photographer_id = $1 ORDER BY category_id',
+    portfolio_image: owned('portfolio_image'),
   };
   const rows: Record<string, unknown[]> = {};
   for (const [table, sql] of Object.entries(queries)) rows[table] = (await raw.query(sql, [photographerId])).rows;
@@ -309,6 +333,9 @@ const SWEEP: Record<string, Case[]> = {
   'GET /api/studio/payouts/:id': [{ label: 'their paid payout', params: (ids) => ({ id: ids.payoutId }) }],
   // Phase 5.
   'GET /api/studio/subscription/payments/:ourRef': [{ label: 'their subscription payment', params: (ids) => ({ ourRef: ids.subscriptionOurRef }) }],
+  // Phase 7.
+  'PATCH /api/studio/portfolio/:id': [{ label: 'their portfolio image', params: (ids) => ({ id: ids.portfolioImageId }), body: { caption: 'Mine now' } }],
+  'DELETE /api/studio/portfolio/:id': [{ label: 'their portfolio image', params: (ids) => ({ id: ids.portfolioImageId }) }],
   'PATCH /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }), body: { nameEn: 'Mine now', isActive: false } }],
   'DELETE /api/studio/services/:id': [{ label: 'their service', params: (ids) => ({ id: ids.serviceId }) }],
   'PATCH /api/studio/packages/:id': [{ label: 'their package', params: (ids) => ({ id: ids.packageId }), body: { priceRwf: 1 } }],
@@ -414,6 +441,17 @@ describe('A’s lists never hold B’s rows', () => {
       theirs.momoNumber,
       theirs.subscriptionId,
       theirs.subscriptionOurRef,
+      theirs.portfolioImageId,
+      b.photographerId,
+      'THEIR-BIO',
+      'THEIR-CAPTION',
+      'THEIR-CATEGORY',
+      'their-category',
+      'their-portfolio.jpg',
+      'their-cover.jpg',
+      'their.contact@example.com',
+      '+250788000998',
+      'rusizi',
       'THEIR-NOTE',
       'THEIR-BLOCK',
       'THEIR-TRANSFER',
@@ -434,6 +472,10 @@ describe('A’s lists never hold B’s rows', () => {
     ['the earnings (T4.4)', '/api/studio/earnings'],
     ['the payout method (T4.4)', '/api/studio/payout-method'],
     ['the subscription page (Phase 5)', '/api/studio/subscription'],
+    ['the profile (Phase 7)', '/api/studio/profile'],
+    ['the portfolio (Phase 7)', '/api/studio/portfolio'],
+    ['the setup checklist (Phase 7)', '/api/studio/setup'],
+    ['/me (Phase 7)', '/api/studio/me'],
   ])('%s', async (_label, path) => {
     const res = await get(path);
 
@@ -454,6 +496,33 @@ describe('A’s lists never hold B’s rows', () => {
     const subscription = await prisma.subscription.findUniqueOrThrow({ where: { photographerId: a.photographerId } });
     expect((await get('/api/studio/subscription')).text).toContain(subscription.id);
     expect((await get(`/api/studio/payouts/${mine.payoutId}`)).status).toBe(200);
+    expect((await get('/api/studio/profile')).text).toContain(PHOTOGRAPHER_HANDLE);
+    expect((await get('/api/studio/me')).text).toContain(a.photographerId);
+  });
+
+  it('the portfolio order refuses B’s image id among A’s with 422, and changes neither portfolio (Phase 7)', async () => {
+    const mineImage = await prisma.portfolioImage.create({ data: { photographerId: a.photographerId, url: 'https://img.example/mine.jpg' } });
+    const before = await rowsOf(b.photographerId);
+    const order = (ids: string[]) => request(app).put('/api/studio/portfolio/order').set('Authorization', `Bearer ${token}`).send({ ids });
+
+    for (const ids of [[mineImage.id, theirs.portfolioImageId], [theirs.portfolioImageId]]) {
+      expect([(await order(ids)).status, (await order(ids)).body]).toEqual([422, { error: 'validation_failed', fields: ['ids'] }]);
+    }
+
+    expect(await rowsOf(b.photographerId)).toEqual(before);
+    await expect(prisma.portfolioImage.findUniqueOrThrow({ where: { id: mineImage.id } })).resolves.toMatchObject({ sortOrder: 0 });
+  });
+
+  it('a profile save by A leaves B’s profile, districts and categories exactly as they were (Phase 7)', async () => {
+    const before = await rowsOf(b.photographerId);
+
+    const res = await request(app)
+      .patch('/api/studio/profile')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ bio: 'Mine', districts: ['rusizi'], categories: ['their-category'], coverImageUrl: null });
+
+    expect(res.status).toBe(200);
+    expect(await rowsOf(b.photographerId)).toEqual(before);
   });
 
   it('never finds B’s booking by searching for it, by reference or by the client both share', async () => {

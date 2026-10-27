@@ -312,7 +312,7 @@ describe('when the API does not answer with a calendar', () => {
     stubFetch(() => json({ error: 'unauthenticated' }, 401))
     renderAt('/studio/calendar?view=month&date=2026-10-07')
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(readSession()).toBeNull()
   })
 
@@ -353,7 +353,7 @@ describe('the admin layout around it', () => {
     const fetchMock = stubFetch()
     renderAt('/studio/calendar')
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -365,7 +365,7 @@ describe('the admin layout around it', () => {
 
     await user().click(screen.getByRole('button', { name: 'Sign out' }))
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(readSession()).toBeNull()
   })
 })

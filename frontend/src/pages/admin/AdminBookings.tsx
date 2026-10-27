@@ -149,9 +149,9 @@ export function AdminBookings() {
     // Tall enough to hold the pager at the bottom of the screen even when the
     // list is short; the pager itself sticks there when the list is long.
     <main className={cn(PAGE, 'max-w-6xl pb-0 lg:min-h-[calc(100dvh-3.5rem)] lg:pb-0')}>
-      {/* <PageHeader eyebrow={t('admin:nav.label')} eyebrowIcon={ClipboardList} title={t('admin:bookings.title')} /> */}
+      {/* <PageHeader eyebrow={t('studio:nav.label')} eyebrowIcon={ClipboardList} title={t('admin:bookings.title')} /> */}
       <PageHeader
-        eyebrow={t('admin:nav.label')}
+        eyebrow={t('studio:nav.label')}
         eyebrowIcon={ClipboardList}
         title={t('admin:bookings.title')}
         actions={

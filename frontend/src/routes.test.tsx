@@ -76,7 +76,7 @@ describe('routing', () => {
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument()
     // The client top bar it wore from 2026-09-25 is gone (admin console decision 6).
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Book now' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Find a photographer' })).not.toBeInTheDocument()
     const shell = routes.find((route) => route.path === undefined)
     expect((shell?.children ?? []).map((child) => child.path)).not.toContain('/studio/login')
   })
@@ -86,7 +86,7 @@ describe('routing', () => {
 
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Book now' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Find a photographer' })).not.toBeInTheDocument()
   })
 
   it('declares every Phase 2 area page (marketplace spec, URL map)', () => {

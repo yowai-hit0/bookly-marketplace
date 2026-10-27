@@ -165,7 +165,10 @@
       "availability": "Availability",
       "settings": "Settings",
       "earnings": "Earnings",
-      "subscription": "Subscription"
+      "subscription": "Subscription",
+      "profile": "Profile",
+      "portfolio": "Portfolio",
+      "setup": "Setup"
     },
     "theme": {
       "label": "Theme",
@@ -915,6 +918,173 @@
         "current": "Current",
         "notPaid": "Not paid"
       }
+    },
+    "profile": {
+      "title": "Profile",
+      "intro": "What clients see on your public profile: your name, your work, where you take bookings, what you shoot and how to reach you.",
+      "loading": "Loading your profile…",
+      "loadFailed": "Could not load your profile. Check your connection and try again.",
+      "retry": "Try again",
+      "sections": {
+        "about": "About you",
+        "contact": "Contact details",
+        "contactHint": "Every contact detail is optional. Clients see only the ones you fill in.",
+        "cover": "Cover image",
+        "districts": "Districts",
+        "categories": "Categories"
+      },
+      "fields": {
+        "handle": "Handle",
+        "displayName": "Display name",
+        "bio": "Bio",
+        "contactPhone": "Phone",
+        "whatsappPhone": "WhatsApp",
+        "contactEmail": "Contact email",
+        "coverImageUrl": "Cover image link"
+      },
+      "hints": {
+        "handle": "3 to 30 lowercase letters, numbers and hyphens, with a letter or number at each end. You can change it until your studio is approved.",
+        "displayName": "The name clients see, up to 80 characters.",
+        "bio": "A few sentences about your work, up to 2,000 characters. Line breaks are kept.",
+        "contactPhone": "A Rwandan number such as 078 123 4567, or any number with its country code.",
+        "whatsappPhone": "The number clients can message on WhatsApp, written the same way.",
+        "contactEmail": "Where clients can write to you. It is not the address you sign in with.",
+        "coverImageUrl": "A link starting with https:// that opens the image itself. It runs across the top of your profile.",
+        "districts": "Where you take bookings. Choose at least one.",
+        "categories": "What you shoot. Choose at least one."
+      },
+      "handleLocked": "Your handle is fixed now that your studio has been approved: it is in every link to your profile.",
+      "handleNotifies": "Your studio is waiting for review. If you change your handle now, the platform team is told the old and the new one.",
+      "errors": {
+        "handleLocked": "Your handle can't change now that your studio has been approved.",
+        "displayName": "Enter a name of 1 to 80 characters.",
+        "bio": "Keep the bio to 2,000 characters.",
+        "contactPhone": "Enter a phone number, such as 078 123 4567 or +250 78 123 4567.",
+        "whatsappPhone": "Enter a phone number, such as 078 123 4567 or +250 78 123 4567.",
+        "contactEmail": "Enter a valid email address.",
+        "coverImageUrl": "Enter a link starting with https://, up to 2,000 characters.",
+        "districts": "Choose districts from the list.",
+        "categories": "Choose categories from the list."
+      },
+      "districtSearch": "Find a district",
+      "districtNoMatch": "No district matches “{{query}}”.",
+      "selected_one": "{{count}} selected",
+      "selected_other": "{{count}} selected",
+      "noCategories": "No categories are available yet.",
+      "coverPreview": "Cover preview",
+      "coverBroken": "This image could not be loaded. Check that the link opens the image itself.",
+      "save": "Save profile",
+      "saving": "Saving…",
+      "saved": "Your profile is saved.",
+      "noChanges": "Nothing has changed since the last save.",
+      "invalid": "Some details were not accepted. Check the form and try again.",
+      "saveFailed": "Could not save your profile. Check your connection and try again."
+    },
+    "portfolio": {
+      "title": "Portfolio",
+      "intro": "Up to 24 photos on your public profile, in the order you set here. Each one is added by its link: Bookly does not store the files.",
+      "count": "{{count}} of {{limit}} photos",
+      "loading": "Loading your portfolio…",
+      "loadFailed": "Could not load your portfolio. Check your connection and try again.",
+      "retry": "Try again",
+      "empty": "No photos yet. Add your first one by its link.",
+      "add": "Add a photo",
+      "full": "Your portfolio is full. Remove a photo to add another.",
+      "fields": {
+        "url": "Image link",
+        "caption": "Caption"
+      },
+      "hints": {
+        "url": "A link starting with https:// that opens the image itself.",
+        "caption": "Optional, up to 200 characters. Shown under the photo."
+      },
+      "errors": {
+        "url": "Enter a link starting with https://, up to 2,000 characters.",
+        "caption": "Keep the caption to 200 characters."
+      },
+      "preview": "Preview",
+      "broken": "This image could not be loaded.",
+      "addSubmit": "Add photo",
+      "adding": "Adding…",
+      "cancel": "Cancel",
+      "added": "Photo added.",
+      "fullNow": "Your portfolio is already full, so the photo was not added. It has been reloaded.",
+      "photo": "Photo {{position}}",
+      "noCaption": "No caption",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "moveUpLabel": "Move photo {{position}} up",
+      "moveDownLabel": "Move photo {{position}} down",
+      "moved": "Photo moved to position {{position}} of {{count}}.",
+      "orderChanged": "Your portfolio changed somewhere else, so it has been reloaded. Check the order and try again.",
+      "orderFailed": "Could not save the new order. Check your connection and try again.",
+      "editCaption": "Edit caption",
+      "editCaptionLabel": "Edit the caption of photo {{position}}",
+      "editTitle": "Edit the caption",
+      "saveCaption": "Save caption",
+      "saving": "Saving…",
+      "captionSaved": "Caption saved.",
+      "remove": "Remove",
+      "removeLabel": "Remove photo {{position}}",
+      "removeTitle": "Remove this photo?",
+      "removeBody": "It disappears from your public profile. The image itself, wherever it is hosted, is not touched.",
+      "removeConfirm": "Remove photo",
+      "removing": "Removing…",
+      "removed": "Photo removed.",
+      "gone": "That photo was already removed. Your portfolio has been reloaded.",
+      "failed": "Could not save. Check your connection and try again."
+    },
+    "setup": {
+      "title": "Set up your studio",
+      "intro": "Finish each step, then submit your studio for review. Once the Bookly team approves it, clients can find and book you.",
+      "loading": "Loading your setup…",
+      "loadFailed": "Could not load your setup. Check your connection and try again.",
+      "retry": "Try again",
+      "progress": "{{done}} of {{total}} done",
+      "done": "Done",
+      "todo": "To do",
+      "items": {
+        "profile": {
+          "title": "Your profile",
+          "body": "A display name and a few words about your work.",
+          "action": "Edit your profile"
+        },
+        "categories": {
+          "title": "Categories",
+          "body": "At least one kind of photography you offer.",
+          "action": "Choose categories"
+        },
+        "districts": {
+          "title": "Districts",
+          "body": "At least one district where you take bookings.",
+          "action": "Choose districts"
+        },
+        "payoutMethod": {
+          "title": "Payout method",
+          "body": "Where Bookly sends what you earn.",
+          "action": "Add a payout method"
+        },
+        "services": {
+          "title": "Services",
+          "body": "At least one active service with an active package.",
+          "action": "Add a service"
+        },
+        "workingHours": {
+          "title": "Working hours",
+          "body": "At least one day a week when you take bookings.",
+          "action": "Set working hours"
+        }
+      },
+      "submit": "Submit for review",
+      "submitting": "Submitting…",
+      "submitHint": "Finish every step to submit.",
+      "incomplete": "These steps still need finishing before you can submit:",
+      "submitFailed": "Could not submit. Check your connection and try again.",
+      "submitted": "Your studio is submitted for review.",
+      "awaiting": "You submitted your studio for review on {{date}}. The Bookly team will email you once it is approved. You can keep editing meanwhile.",
+      "approved": "Your studio is approved: clients can find and book you.",
+      "suspended": "Your studio is suspended, so there is nothing to submit. Bookings you already have carry on.",
+      "notPending": "Your studio is no longer waiting to be submitted, so this page has been reloaded."
     }
   },
   "checkout": {
@@ -1158,7 +1328,9 @@
       "myBooking": "My booking",
       "photographers": "Photographers",
       "signIn": "Sign in",
-      "account": "Your account"
+      "account": "Your account",
+      "studio": "Studio",
+      "findPhotographer": "Find a photographer"
     },
     "footer": {
       "label": "Footer",
@@ -1353,7 +1525,8 @@
       "google": "Continue with Google",
       "googleStarting": "Opening Google…",
       "googleUnavailable": "Google sign-in is not available right now. Sign in with your email and password.",
-      "googleFailed": "Could not open Google sign-in. Check your connection and try again."
+      "googleFailed": "Could not open Google sign-in. Check your connection and try again.",
+      "studioTitle": "Studio sign in"
     },
     "signup": {
       "studioTitle": "Create your studio",
@@ -1439,7 +1612,14 @@
         "trial_ending": "Your free trial ends {{date}}. Pay to keep taking bookings.",
         "period_ending": "Your subscription ends {{date}}. Pay to keep taking bookings.",
         "link": "Go to subscription"
-      }
+      },
+      "setup": "Finish setting up your studio and submit it for review. Clients can't find or book you until it is approved.",
+      "setupLink": "Go to setup",
+      "awaitingReview": "Your studio is waiting for review: the Bookly team will email you once it is approved. Clients can't find or book you yet.",
+      "suspendedReason": "Reason: {{reason}}"
+    },
+    "nav": {
+      "label": "Studio"
     }
   },
   "platform": {
@@ -1469,7 +1649,8 @@
         "email": "Email",
         "status": "Status",
         "applied": "Applied",
-        "actions": "Actions"
+        "actions": "Actions",
+        "submitted": "Submitted"
       },
       "loading": "Loading photographers…",
       "loadFailed": "Could not load the photographers. Check your connection and try again.",
@@ -1500,7 +1681,20 @@
       },
       "stale": "That change no longer applies: {{name}} is now {{status}}.",
       "notFound": "That photographer no longer exists.",
-      "failed": "Could not save the change. Check your connection and try again."
+      "failed": "Could not save the change. Check your connection and try again.",
+      "review": {
+        "label": "Review",
+        "all": "All photographers",
+        "awaiting": "Awaiting review",
+        "setting_up": "Still setting up"
+      },
+      "notSubmitted": "Not submitted",
+      "approveNeedsSubmission": "Not submitted for review yet",
+      "notSubmittedError": "{{name}} hasn't submitted their studio for review yet, so it can't be approved.",
+      "emptyAwaiting": "No studios are waiting for review.",
+      "emptySettingUp": "No studios are still setting up.",
+      "handleChanged": "Handle changed since submission",
+      "handleChangedDetail": "Now /p/{{handle}}, changed {{date}}"
     },
     "payouts": {
       "title": "Payouts",

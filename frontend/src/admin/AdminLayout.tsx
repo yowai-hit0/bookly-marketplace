@@ -1,4 +1,4 @@
-import { CalendarCheck, CircleX, Clock, LogOut, TriangleAlert } from 'lucide-react'
+import { CalendarCheck, CircleX, Clock, ListChecks, LogOut, TriangleAlert } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useLocation } from 'react-router'
@@ -12,9 +12,9 @@ import { formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { BreadcrumbTailContext, useBreadcrumbTailState } from './breadcrumb-tail'
 import { Breadcrumbs } from './breadcrumbs'
-import { NAV_ITEMS, navItemFor } from './nav'
-import { adminFetch } from './api'
-import { type StudioSubscription, subscriptionApi, subscriptionBanner } from './subscription'
+import { navItemFor, navItemsFor } from './nav'
+import { type StudioBanner as Banner, type StudioMe, isSubscriptionBanner, studioBanner, studioMeApi } from './studio-me'
+import { StudioRefreshContext } from './studio-refresh'
 import { SubscriptionRefreshContext } from './subscription-refresh'
 import { ThemeToggle } from './ThemeToggle'
 import { useAdminTheme } from './theme'
@@ -26,13 +26,13 @@ import { useAdminTheme } from './theme'
  * refuses the data itself (spec §2.2: no permission is enforced by hiding UI
  * alone).
  *
- * Above every page sits the studio's status from `GET /api/studio/me`
- * (marketplace spec R2.2): a pending photographer can sign in and set up, but
- * is not listed or bookable until approved, and a suspended one is hidden.
- * Once `/me` says approved, the subscription is read too (Phase 5, R5.5), and
- * a second banner says when it is past due or expired, or when the trial or
- * the paid period ends within seven days, each linking to the subscription
- * page (which says it all itself, so the banner is not repeated there).
+ * Above every page sits one banner from `GET /api/studio/me` (marketplace spec
+ * R2.2, R5.5, R7.4), by priority: suspended (with the platform's reason),
+ * pending (finish your setup, or awaiting review), then the subscription (past
+ * due, expired, or a trial or paid period ending soon, as the API judges it).
+ * A page that already says it all drops its own banner: the subscription page
+ * the subscription ones, the setup page the pending ones. The same answer
+ * decides whether the nav links Setup (pending only).
  *
  * Layout (`design-system/bookly/admin-console.md` section 6.1, on top of
  * `pages/admin-shell.md`): a 56px top bar of bordered cells (the mark, the
@@ -57,10 +57,14 @@ function StudioShell() {
   const { preference, setPreference } = useAdminTheme()
   const [tail, setTail] = useBreadcrumbTailState()
   const current = navItemFor(pathname)?.page ?? null
-  const status = useStudioStatus()
-  const [subscriptionRead, setSubscriptionRead] = useState(0)
-  const refreshSubscription = useCallback(() => setSubscriptionRead((n) => n + 1), [])
-  const subscription = useBannerSubscription(status === 'approved', subscriptionRead)
+  const [read, setRead] = useState(0)
+  const refresh = useCallback(() => setRead((n) => n + 1), [])
+  const me = useStudioMe(read)
+  const banner = studioBanner(me)
+  const hideBanner =
+    banner === null ||
+    (current === 'subscription' && isSubscriptionBanner(banner)) ||
+    (current === 'setup' && (banner.kind === 'setup' || banner.kind === 'awaiting_review'))
 
   return (
     <div className="bg-background text-foreground min-h-svh lg:grid lg:grid-cols-[260px_minmax(0,1fr)] lg:grid-rows-[3.5rem_1fr]">
@@ -90,10 +94,10 @@ function StudioShell() {
           </span>
 
           <nav
-            aria-label={t('admin:nav.label')}
+            aria-label={t('studio:nav.label')}
             className="order-3 flex w-full basis-full flex-wrap gap-1 lg:order-2 lg:w-auto lg:flex-1 lg:basis-auto lg:flex-col lg:flex-nowrap"
           >
-            {NAV_ITEMS.map(({ page, icon: Icon }) => {
+            {navItemsFor(me?.photographer.status ?? null).map(({ page, icon: Icon }) => {
               // The section the path is in, so a page with no link of its own
               // (one payout, the payout method) still marks Earnings current.
               const isActive = current === page
@@ -132,122 +136,109 @@ function StudioShell() {
       </aside>
 
       <div id="admin-content" tabIndex={-1} className="min-w-0 outline-none">
-        <StatusBanner status={status} />
-        {current !== 'subscription' && <SubscriptionBanner subscription={subscription} />}
+        {!hideBanner && <StudioBanner banner={banner} />}
         <BreadcrumbTailContext.Provider value={setTail}>
-          <SubscriptionRefreshContext.Provider value={refreshSubscription}>
-            {/* Every status badge in the admin takes the console look, the legend's popover included. */}
-            <StatusBadgeVariantContext.Provider value="console">
-              <Outlet />
-            </StatusBadgeVariantContext.Provider>
-          </SubscriptionRefreshContext.Provider>
+          <StudioRefreshContext.Provider value={refresh}>
+            <SubscriptionRefreshContext.Provider value={refresh}>
+              {/* Every status badge in the admin takes the console look, the legend's popover included. */}
+              <StatusBadgeVariantContext.Provider value="console">
+                <Outlet />
+              </StatusBadgeVariantContext.Provider>
+            </SubscriptionRefreshContext.Provider>
+          </StudioRefreshContext.Provider>
         </BreadcrumbTailContext.Provider>
       </div>
     </div>
   )
 }
 
-type StudioStatus = 'pending' | 'approved' | 'suspended'
-
 /**
- * The studio's moderation status, once `/api/studio/me` has answered; null
- * until then and on any failure (no banner is better than a wrong one). A 401
+ * `/api/studio/me`, read on every visit and again whenever `read` changes (a
+ * page reports a change: a payment settled, the studio submitted). Null until
+ * it answers and on any failure of the first read; a failed re-read keeps the
+ * last answer, so a banner never flickers away on a dropped connection. A 401
  * drops the session in `apiFetch`, and the guard above takes him to sign in.
  */
-function useStudioStatus(): StudioStatus | null {
-  const [status, setStatus] = useState<StudioStatus | null>(null)
+function useStudioMe(read: number): StudioMe | null {
+  const [me, setMe] = useState<StudioMe | null>(null)
   useEffect(() => {
     let cancelled = false
-    adminFetch<{ photographer?: { status?: unknown } }>('/studio/me').then(
-      (body) => {
-        const value = body?.photographer?.status
-        if (!cancelled && (value === 'pending' || value === 'approved' || value === 'suspended')) setStatus(value)
-      },
+    studioMeApi.load().then(
+      (answer) => !cancelled && answer !== null && setMe(answer),
       () => {},
     )
     return () => {
       cancelled = true
     }
-  }, [])
-  return status
+  }, [read])
+  return me
 }
 
-/** Pending or suspended, said above every studio page; nothing once approved. */
-function StatusBanner({ status }: { status: StudioStatus | null }) {
-  const { t } = useTranslation()
-  if (status !== 'pending' && status !== 'suspended') return null
-  return (
-    <div className="px-4 pt-4 lg:px-12 lg:pt-6">
-      <Callout
-        variant="console"
-        tone={status === 'pending' ? 'info' : 'destructive'}
-        icon={status === 'pending' ? Clock : CircleX}
-        data-studio-status={status}
-      >
-        <p>{t(`studio:banner.${status}`)}</p>
-      </Callout>
-    </div>
-  )
-}
-
-type BannerSubscription = Pick<StudioSubscription, 'status' | 'currentPeriodEndsAt' | 'graceEndsAt'>
-
-/**
- * The subscription, for the banner: asked only once `/me` says approved (a
- * pending or suspended photographer cannot pay, so a banner asking him to
- * would mislead), and again whenever `read` changes (the subscription page
- * bumps it when a payment settles). Null until then, for a photographer never
- * approved, and on any failure: no banner is better than a wrong one.
- */
-function useBannerSubscription(enabled: boolean, read: number): BannerSubscription | null {
-  const [subscription, setSubscription] = useState<BannerSubscription | null>(null)
-  useEffect(() => {
-    if (!enabled) return
-    let cancelled = false
-    subscriptionApi.load().then(
-      (page) => !cancelled && setSubscription(page.subscription),
-      () => {},
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [enabled, read])
-  return enabled ? subscription : null
-}
-
-const SUBSCRIPTION_BANNER_LOOK = {
+const BANNER_LOOK = {
+  suspended: { tone: 'destructive', icon: CircleX },
+  setup: { tone: 'info', icon: ListChecks },
+  awaiting_review: { tone: 'info', icon: Clock },
   past_due: { tone: 'warning', icon: TriangleAlert },
   expired: { tone: 'destructive', icon: CircleX },
   trial_ending: { tone: 'info', icon: Clock },
   period_ending: { tone: 'info', icon: Clock },
 } as const
 
-/** Past due, expired, or ending within seven days; each links to the subscription page. */
-function SubscriptionBanner({ subscription }: { subscription: BannerSubscription | null }) {
+/** Underlined at rest: a link inside a banner (admin-console.md section 3); a 44px target below `lg` and on touch. */
+const BANNER_LINK = 'inline-flex items-center rounded-xs font-medium underline underline-offset-4 max-lg:min-h-11 pointer-coarse:min-h-11'
+
+/** The one banner, its words, and where it sends him when it asks something of him. */
+function StudioBanner({ banner }: { banner: Banner }) {
   const { t } = useTranslation()
-  const kind = subscriptionBanner(subscription, new Date())
-  if (subscription === null || kind === null) return null
-  const look = SUBSCRIPTION_BANNER_LOOK[kind]
+  const look = BANNER_LOOK[banner.kind]
+  const subscription = 'subscription' in banner ? banner.subscription : null
+
+  let action = null
+  if (banner.kind === 'setup') {
+    action = (
+      <Link to="/studio/setup" className={BANNER_LINK}>
+        {t('studio:banner.setupLink')}
+      </Link>
+    )
+  } else if (subscription !== null) {
+    action = (
+      <Link to="/studio/subscription" className={BANNER_LINK}>
+        {t('studio:banner.subscription.link')}
+      </Link>
+    )
+  }
+
   return (
     <div className="px-4 pt-4 lg:px-12 lg:pt-6">
       <Callout
         variant="console"
         tone={look.tone}
         icon={look.icon}
-        data-subscription-banner={kind}
-        action={
-          // Underlined at rest: a link inside a banner (admin-console.md section 3).
-          <Link to="/studio/subscription" className="rounded-xs font-medium underline underline-offset-4">
-            {t('studio:banner.subscription.link')}
-          </Link>
-        }
+        data-studio-banner={banner.kind}
+        // The older hooks, kept for the specs that look for them.
+        {...(banner.kind === 'suspended' ? { 'data-studio-status': 'suspended' } : {})}
+        {...(banner.kind === 'setup' || banner.kind === 'awaiting_review' ? { 'data-studio-status': 'pending' } : {})}
+        {...(subscription !== null ? { 'data-subscription-banner': banner.kind } : {})}
+        {...(action === null ? {} : { action })}
       >
-        <p>
-          {t(`studio:banner.subscription.${kind}`, {
-            date: formatDateTime(subscription.currentPeriodEndsAt),
-            graceEndsAt: formatDateTime(subscription.graceEndsAt),
-          })}
-        </p>
+        {banner.kind === 'suspended' ? (
+          <>
+            <p>{t('studio:banner.suspended')}</p>
+            {/* The platform's words, as plain text (never markup). */}
+            {banner.reason !== null && <p className="mt-1 wrap-anywhere whitespace-pre-line">{t('studio:banner.suspendedReason', { reason: banner.reason })}</p>}
+          </>
+        ) : banner.kind === 'setup' ? (
+          <p>{t('studio:banner.setup')}</p>
+        ) : banner.kind === 'awaiting_review' ? (
+          <p>{t('studio:banner.awaitingReview')}</p>
+        ) : (
+          <p>
+            {t(`studio:banner.subscription.${banner.kind}`, {
+              date: formatDateTime(banner.subscription.currentPeriodEndsAt),
+              graceEndsAt: formatDateTime(banner.subscription.graceEndsAt),
+            })}
+          </p>
+        )}
       </Callout>
     </div>
   )

@@ -11,7 +11,9 @@ import { type Sent, json, stubApi } from '@/test/fetch'
 /**
  * `/platform/photographers` (Phase 2 brief decision 7): the table, filtered by
  * status, and approve, suspend (with a reason) and reactivate, each confirmed
- * first. The row shows what the API answered.
+ * first. The row shows what the API answered. Phase 7: the review views
+ * (`?review=awaiting`, `?review=setting_up`), the submitted date, and approval
+ * held back until a pending studio has submitted.
  */
 
 const SESSION = { token: 'platform.jwt', expiresAt: '2099-01-01T00:00:00.000Z' }
@@ -28,6 +30,8 @@ function photographer(overrides: Partial<PlatformPhotographer> = {}): PlatformPh
     approvedByUserId: null,
     suspendedAt: null,
     suspensionReason: null,
+    submittedAt: '2026-10-16T08:00:00.000Z',
+    handleChangedAt: null,
     ...overrides,
   }
 }
@@ -37,18 +41,27 @@ const APPROVED = photographer({ id: 'p2', handle: 'nyamirambo-studio', displayNa
 const SUSPENDED = photographer({ id: 'p3', handle: 'gisozi-pix', displayName: 'Gisozi Pix', email: 'pix@gisozi.example', status: 'suspended', suspensionReason: 'Fake portfolio.' })
 const ALL = [PENDING, APPROVED, SUSPENDED]
 
-/** The platform API over a list; `onPost` answers a moderation, by default as the API would. */
-function platformApi(onPost?: (call: Sent) => Response | Promise<Response>) {
+/** The platform API over `list`; `onPost` answers a moderation, by default as the API would. */
+function platformApi(onPost?: (call: Sent) => Response | Promise<Response>, list: PlatformPhotographer[] = ALL) {
   return stubApi((call) => {
     const url = new URL(call.url, 'http://test')
     if (call.method === 'GET' && url.pathname === '/api/platform/photographers') {
       const status = url.searchParams.get('status')
-      return json({ photographers: status === null ? ALL : ALL.filter((row) => row.status === status) })
+      const review = url.searchParams.get('review')
+      return json({
+        photographers: list.filter(
+          (row) =>
+            (status === null || row.status === status) &&
+            (review === null ||
+              (review === 'awaiting' && row.status === 'pending' && row.submittedAt !== null) ||
+              (review === 'setting_up' && row.status === 'pending' && row.submittedAt === null)),
+        ),
+      })
     }
     const action = /^\/api\/platform\/photographers\/([^/]+)\/(approve|suspend|reactivate)$/.exec(url.pathname)
     if (call.method === 'POST' && action !== null) {
       if (onPost !== undefined) return onPost(call)
-      const row = ALL.find((each) => each.id === action[1])
+      const row = list.find((each) => each.id === action[1])
       if (row === undefined) return json({ error: 'not_found' }, 404)
       const next =
         action[2] === 'approve'
@@ -409,5 +422,160 @@ describe('moderating', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/platform/login'))
     expect(readSession('platform')).toBeNull()
+  })
+})
+
+describe('the review queue (Phase 7)', () => {
+  const SETTING_UP = photographer({ id: 'p4', handle: 'remera-shots', displayName: 'Remera Shots', email: 'hi@remera.example', submittedAt: null })
+  const QUEUE = [PENDING, SETTING_UP, APPROVED]
+
+  it('shows the submitted date, or says a studio has not submitted', async () => {
+    platformApi(undefined, QUEUE)
+    renderAt()
+    await table()
+
+    expect(screen.getByRole('columnheader', { name: 'Submitted' })).toBeInTheDocument()
+    expect(row('Kigali Lens').getByText('Friday, 16 October 2026')).toBeInTheDocument()
+    expect(row('Remera Shots').getByText('Not submitted')).toBeInTheDocument()
+  })
+
+  it('holds approval back for a pending studio that has not submitted, saying why, and still offers suspend', async () => {
+    const api = platformApi(undefined, QUEUE)
+    renderAt()
+    await table()
+
+    const approve = row('Remera Shots').getByRole('button', { name: 'Approve Remera Shots' })
+    expect(approve).toBeDisabled()
+    expect(approve).toHaveAccessibleDescription('Not submitted for review yet')
+    expect(row('Remera Shots').getByRole('button', { name: 'Suspend Remera Shots' })).toBeEnabled()
+    expect(row('Kigali Lens').getByRole('button', { name: 'Approve Kigali Lens' })).toBeEnabled()
+
+    await user().click(approve)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(posts(api)).toHaveLength(0)
+  })
+
+  it('opens the awaiting-review queue from the URL the admin email links to, asking the API for it', async () => {
+    const api = platformApi(undefined, QUEUE)
+    renderAt('/platform/photographers?review=awaiting')
+    await table()
+
+    expect(api.sent[0]?.url).toBe('/api/platform/photographers?review=awaiting')
+    expect(rowsNamed('Kigali Lens')).toHaveLength(1)
+    expect(rowsNamed('Remera Shots')).toHaveLength(0)
+    expect(rowsNamed('Nyamirambo Studio')).toHaveLength(0)
+    const views = screen.getByRole('navigation', { name: 'Review' })
+    expect(within(views).getByRole('link', { name: 'Awaiting review' })).toHaveAttribute('aria-current', 'page')
+    // Both review views are pending by definition: no status filter beside them.
+    expect(screen.queryByLabelText('Status')).not.toBeInTheDocument()
+  })
+
+  it('switches between the views through the URL', async () => {
+    const api = platformApi(undefined, QUEUE)
+    const router = renderAt()
+    await table()
+    const views = () => screen.getByRole('navigation', { name: 'Review' })
+    expect(within(views()).getAllByRole('link').map((link) => link.textContent)).toEqual(['All photographers', 'Awaiting review', 'Still setting up'])
+    expect(within(views()).getByRole('link', { name: 'All photographers' })).toHaveAttribute('aria-current', 'page')
+
+    await user().click(within(views()).getByRole('link', { name: 'Still setting up' }))
+    await waitFor(() => expect(router.state.location.search).toBe('?review=setting_up'))
+    await waitFor(() => expect(rowsNamed('Kigali Lens')).toHaveLength(0))
+    expect(rowsNamed('Remera Shots')).toHaveLength(1)
+    expect(api.sent.at(-1)?.url).toBe('/api/platform/photographers?review=setting_up')
+
+    await user().click(within(views()).getByRole('link', { name: 'All photographers' }))
+    await waitFor(() => expect(router.state.location.search).toBe(''))
+    await waitFor(() => expect(rowsNamed('Nyamirambo Studio')).toHaveLength(1))
+    expect(screen.getByLabelText('Status')).toBeInTheDocument()
+  })
+
+  it('ignores a review value it does not know, and lets a review view win over a status', async () => {
+    const api = platformApi(undefined, QUEUE)
+    const { unmount } = render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: ['/platform/photographers?review=later'] })} />)
+    await table()
+    expect(api.sent[0]?.url).toBe('/api/platform/photographers')
+    unmount()
+
+    renderAt('/platform/photographers?status=approved&review=awaiting')
+    await table()
+    expect(api.sent.at(-1)?.url).toBe('/api/platform/photographers?review=awaiting')
+  })
+
+  it.each([
+    ['awaiting', 'No studios are waiting for review.'],
+    ['setting_up', 'No studios are still setting up.'],
+  ])('says when the %s view is empty', async (review, words) => {
+    stubApi(() => json({ photographers: [] }))
+    renderAt(`/platform/photographers?review=${review}`)
+    expect(await screen.findByText(words)).toBeInTheDocument()
+  })
+
+  it('takes an approved studio out of the awaiting queue', async () => {
+    platformApi(undefined, QUEUE)
+    renderAt('/platform/photographers?review=awaiting')
+    await table()
+
+    await user().click(row('Kigali Lens').getByRole('button', { name: 'Approve Kigali Lens' }))
+    await user().click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Approve' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Kigali Lens is approved.')
+    expect(screen.getByText('No studios are waiting for review.')).toBeInTheDocument()
+  })
+
+  it('on a 409 not_submitted (a race) says the studio has not submitted, and refreshes the row with approval held back', async () => {
+    platformApi(() => json({ error: 'not_submitted', photographer: { ...PENDING, submittedAt: null } }, 409), QUEUE)
+    renderAt()
+    await table()
+
+    await user().click(row('Kigali Lens').getByRole('button', { name: 'Approve Kigali Lens' }))
+    await user().click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Approve' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Kigali Lens hasn't submitted their studio for review yet, so it can't be approved.")
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(row('Kigali Lens').getByText('Not submitted')).toBeInTheDocument()
+    expect(row('Kigali Lens').getByRole('button', { name: 'Approve Kigali Lens' })).toBeDisabled()
+  })
+
+  it('on a 409 not_submitted in the awaiting queue drops the row there', async () => {
+    platformApi(() => json({ error: 'not_submitted', photographer: { ...PENDING, submittedAt: null } }, 409), QUEUE)
+    renderAt('/platform/photographers?review=awaiting')
+    await table()
+
+    await user().click(row('Kigali Lens').getByRole('button', { name: 'Approve Kigali Lens' }))
+    await user().click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Approve' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Kigali Lens hasn't submitted")
+    expect(rowsNamed('Kigali Lens')).toHaveLength(0)
+  })
+
+  it('flags a studio awaiting review whose handle changed since submission, with the current handle and the date', async () => {
+    // 22:30 UTC is already the 19th in Kigali.
+    const RENAMED = photographer({ id: 'p5', handle: 'lens-of-kigali', displayName: 'Renamed Studio', handleChangedAt: '2026-10-18T22:30:00.000Z' })
+    platformApi(undefined, [PENDING, RENAMED])
+    renderAt('/platform/photographers?review=awaiting')
+    await table()
+
+    expect(row('Renamed Studio').getByText('Handle changed since submission')).toBeInTheDocument()
+    expect(row('Renamed Studio').getByText('Now /p/lens-of-kigali, changed Monday, 19 October 2026')).toBeInTheDocument()
+    expect(row('Kigali Lens').queryByText('Handle changed since submission')).not.toBeInTheDocument()
+  })
+
+  it('does not flag a handle change once the studio is approved', async () => {
+    const LOCKED = photographer({ id: 'p5', displayName: 'Approved Since', status: 'approved', approvedAt: '2026-10-19T09:00:00.000Z', handleChangedAt: '2026-10-18T09:00:00.000Z' })
+    platformApi(undefined, [LOCKED])
+    renderAt()
+    await table()
+
+    expect(row('Approved Since').queryByText('Handle changed since submission')).not.toBeInTheDocument()
+  })
+
+  it('treats a row from before Phase 7, with no submittedAt at all, as not submitted', async () => {
+    const legacy = { ...SETTING_UP, submittedAt: undefined } as unknown as PlatformPhotographer
+    platformApi(undefined, [legacy])
+    renderAt()
+    await table()
+
+    expect(row('Remera Shots').getByRole('button', { name: 'Approve Remera Shots' })).toBeDisabled()
   })
 })

@@ -3,15 +3,7 @@ import { ApiError, UnauthenticatedError } from '@/auth/api'
 import { readSession, saveSession } from '@/auth/session'
 import { json, stubApi } from '@/test/fetch'
 import { OUR_REF, paidPeriod, paymentProgress, subscriptionPage, trialPeriod } from '@/test/subscription-fixtures'
-import {
-  ENDING_SOON_DAYS,
-  isSubscriptionStatus,
-  lastPaidPeriod,
-  paymentOutcome,
-  subscriptionApi,
-  subscriptionBanner,
-  yearlySaving,
-} from './subscription'
+import { isSubscriptionStatus, lastPaidPeriod, paymentOutcome, subscriptionApi, yearlySaving } from './subscription'
 
 /**
  * The studio's subscription client (marketplace spec Phase 5: R5.2, R5.3,
@@ -239,46 +231,6 @@ describe('yearlySaving', () => {
     [{ monthly: 1, yearly: 1 }, 11],
   ])('for %j is %s', (prices, saving) => {
     expect(yearlySaving(prices)).toBe(saving)
-  })
-})
-
-describe('subscriptionBanner', () => {
-  const NOW = new Date('2026-10-25T08:00:00.000Z')
-  const DAY = 24 * 60 * 60 * 1000
-  const at = (days: number) => new Date(NOW.getTime() + days * DAY).toISOString()
-
-  it('is seven days', () => {
-    expect(ENDING_SOON_DAYS).toBe(7)
-  })
-
-  it('is none for no subscription', () => {
-    expect(subscriptionBanner(null, NOW)).toBeNull()
-  })
-
-  it.each([
-    ['past_due', at(-1), 'past_due'],
-    // Past due or expired whatever the end date says: the status is the API's, at its clock.
-    ['past_due', at(20), 'past_due'],
-    ['expired', at(-30), 'expired'],
-    ['expired', at(20), 'expired'],
-    ['trialing', at(7), 'trial_ending'],
-    ['trialing', at(0.01), 'trial_ending'],
-    ['active', at(3), 'period_ending'],
-    ['active', at(7), 'period_ending'],
-  ] as const)('is %s ending %s: %s', (status, currentPeriodEndsAt, banner) => {
-    expect(subscriptionBanner({ status, currentPeriodEndsAt }, NOW)).toBe(banner)
-  })
-
-  it.each([
-    ['trialing', at(7.001)],
-    ['active', at(8)],
-    ['active', at(365)],
-    // Already over without the status having caught up: not "ending".
-    ['trialing', at(0)],
-    ['active', at(-1)],
-    ['active', 'not a date'],
-  ] as const)('is none for %s ending %s', (status, currentPeriodEndsAt) => {
-    expect(subscriptionBanner({ status, currentPeriodEndsAt }, NOW)).toBeNull()
   })
 })
 

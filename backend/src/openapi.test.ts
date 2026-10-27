@@ -348,6 +348,59 @@ describe('responses match the spec', () => {
     await expectMatchesSpec(await request(server).get('/api/platform/subscriptions?status=trialing').set(platform), 'listPlatformSubscriptions', 200);
   });
 
+  it('the studio onboarding: profile, portfolio, setup and the approval gate (Phase 7)', async () => {
+    const server = app();
+    const auth = { Authorization: `Bearer ${await studioToken()}` };
+    await expectMatchesSpec(await request(server).get('/api/studio/profile').set(auth), 'getStudioProfile', 200);
+    const saved = await request(server)
+      .patch('/api/studio/profile')
+      .set(auth)
+      .send({ bio: 'Portraits in Kigali.', contactPhone: '078 123 4567', contactEmail: 'Hello@Kigali-Lens.example', coverImageUrl: 'https://img.example/cover.jpg', districts: ['gasabo'] });
+    await expectMatchesSpec(saved, 'updateStudioProfile', 200);
+    await expectMatchesSpec(await request(server).patch('/api/studio/profile').set(auth).send({ handle: 'studio' }), 'updateStudioProfile', 409);
+    await expectMatchesSpec(await request(server).patch('/api/studio/profile').set(auth).send({ districts: ['atlantis'] }), 'updateStudioProfile', 422);
+    await expectMatchesSpec(await request(server).patch('/api/studio/profile').set(auth).send({ handle: 'Not A Handle' }), 'updateStudioProfile', 400);
+
+    const added = await request(server).post('/api/studio/portfolio').set(auth).send({ url: 'https://img.example/1.jpg', caption: 'One' });
+    await expectMatchesSpec(added, 'addStudioPortfolioImage', 201);
+    await expectMatchesSpec(await request(server).post('/api/studio/portfolio').set(auth).send({ url: 'http://img.example/2.jpg' }), 'addStudioPortfolioImage', 422);
+    const { id } = (added.body as { image: { id: string } }).image;
+    await expectMatchesSpec(await request(server).get('/api/studio/portfolio').set(auth), 'listStudioPortfolio', 200);
+    await expectMatchesSpec(await request(server).patch(`/api/studio/portfolio/${id}`).set(auth).send({ caption: null }), 'updateStudioPortfolioImage', 200);
+    await expectMatchesSpec(await request(server).put('/api/studio/portfolio/order').set(auth).send({ ids: [id] }), 'reorderStudioPortfolio', 200);
+    await expectMatchesSpec(await request(server).put('/api/studio/portfolio/order').set(auth).send({ ids: [] }), 'reorderStudioPortfolio', 422);
+    expect((await request(server).delete(`/api/studio/portfolio/${id}`).set(auth)).status).toBe(204);
+    await expectMatchesSpec(await request(server).delete(`/api/studio/portfolio/${id}`).set(auth), 'deleteStudioPortfolioImage', 404);
+    for (let n = 0; n < 24; n += 1) await prisma.portfolioImage.create({ data: { photographerId: world.photographerId, url: `https://img.example/${n}.jpg` } });
+    await expectMatchesSpec(await request(server).post('/api/studio/portfolio').set(auth).send({ url: 'https://img.example/25.jpg' }), 'addStudioPortfolioImage', 409);
+
+    await expectMatchesSpec(await request(server).get('/api/studio/setup').set(auth), 'getStudioSetup', 200);
+    // The world's photographer is approved: not pending.
+    await expectMatchesSpec(await request(server).post('/api/studio/setup/submit').set(auth), 'submitStudioSetup', 409);
+    await prisma.photographer.update({ where: { id: world.photographerId }, data: { status: 'pending', approvedAt: null } });
+    await expectMatchesSpec(await request(server).post('/api/studio/setup/submit').set(auth), 'submitStudioSetup', 422);
+    await expectMatchesSpec(await request(server).get('/api/studio/me').set(auth), 'getStudioMe', 200);
+
+    const admin = await prisma.appUser.findFirstOrThrow({ where: { role: 'platform_admin' } });
+    const platform = { Authorization: `Bearer ${(await issueToken(TEST_SECRET, 'platform', admin, NOW)).token}` };
+    await expectMatchesSpec(await request(server).get('/api/platform/photographers?review=setting_up').set(platform), 'listPlatformPhotographers', 200);
+    await expectMatchesSpec(await request(server).post(`/api/platform/photographers/${world.photographerId}/approve`).set(platform), 'approvePhotographer', 409);
+  });
+
+  it('the setup submission itself (Phase 7, R7.3)', async () => {
+    const server = app();
+    const auth = { Authorization: `Bearer ${await studioToken()}` };
+    const photographerId = world.photographerId;
+    await prisma.photographer.update({ where: { id: photographerId }, data: { status: 'pending', approvedAt: null, bio: 'Portraits.' } });
+    const category = await prisma.category.create({ data: { slug: 'portrait', nameEn: 'Portrait' } });
+    await prisma.photographerCategory.create({ data: { photographerId, categoryId: category.id } });
+    await prisma.photographerDistrict.create({ data: { photographerId, districtCode: 'gasabo' } });
+    await prisma.payoutMethod.create({ data: { photographerId, kind: 'momo', momoNetwork: 'mtn', momoNumber: '+250788000111', accountName: 'Kigali Lens' } });
+    await prisma.workingHours.create({ data: { photographerId, weekday: 1, opensMinute: 540, closesMinute: 1020 } });
+
+    await expectMatchesSpec(await request(server).post('/api/studio/setup/submit').set(auth), 'submitStudioSetup', 200);
+  });
+
   it('studio catalogue and bookings', async () => {
     const { booking } = await insertBookingWithToken(prisma, world);
     await insertPayment(prisma, booking.id, { kind: 'booking_fee', status: 'succeeded', amountRwf: 20_000 });

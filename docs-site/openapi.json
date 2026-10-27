@@ -84,6 +84,14 @@
       "description": "The photographer's subscription, and paying for it by Mobile Money (Phase 5)."
     },
     {
+      "name": "Studio profile",
+      "description": "The photographer's public profile and portfolio, as the studio edits them (Phase 7)."
+    },
+    {
+      "name": "Studio setup",
+      "description": "The setup checklist, and submitting the studio for review (Phase 7)."
+    },
+    {
       "name": "Platform auth",
       "description": "Login, email verification and password reset for a platform admin."
     },
@@ -3744,6 +3752,413 @@
         }
       }
     },
+    "/api/studio/profile": {
+      "get": {
+        "operationId": "getStudioProfile",
+        "tags": [
+          "Studio profile"
+        ],
+        "summary": "The photographer's profile",
+        "responses": {
+          "200": {
+            "description": "The profile as the editor shows it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioProfileEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateStudioProfile",
+        "tags": [
+          "Studio profile"
+        ],
+        "summary": "Edit the profile",
+        "description": "Changes what is sent and nothing else, in one transaction: a refusal\nchanges nothing. District and category names are checked before the\nhandle. `districts` and `categories` replace the whole set.\n\nA different handle while the studio is pending and submitted for review\n(`submittedAt` set) saves, flags the studio's row in the platform console\n(`handleChangedAt`) and emails every platform admin the old and the new\nhandle, in the same transaction. Before submission it does neither; no\nother field alerts anyone.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profile as now saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioProfileEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "`handle_taken`: the handle is reserved or another photographer's.\n`handle_locked`: a different handle after approval (R7.2).\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "handle_taken",
+                        "handle_locked"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      }
+    },
+    "/api/studio/portfolio": {
+      "get": {
+        "operationId": "listStudioPortfolio",
+        "tags": [
+          "Studio profile"
+        ],
+        "summary": "The portfolio",
+        "responses": {
+          "200": {
+            "description": "Every image, in order, and the limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioPortfolio"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "operationId": "addStudioPortfolioImage",
+        "tags": [
+          "Studio profile"
+        ],
+        "summary": "Add an image",
+        "description": "Appends a pasted `https://` image URL (no uploads), with an optional\ncaption of at most 200 characters (null or blank: none). A portfolio\nholds at most 24 images: the 25th is `409 portfolio_full`.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "An `https://` URL of at most 2,000 characters: malformed is a `400`, another scheme a `422`."
+                  },
+                  "caption": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The image, last in the order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioPortfolioImageEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The portfolio already holds 24 images.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioFull"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      }
+    },
+    "/api/studio/portfolio/order": {
+      "put": {
+        "operationId": "reorderStudioPortfolio",
+        "tags": [
+          "Studio profile"
+        ],
+        "summary": "Reorder the portfolio",
+        "description": "`ids` must be exactly the photographer's images, each once, in the new\norder. A missing, extra, repeated or another photographer's id is a\n`422` naming `ids`, and nothing changes; an id that is not a uuid is a `400`.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ids"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "maxItems": 24,
+                    "items": {
+                      "$ref": "#/components/schemas/Uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Every image, in the new order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "images"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "images": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StudioPortfolioImage"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      }
+    },
+    "/api/studio/portfolio/{id}": {
+      "patch": {
+        "operationId": "updateStudioPortfolioImage",
+        "tags": [
+          "Studio profile"
+        ],
+        "summary": "Change an image's caption",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "caption"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "caption": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "At most 200 characters; null or blank clears it."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The image.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioPortfolioImageEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteStudioPortfolioImage",
+        "tags": [
+          "Studio profile"
+        ],
+        "summary": "Remove an image",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RowId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/studio/setup": {
+      "get": {
+        "operationId": "getStudioSetup",
+        "tags": [
+          "Studio setup"
+        ],
+        "summary": "The setup checklist",
+        "description": "Every item of R7.3 with whether it is done, the photographer's status,\nwhen the studio was submitted for review, and whether it can be now.\n",
+        "responses": {
+          "200": {
+            "description": "The checklist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/studio/setup/submit": {
+      "post": {
+        "operationId": "submitStudioSetup",
+        "tags": [
+          "Studio setup"
+        ],
+        "summary": "Submit the studio for review",
+        "description": "Records the submission and emails every platform admin\n(`photographer_application_received`, variant `submitted`). Only a\nsubmitted studio can be approved. Idempotent: a studio already submitted\nanswers `200` with its first `submittedAt`, sends nothing and is not\nre-judged. Edits afterwards keep the submission. Takes no body.\n",
+        "responses": {
+          "200": {
+            "description": "Submitted, now or before.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The photographer is not pending (approved or suspended).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "const": "not_pending"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An item is not done (T7.1). Nothing was recorded or sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupIncomplete"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/platform/auth/login": {
       "post": {
         "operationId": "platformLogin",
@@ -3971,7 +4386,7 @@
           "Platform photographers"
         ],
         "summary": "List photographers",
-        "description": "Every photographer, newest first, or only those in one status.",
+        "description": "Every photographer, newest first, or only those matching the filters.\n`review` narrows to pending photographers awaiting review or still\nsetting up; it combines with `status` by AND, so with any status but\n`pending` the list is empty.\n",
         "security": [
           {
             "platformBearer": []
@@ -3984,6 +4399,14 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/PhotographerStatus"
+            }
+          },
+          {
+            "name": "review",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ReviewFilter"
             }
           }
         ],
@@ -4014,7 +4437,7 @@
           "Platform photographers"
         ],
         "summary": "Approve a photographer",
-        "description": "`pending` → `approved`: listed and bookable from now on. Records who\napproved and when, and emails the photographer `photographer_approved`.\nIdempotent: approving an approved photographer is a `200` that changes\nnothing and sends nothing. A suspended photographer is reactivated, not\napproved (`409`). Takes no body.\n",
+        "description": "`pending` → `approved`: listed and bookable from now on. Records who\napproved and when, starts the subscription's trial, and emails the\nphotographer `photographer_approved`. Only a photographer who has\nsubmitted the studio for review from the setup checklist: a pending one\nwho has not is `409 not_submitted`, changed in nothing.\nIdempotent: approving an approved photographer is a `200` that changes\nnothing and sends nothing. A suspended photographer is reactivated, not\napproved (`409 invalid_transition`). Takes no body.\n",
         "security": [
           {
             "platformBearer": []
@@ -4046,7 +4469,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The photographer is suspended.",
+            "description": "The photographer is suspended (`invalid_transition`), or pending and not submitted for review (`not_submitted`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -7258,25 +7681,39 @@
         ],
         "description": "`pending` until a platform admin approves; `approved` is listed and\nbookable; `suspended` is hidden and takes no new bookings, but keeps every\nbooking it already has.\n"
       },
+      "SubscriptionStatus": {
+        "type": "string",
+        "description": "`trialing` or `active` while the current period runs; `past_due` from its\nend until the grace days are over (listed, not bookable); then `expired`\n(hidden). Computed from the clock, so it is right even when the job that\nrecords it runs late (R5.4).\n",
+        "enum": [
+          "trialing",
+          "active",
+          "past_due",
+          "expired"
+        ]
+      },
       "StudioMe": {
         "type": "object",
         "required": [
           "user",
-          "photographer"
+          "photographer",
+          "subscription"
         ],
         "additionalProperties": false,
+        "description": "Everything the studio's banners need (R7.4), in one read:\n\n- pending approval: `photographer.status` `pending`; `submittedAt` null is\n  \"finish your setup\", set is \"waiting for review\";\n- suspended: `status` `suspended`, with `suspensionReason`;\n- trial ending: `subscription.status` `trialing` and `endingSoon`;\n- past due: `subscription.status` `past_due`, until `graceEndsAt`.\n",
         "properties": {
           "user": {
             "$ref": "#/components/schemas/PublicUser"
           },
           "photographer": {
             "type": "object",
-            "description": "The studio the login owns. Its `status` drives the pending or suspended banner.",
+            "description": "The studio the login owns.",
             "required": [
               "id",
               "handle",
               "displayName",
-              "status"
+              "status",
+              "submittedAt",
+              "suspensionReason"
             ],
             "additionalProperties": false,
             "properties": {
@@ -7291,8 +7728,61 @@
               },
               "status": {
                 "$ref": "#/components/schemas/PhotographerStatus"
+              },
+              "submittedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "When the studio was submitted for review from the setup checklist (R7.3)."
+              },
+              "suspensionReason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The reason given for the current suspension, as emailed. Null unless suspended."
               }
             }
+          },
+          "subscription": {
+            "description": "Null until approval creates it (R5.1).",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "currentPeriodEndsAt",
+                  "graceEndsAt",
+                  "takingBookings",
+                  "endingSoon"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "$ref": "#/components/schemas/SubscriptionStatus"
+                  },
+                  "currentPeriodEndsAt": {
+                    "$ref": "#/components/schemas/Instant"
+                  },
+                  "graceEndsAt": {
+                    "$ref": "#/components/schemas/Instant",
+                    "description": "When `past_due` becomes `expired` for the current end."
+                  },
+                  "takingBookings": {
+                    "type": "boolean"
+                  },
+                  "endingSoon": {
+                    "type": "boolean",
+                    "description": "`trialing` or `active`, and the period ends within the platform's\nearliest reminder (the largest of the reminder days, 7 by default).\n"
+                  }
+                }
+              }
+            ]
           }
         }
       },
@@ -9512,16 +10002,6 @@
           }
         }
       },
-      "SubscriptionStatus": {
-        "type": "string",
-        "description": "`trialing` or `active` while the current period runs; `past_due` from its\nend until the grace days are over (listed, not bookable); then `expired`\n(hidden). Computed from the clock, so it is right even when the job that\nrecords it runs late (R5.4).\n",
-        "enum": [
-          "trialing",
-          "active",
-          "past_due",
-          "expired"
-        ]
-      },
       "PlanInterval": {
         "type": "string",
         "description": "The subscription plan's interval (marketplace-spec.md R5.2).",
@@ -9876,6 +10356,374 @@
           }
         }
       },
+      "StudioProfile": {
+        "type": "object",
+        "required": [
+          "handle",
+          "handleEditable",
+          "displayName",
+          "bio",
+          "contactPhone",
+          "whatsappPhone",
+          "contactEmail",
+          "coverImageUrl",
+          "districts",
+          "categories",
+          "status",
+          "submittedAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "handle": {
+            "type": "string",
+            "examples": [
+              "kigali-lens"
+            ]
+          },
+          "handleEditable": {
+            "type": "boolean",
+            "description": "False once the photographer has ever been approved (R7.2); a different handle is then `409 handle_locked`."
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
+          },
+          "contactPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+[1-9]\\d{6,14}$",
+            "description": "E.164."
+          },
+          "whatsappPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+[1-9]\\d{6,14}$",
+            "description": "E.164."
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email",
+            "description": "The public contact address shown on the profile, never the login."
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "pattern": "^https://"
+          },
+          "districts": {
+            "type": "array",
+            "description": "In the migration's order.",
+            "items": {
+              "$ref": "#/components/schemas/PublicDistrict"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "description": "Active categories only, in the platform's order.",
+            "items": {
+              "$ref": "#/components/schemas/PublicCategory"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/PhotographerStatus"
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the studio was submitted for review from the setup checklist\n(R7.3); null until then. While the studio is pending and submitted,\na different handle still saves, and every platform admin is emailed\nthe old and the new one (Phase 7, 2026-10-27).\n"
+          }
+        }
+      },
+      "StudioProfileEnvelope": {
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/StudioProfile"
+          }
+        }
+      },
+      "StudioProfileUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Any subset; an absent key is left as it is. Text is trimmed, and an\noptional field takes `null` or a blank string to clear it. Lengths count\ncharacters as the database does.\n",
+        "properties": {
+          "handle": {
+            "type": "string",
+            "description": "Lowercased, then 3-30 of `a-z`, `0-9` and inner hyphens (else `400`).\nOnly before approval (`409 handle_locked` after); a reserved or taken\nhandle is `409 handle_taken`. Sending the current handle is never a change.\n"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "1-80 characters after trimming."
+          },
+          "bio": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "At most 2",
+            "000 characters.": null
+          },
+          "contactPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stored E.164. A Rwandan local number (`078 123 4567`, `250 78…`) is\nnormalised to `+250…`; any other needs its `+` and country code. A\nvalue that is not a phone number is a `422`.\n"
+          },
+          "whatsappPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "As `contactPhone`."
+          },
+          "contactEmail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A valid address (else `400`)",
+            "stored lowercased.": null
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An `https://` URL of at most 2,000 characters: malformed is a `400`, another scheme a `422`."
+          },
+          "districts": {
+            "type": "array",
+            "maxItems": 30,
+            "description": "The WHOLE set of district codes, each once (`GET /api/districts`). An unknown code or a repeat is a `422` naming `districts`.",
+            "items": {
+              "type": "string",
+              "examples": [
+                "gasabo"
+              ]
+            }
+          },
+          "categories": {
+            "type": "array",
+            "maxItems": 50,
+            "description": "The WHOLE set of active category slugs, each once (`GET /api/categories`).\nAn unknown or inactive slug, or a repeat, is a `422` naming\n`categories`. A category the platform has deactivated stays assigned,\nuntouched and unseen.\n",
+            "items": {
+              "type": "string",
+              "examples": [
+                "wedding"
+              ]
+            }
+          }
+        }
+      },
+      "StudioPortfolioImage": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "caption",
+          "sortOrder",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://"
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "sortOrder": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          }
+        }
+      },
+      "StudioPortfolio": {
+        "type": "object",
+        "required": [
+          "images",
+          "limit"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "images": {
+            "type": "array",
+            "maxItems": 24,
+            "description": "In the photographer's order, which the public profile shows.",
+            "items": {
+              "$ref": "#/components/schemas/StudioPortfolioImage"
+            }
+          },
+          "limit": {
+            "const": 24,
+            "description": "The most images a portfolio holds."
+          }
+        }
+      },
+      "StudioPortfolioImageEnvelope": {
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "image": {
+            "$ref": "#/components/schemas/StudioPortfolioImage"
+          }
+        }
+      },
+      "PortfolioFull": {
+        "type": "object",
+        "required": [
+          "error",
+          "limit"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "portfolio_full"
+          },
+          "limit": {
+            "const": 24
+          }
+        }
+      },
+      "SetupItem": {
+        "type": "string",
+        "description": "One checklist item (R7.3), each decided from the studio as it is now:\n\n- `profile`: the display name and the bio each hold a non-blank character.\n- `categories`: at least one active category.\n- `districts`: at least one district.\n- `payoutMethod`: a current payout method.\n- `services`: at least one active service with an active package.\n- `workingHours`: at least one open weekly rule (a one-date override alone does not count).\n",
+        "enum": [
+          "profile",
+          "categories",
+          "districts",
+          "payoutMethod",
+          "services",
+          "workingHours"
+        ]
+      },
+      "Setup": {
+        "type": "object",
+        "required": [
+          "items",
+          "missing",
+          "status",
+          "submittedAt",
+          "canSubmit"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "description": "Every item, always in the order of `SetupItem`.",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "done"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "$ref": "#/components/schemas/SetupItem"
+                },
+                "done": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "missing": {
+            "type": "array",
+            "description": "The items not done, in the same order.",
+            "items": {
+              "$ref": "#/components/schemas/SetupItem"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/PhotographerStatus"
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the studio was submitted for review. Kept through later edits."
+          },
+          "canSubmit": {
+            "type": "boolean",
+            "description": "Pending, not submitted yet, and every item done."
+          }
+        }
+      },
+      "SetupEnvelope": {
+        "type": "object",
+        "required": [
+          "setup"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "setup": {
+            "$ref": "#/components/schemas/Setup"
+          }
+        }
+      },
+      "SetupIncomplete": {
+        "type": "object",
+        "required": [
+          "error",
+          "missing"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "setup_incomplete"
+          },
+          "missing": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/SetupItem"
+            }
+          }
+        }
+      },
       "UserEnvelope": {
         "type": "object",
         "required": [
@@ -9888,6 +10736,14 @@
           }
         }
       },
+      "ReviewFilter": {
+        "type": "string",
+        "enum": [
+          "awaiting",
+          "setting_up"
+        ],
+        "description": "Narrows to pending photographers: `awaiting` review (submitted, the only\nones approval accepts) or still `setting_up` (not submitted).\n"
+      },
       "PlatformPhotographer": {
         "type": "object",
         "required": [
@@ -9897,6 +10753,8 @@
           "email",
           "status",
           "createdAt",
+          "submittedAt",
+          "handleChangedAt",
           "approvedAt",
           "approvedByUserId",
           "suspendedAt",
@@ -9923,6 +10781,22 @@
           },
           "createdAt": {
             "$ref": "#/components/schemas/Instant"
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the photographer submitted the studio for review from the setup checklist (R7.3). Approval requires it."
+          },
+          "handleChangedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the photographer last changed their handle after submitting the\nstudio for review and before approval (Phase 7, 2026-10-27); every\nplatform admin was emailed the old and the new handle. Null if the\nhandle has not changed since the submission. Kept after approval,\nwhen the handle is locked.\n"
           },
           "approvedAt": {
             "type": [
@@ -9996,7 +10870,12 @@
         "additionalProperties": false,
         "properties": {
           "error": {
-            "const": "invalid_transition"
+            "type": "string",
+            "enum": [
+              "invalid_transition",
+              "not_submitted"
+            ],
+            "description": "`invalid_transition`: the status does not allow it (approving a\nsuspended photographer). `not_submitted`: approving a pending\nphotographer who has not submitted the studio for review.\n"
           },
           "photographer": {
             "$ref": "#/components/schemas/PlatformPhotographer"

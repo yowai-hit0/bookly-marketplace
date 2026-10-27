@@ -3,7 +3,15 @@ import { type Page, expect, test } from '@playwright/test'
 /** The studio layout's status banner asks this (Phase 2); approved, so no banner shows. */
 const STUDIO_ME = {
   user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null },
-  photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status: 'approved' },
+  photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status: 'approved', submittedAt: null, suspensionReason: null },
+  // Phase 7: the subscription comes with /me. Paid far ahead, so no banner shows.
+  subscription: {
+    status: 'active',
+    currentPeriodEndsAt: '2099-01-01T00:00:00.000Z',
+    graceEndsAt: '2099-01-08T00:00:00.000Z',
+    takingBookings: true,
+    endingSoon: false,
+  },
 }
 
 /**
@@ -335,7 +343,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Email').fill('photographer@bookly.example')
   await page.getByLabel('Password').fill('dev-only-change-me-123')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.getByRole('navigation', { name: 'Admin' }).waitFor()
+  await page.getByRole('navigation', { name: 'Studio' }).waitFor()
 }
 
 test.beforeEach(async ({ page }) => {
@@ -353,7 +361,7 @@ test('signs in, filters the list, moves a booking and then cancels it', async ({
   await page.getByLabel('Password').fill('dev-only-change-me-123')
   await page.getByRole('button', { name: 'Sign in' }).click()
 
-  const nav = page.getByRole('navigation', { name: 'Admin' })
+  const nav = page.getByRole('navigation', { name: 'Studio' })
   await nav.getByRole('link', { name: 'Bookings' }).click()
   await expect(page).toHaveURL(/\/studio\/bookings$/)
 

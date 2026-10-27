@@ -87,9 +87,9 @@ describe('the admin breadcrumb', () => {
     renderAt(path)
 
     const items = crumbs()
-    expect(items.map((item) => item.textContent)).toEqual(['Admin', section])
+    expect(items.map((item) => item.textContent)).toEqual(['Studio', section])
 
-    const admin = within(items[0] as HTMLElement).getByRole('link', { name: 'Admin' })
+    const admin = within(items[0] as HTMLElement).getByRole('link', { name: 'Studio' })
     expect(admin).toHaveAttribute('href', '/studio')
 
     // The page itself is plain text, not a link to where you already are.
@@ -110,7 +110,7 @@ describe('the admin breadcrumb', () => {
     act(() => finishLoad('BKY-2610-00042'))
 
     items = crumbs()
-    expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Bookings', 'BKY-2610-00042'])
+    expect(items.map((item) => item.textContent)).toEqual(['Studio', 'Bookings', 'BKY-2610-00042'])
     expect(within(items[1] as HTMLElement).getByRole('link', { name: 'Bookings' })).toHaveAttribute('href', '/studio/bookings')
     expect(items[2]?.querySelector('[aria-current="page"]')).toHaveTextContent('BKY-2610-00042')
     expect(items[1]?.querySelector('[aria-current]')).toBeNull()
@@ -122,7 +122,7 @@ describe('the admin breadcrumb', () => {
     act(() => finishLoad('Payout 10 Oct 2026, 10:00'))
 
     const items = crumbs()
-    expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Earnings', 'Payout 10 Oct 2026, 10:00'])
+    expect(items.map((item) => item.textContent)).toEqual(['Studio', 'Earnings', 'Payout 10 Oct 2026, 10:00'])
     expect(within(items[1] as HTMLElement).getByRole('link', { name: 'Earnings' })).toHaveAttribute('href', '/studio/earnings')
   })
 
@@ -131,7 +131,7 @@ describe('the admin breadcrumb', () => {
 
     const items = crumbs()
     // The page reports its own name as the tail; rendered alone here it reports none.
-    expect(items.map((item) => item.textContent)).toEqual(['Admin', 'Earnings'])
+    expect(items.map((item) => item.textContent)).toEqual(['Studio', 'Earnings'])
     expect(items[1]?.querySelector('[aria-current="page"]')).toHaveTextContent('Earnings')
   })
 
@@ -140,7 +140,7 @@ describe('the admin breadcrumb', () => {
 
     act(() => finishLoad(null))
 
-    expect(crumbs().map((item) => item.textContent)).toEqual(['Admin', 'Bookings'])
+    expect(crumbs().map((item) => item.textContent)).toEqual(['Studio', 'Bookings'])
   })
 
   it('forgets the reference when leaving the booking', async () => {
@@ -149,15 +149,15 @@ describe('the admin breadcrumb', () => {
 
     await act(() => router.navigate('/studio/bookings'))
 
-    expect(crumbs().map((item) => item.textContent)).toEqual(['Admin', 'Bookings'])
+    expect(crumbs().map((item) => item.textContent)).toEqual(['Studio', 'Bookings'])
   })
 
-  it('hides separators from assistive tech, and is not a second "Admin" navigation', () => {
+  it('hides separators from assistive tech, and is not a second "Studio" navigation', () => {
     renderAt('/studio/bookings')
 
     const nav = screen.getByRole('navigation', { name: 'Breadcrumb' })
     for (const svg of nav.querySelectorAll('svg')) expect(svg).toHaveAttribute('aria-hidden', 'true')
-    // The e2e suite finds the sidebar by the name "Admin"; the breadcrumb must not match it.
-    expect(screen.getAllByRole('navigation', { name: 'Admin' })).toHaveLength(1)
+    // The e2e suite finds the sidebar by the name "Studio"; the breadcrumb must not match it.
+    expect(screen.getAllByRole('navigation', { name: 'Studio' })).toHaveLength(1)
   })
 })

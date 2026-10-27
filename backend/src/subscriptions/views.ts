@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { PAYMENT_ATTEMPT_WINDOW_SECONDS } from '../payments/initiate.js';
 import { isBookable } from '../photographers/bookable.js';
 import { getPlatformSettings } from '../settings/index.js';
-import { type SubscriptionStatus, graceEndsAt, statusAt } from './plan.js';
+import { DAY_MS, type SubscriptionStatus, graceEndsAt, statusAt } from './plan.js';
 
 /**
  * What the studio's subscription page and the platform's subscriptions list
@@ -183,6 +183,68 @@ export async function studioSubscriptionPayment(
       status: statusAt(subscription.status, subscription.currentPeriodEndsAt, now, subscriptionGraceDays),
       currentPeriodEndsAt: subscription.currentPeriodEndsAt.toISOString(),
       takingBookings: isBookable(subscription.photographer, subscription, now),
+    },
+  };
+}
+
+/**
+ * The studio's `/me` (marketplace-spec.md R7.4): the login's photographer with
+ * what every banner needs, so the layout draws them without another fetch.
+ *
+ *   pending approval   `status: 'pending'`; `submittedAt` tells "finish your
+ *                      setup" (null) from "waiting for review" (set)
+ *   suspended          `status: 'suspended'` and `suspensionReason`
+ *   trial ending       `subscription.status: 'trialing'` and `endingSoon`
+ *   past due           `subscription.status: 'past_due'`, until `graceEndsAt`
+ *
+ * `subscription` is null for a photographer never approved (approval creates
+ * it; R5.1), and the platform settings are read only when there is one. Its
+ * `status` is the status at the clock (`statusAt`), like the subscription
+ * page's. `endingSoon` is true while the period runs and ends within the
+ * platform's earliest reminder (the largest of `subscription_reminder_days`:
+ * the window in which the reminder emails go out, R5.4); with no reminder days
+ * set it is never true.
+ */
+export type StudioMeView = {
+  photographer: { id: string; handle: string; displayName: string; status: string; submittedAt: string | null; suspensionReason: string | null };
+  subscription: {
+    status: SubscriptionStatus;
+    currentPeriodEndsAt: string;
+    graceEndsAt: string;
+    takingBookings: boolean;
+    endingSoon: boolean;
+  } | null;
+};
+
+export async function studioMe(prisma: PrismaClient, photographerId: string, now: Date): Promise<StudioMeView> {
+  const row = await prisma.photographer.findUniqueOrThrow({
+    where: { id: photographerId },
+    select: {
+      id: true,
+      handle: true,
+      displayName: true,
+      status: true,
+      submittedAt: true,
+      suspensionReason: true,
+      subscription: { select: { status: true, currentPeriodEndsAt: true } },
+    },
+  });
+  const { subscription: stored, submittedAt, ...photographer } = row;
+  const view = { ...photographer, submittedAt: submittedAt?.toISOString() ?? null };
+  if (stored === null) return { photographer: view, subscription: null };
+
+  const settings = await getPlatformSettings(prisma);
+  const status = statusAt(stored.status, stored.currentPeriodEndsAt, now, settings.subscriptionGraceDays);
+  const window = (settings.subscriptionReminderDays[0] ?? 0) * DAY_MS;
+  const left = stored.currentPeriodEndsAt.getTime() - now.getTime();
+  return {
+    photographer: view,
+    subscription: {
+      status,
+      currentPeriodEndsAt: stored.currentPeriodEndsAt.toISOString(),
+      graceEndsAt: graceEndsAt(stored.currentPeriodEndsAt, settings.subscriptionGraceDays).toISOString(),
+      takingBookings: isBookable(row, stored, now),
+      endingSoon: (status === 'trialing' || status === 'active') && left <= window,
     },
   };
 }

@@ -7,6 +7,7 @@ import {
   type ModerationDeps,
   type ModerationResult,
   PHOTOGRAPHER_STATUSES,
+  REVIEW_FILTERS,
   approvePhotographer,
   listPhotographers,
   reactivatePhotographer,
@@ -33,7 +34,13 @@ import { parseOrReject } from './validation.js';
 
 export type PlatformRouterDeps = AuthDeps & Pick<ModerationDeps, 'log'>;
 
-const listQuery = z.strictObject({ status: z.enum(PHOTOGRAPHER_STATUSES).optional() });
+/**
+ * `status` is the column's own vocabulary; `review` (Phase 7) narrows pending
+ * photographers to those awaiting review (submitted) or still setting up (not
+ * submitted). The two combine with AND (photographers/moderation.ts says why
+ * `review` is a filter of its own).
+ */
+const listQuery = z.strictObject({ status: z.enum(PHOTOGRAPHER_STATUSES).optional(), review: z.enum(REVIEW_FILTERS).optional() });
 
 const photographerId = z.guid();
 
@@ -59,7 +66,12 @@ export function platformRouter(deps: PlatformRouterDeps): Router {
   router.get('/photographers', async (req, res) => {
     const query = parseOrReject(listQuery, req.query, res);
     if (query === undefined) return;
-    res.json({ photographers: await listPhotographers(deps.prisma, query.status) });
+    res.json({
+      photographers: await listPhotographers(deps.prisma, {
+        ...(query.status === undefined ? {} : { status: query.status }),
+        ...(query.review === undefined ? {} : { review: query.review }),
+      }),
+    });
   });
 
   router.post('/photographers/:id/approve', async (req, res) => {
@@ -95,16 +107,18 @@ export function platformRouter(deps: PlatformRouterDeps): Router {
  * 200 with the photographer as they now are -- whether this call changed them
  * or an earlier one already had (idempotent) -- 404 for an id that names
  * nobody, 409 for a transition the photographer's status does not allow
- * (approving a suspended photographer: reactivate them instead). Approve and
- * reactivate read no body.
+ * (approving a suspended photographer: reactivate them instead), and 409
+ * `not_submitted` for approving a pending photographer who has not submitted
+ * their studio for review (Phase 7 user decision; R7.3). Approve and reactivate
+ * read no body.
  */
 function send(res: Response, result: ModerationResult): void {
   if (result.status === 'not_found') {
     res.status(404).json({ error: 'not_found' });
     return;
   }
-  if (result.status === 'invalid_transition') {
-    res.status(409).json({ error: 'invalid_transition', photographer: result.photographer });
+  if (result.status === 'invalid_transition' || result.status === 'not_submitted') {
+    res.status(409).json({ error: result.status, photographer: result.photographer });
     return;
   }
   res.json({ photographer: result.photographer });

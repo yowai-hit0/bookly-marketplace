@@ -142,7 +142,20 @@ export async function seedSecondPhotographer(
  */
 export async function createPhotographer(
   prisma: PrismaClient,
-  { email, handle, displayName, status = 'approved' }: { email: string; handle: string; displayName: string; status?: 'pending' | 'approved' | 'suspended' },
+  {
+    email,
+    handle,
+    displayName,
+    status = 'approved',
+    submittedAt,
+  }: {
+    email: string;
+    handle: string;
+    displayName: string;
+    status?: 'pending' | 'approved' | 'suspended';
+    /** Submitted for review from the setup checklist (R7.3), which approval requires (Phase 7). Default: never. */
+    submittedAt?: Date;
+  },
 ): Promise<{ photographerId: string; photographerUserId: string }> {
   const user = await prisma.appUser.create({ data: { email, role: 'photographer', passwordHash: 'not-a-real-hash', emailVerifiedAt: new Date('2026-09-01T06:00:00Z') } });
   const photographer = await prisma.photographer.create({
@@ -151,6 +164,7 @@ export async function createPhotographer(
       handle,
       displayName,
       status,
+      ...(submittedAt === undefined ? {} : { submittedAt }),
       ...(status === 'approved' ? { approvedAt: new Date('2026-09-02T06:00:00Z') } : {}),
       ...(status === 'suspended' ? { suspendedAt: new Date('2026-09-03T06:00:00Z') } : {}),
       setting: { create: {} },

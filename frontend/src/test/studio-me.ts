@@ -1,18 +1,51 @@
 /**
  * `GET /api/studio/me`, which the studio layout asks for on every visit to
- * draw the pending or suspended banner (Phase 2). Page tests answer it with
- * this and leave it out of the calls they count, so each one still counts
- * only the requests its own page makes.
+ * draw its one banner and decide its nav (Phase 2; the Phase 7 shape). Page
+ * tests answer it with this and leave it out of the calls they count, so each
+ * one still counts only the requests its own page makes.
+ *
+ * The default is an approved studio whose subscription is paid far ahead, so
+ * no banner shows and nothing else on the page moves. A pending one has not
+ * submitted and has no subscription yet; a suspended one keeps the
+ * subscription it had.
  */
 
 export const STUDIO_ME_URL = '/api/studio/me'
 
 export type StudioStatus = 'pending' | 'approved' | 'suspended'
 
-export function studioMeBody(status: StudioStatus = 'approved') {
+type MeOverrides = {
+  submittedAt?: string | null
+  suspensionReason?: string | null
+  subscription?: Partial<StudioMeSubscriptionBody> | null
+}
+
+type StudioMeSubscriptionBody = {
+  status: 'trialing' | 'active' | 'past_due' | 'expired'
+  currentPeriodEndsAt: string
+  graceEndsAt: string
+  takingBookings: boolean
+  endingSoon: boolean
+}
+
+export function studioMeBody(status: StudioStatus = 'approved', overrides: MeOverrides = {}) {
+  const far = new Date(Date.now() + 200 * 24 * 60 * 60 * 1000).toISOString()
+  const paidAhead: StudioMeSubscriptionBody = { status: 'active', currentPeriodEndsAt: far, graceEndsAt: far, takingBookings: true, endingSoon: false }
+  const subscription =
+    overrides.subscription === null || (overrides.subscription === undefined && status === 'pending')
+      ? null
+      : { ...paidAhead, ...overrides.subscription }
   return {
     user: { id: 'a1', email: 'photographer@bookly.example', lastLoginAt: null },
-    photographer: { id: 'p1', handle: 'kigali-lens', displayName: 'Kigali Lens', status },
+    photographer: {
+      id: 'p1',
+      handle: 'kigali-lens',
+      displayName: 'Kigali Lens',
+      status,
+      submittedAt: overrides.submittedAt ?? null,
+      suspensionReason: 'suspensionReason' in overrides ? (overrides.suspensionReason ?? null) : status === 'suspended' ? 'Photos that are not your own.' : null,
+    },
+    subscription,
   }
 }
 

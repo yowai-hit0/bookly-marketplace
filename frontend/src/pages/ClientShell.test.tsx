@@ -70,9 +70,9 @@ describe('the client shell', () => {
 
     const banner = screen.getByRole('banner')
     expect(within(banner).getByRole('link', { name: 'Bookly' })).toHaveAttribute('href', '/')
-    expect(within(banner).getByRole('link', { name: 'Book now' })).toHaveAttribute('href', '/photographers')
+    expect(within(banner).getByRole('link', { name: 'Find a photographer' })).toHaveAttribute('href', '/photographers')
     // Added 2026-09-25: the photographer's way into admin from the site.
-    expect(within(banner).getByRole('link', { name: 'Admin login' })).toHaveAttribute('href', '/studio/login')
+    expect(within(banner).getByRole('link', { name: 'Studio' })).toHaveAttribute('href', '/studio/login')
     // Added 2026-09-25, now that a public resend exists (item 4).
     expect(within(banner).getByRole('link', { name: 'My booking' })).toBeInTheDocument()
     // Added 2026-09-27 (client front redesign): the two page links of the board.
@@ -84,18 +84,18 @@ describe('the client shell', () => {
     expect(within(banner).getAllByRole('link')).toHaveLength(7)
   })
 
-  it('keeps "Book now" last in the bar, the primary action after the quieter links', () => {
+  it('keeps "Find a photographer" last in the bar, the primary action after the quieter links', () => {
     renderShell()
 
     const links = within(screen.getByRole('banner')).getAllByRole('link').map((link) => link.textContent)
-    expect(links).toEqual(['Bookly', 'Photographers', 'How booking works', 'My booking', 'Sign in', 'Admin login', 'Book now'])
+    expect(links).toEqual(['Bookly', 'Photographers', 'How booking works', 'My booking', 'Sign in', 'Studio', 'Find a photographer'])
   })
 
   it('moves the admin login to the footer below sm, where the bar has no room for it (2026-09-25)', () => {
     renderShell()
 
-    expect(within(screen.getByRole('banner')).getByRole('link', { name: 'Admin login' })).toHaveClass('hidden', 'sm:inline-flex')
-    const footerLink = within(screen.getByRole('contentinfo')).getByRole('link', { name: 'Admin login' })
+    expect(within(screen.getByRole('banner')).getByRole('link', { name: 'Studio' })).toHaveClass('hidden', 'sm:inline-flex')
+    const footerLink = within(screen.getByRole('contentinfo')).getByRole('link', { name: 'Studio' })
     expect(footerLink).toHaveAttribute('href', '/studio/login')
     expect(footerLink.closest('li')).toHaveClass('sm:hidden')
   })

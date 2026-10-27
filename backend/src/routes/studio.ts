@@ -13,8 +13,11 @@ import { studioBookingsRouter } from './studio-bookings.js';
 import { calendarRouter } from './studio-calendar.js';
 import { catalogueRouter } from './studio-catalogue.js';
 import { studioPayoutsRouter } from './studio-payouts.js';
+import { studioProfileRouter } from './studio-profile.js';
 import { settingsRouter } from './studio-settings.js';
+import { studioSetupRouter } from './studio-setup.js';
 import { studioSubscriptionRouter } from './studio-subscription.js';
+import { studioMe } from '../subscriptions/views.js';
 import { parseOrReject } from './validation.js';
 
 /**
@@ -77,14 +80,12 @@ export function studioRouter(deps: StudioRouterDeps): Router {
   router.use(requirePhotographer(deps));
 
   // The signed-in login and the photographer it owns: what the studio layout
-  // needs, the pending or suspended banner included (marketplace-spec.md R2.2).
+  // needs, every banner included -- pending (submitted or not), suspended with
+  // the reason, trial ending, past due (marketplace-spec.md R2.2, R7.4;
+  // subscriptions/views.ts `studioMe`).
   router.get('/me', async (_req, res) => {
     const { user, photographerId } = photographerLocals(res);
-    const photographer = await deps.prisma.photographer.findUniqueOrThrow({
-      where: { id: photographerId },
-      select: { id: true, handle: true, displayName: true, status: true },
-    });
-    res.json({ user: toPublicUser(user), photographer });
+    res.json({ user: toPublicUser(user), ...(await studioMe(deps.prisma, photographerId, deps.now())) });
   });
 
   // Availability and settings (Task 8).
@@ -109,6 +110,10 @@ export function studioRouter(deps: StudioRouterDeps): Router {
 
   // Earnings, payouts and the payout method (Phase 4: R4.1, R4.5).
   router.use(studioPayoutsRouter(deps));
+
+  // Onboarding: the profile, the portfolio and the setup checklist (Phase 7: R7.2, R7.3).
+  router.use(studioProfileRouter(deps));
+  router.use(studioSetupRouter(deps));
 
   // The subscription: its page, paying for it, and polling a payment (Phase 5: R5.2, R5.3).
   router.use(

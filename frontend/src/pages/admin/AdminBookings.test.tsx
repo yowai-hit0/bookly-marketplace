@@ -267,7 +267,7 @@ describe('the list', () => {
     stubFetch(() => json({ error: 'unauthenticated' }, 401))
     renderAt()
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(readSession()).toBeNull()
   })
 })
@@ -516,7 +516,7 @@ describe('numbered pages', () => {
 
     await user().click(within(pager()).getByRole('button', { name: 'Next page' }))
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(readSession()).toBeNull()
   })
 })

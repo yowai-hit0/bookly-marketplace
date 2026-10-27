@@ -69,6 +69,10 @@ tags:
     description: What the photographer has earned and been paid, and where payouts go (Phase 4).
   - name: Studio subscription
     description: The photographer's subscription, and paying for it by Mobile Money (Phase 5).
+  - name: Studio profile
+    description: The photographer's public profile and portfolio, as the studio edits them (Phase 7).
+  - name: Studio setup
+    description: The setup checklist, and submitting the studio for review (Phase 7).
   - name: Platform auth
     description: Login, email verification and password reset for a platform admin.
   - name: Platform photographers
@@ -221,6 +225,19 @@ paths:
     $ref: paths/studio-subscription.yaml#/payments
   /api/studio/subscription/payments/{ourRef}:
     $ref: paths/studio-subscription.yaml#/payment
+  # --- Studio onboarding (Phase 7) -------------------------------------------
+  /api/studio/profile:
+    $ref: paths/studio-profile.yaml#/profile
+  /api/studio/portfolio:
+    $ref: paths/studio-profile.yaml#/portfolio
+  /api/studio/portfolio/order:
+    $ref: paths/studio-profile.yaml#/portfolioOrder
+  /api/studio/portfolio/{id}:
+    $ref: paths/studio-profile.yaml#/portfolioItem
+  /api/studio/setup:
+    $ref: paths/studio-profile.yaml#/setup
+  /api/studio/setup/submit:
+    $ref: paths/studio-profile.yaml#/setupSubmit
   # --- Platform -------------------------------------------------------------
   /api/platform/auth/login:
     $ref: paths/platform.yaml#/login

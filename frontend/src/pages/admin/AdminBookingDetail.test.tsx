@@ -473,7 +473,7 @@ describe('before the booking arrives', () => {
     vi.stubGlobal('fetch', mock)
     renderAt()
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(readSession()).toBeNull()
   })
 })
@@ -967,7 +967,7 @@ describe('when the API refuses an action', () => {
 
     await user().click(screen.getByRole('button', { name: 'Send a new booking link' }))
 
-    expect(await screen.findByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Studio sign in' })).toBeInTheDocument()
     expect(readSession()).toBeNull()
   })
 

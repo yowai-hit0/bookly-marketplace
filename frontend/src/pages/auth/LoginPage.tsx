@@ -61,7 +61,7 @@ export function LoginPage({ area }: { area: Area }) {
           : null
 
   const title =
-    area === 'studio' ? t('admin:signIn.title') : area === 'platform' ? t('auth:signIn.platformTitle') : t('auth:signIn.accountTitle')
+    area === 'studio' ? t('auth:signIn.studioTitle') : area === 'platform' ? t('auth:signIn.platformTitle') : t('auth:signIn.accountTitle')
 
   return (
     <AuthFrame area={area} title={title} intro={area === 'account' ? t('auth:signIn.accountIntro') : undefined}>

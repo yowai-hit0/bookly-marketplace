@@ -151,7 +151,7 @@ describe('the verify page’s other answers', () => {
     stubApi(() => undefined)
     const { unmount } = render(<RouterProvider router={createMemoryRouter(routes, { initialEntries: [`/studio/verify/${TOKEN}`] })} />)
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument()
-    expect(screen.getByText('Admin')).toBeInTheDocument()
+    expect(screen.getByText('Studio')).toBeInTheDocument()
     unmount()
 
     renderAt(`/account/verify/${TOKEN}`)

@@ -28,6 +28,13 @@ import { createTrialSubscription } from '../subscriptions/lifecycle.js';
  * table): it changes the status only, and `photographers/bookable.ts` stops
  * new bookings and hides the profile.
  *
+ * Approval requires a submission (user decision, Phase 7; marketplace-spec.md
+ * R7.3): a pending photographer who has not submitted their studio for review
+ * from the setup checklist (`submitted_at` null; photographers/setup.ts) is
+ * refused as `not_submitted`. The guard is in the approval's own UPDATE, like
+ * the status guard, so a submission and an approval racing each other cannot
+ * approve a studio that was never submitted.
+ *
  * Approval also starts the subscription and its free trial, in the same
  * transaction as the status change (marketplace-spec.md R5.1;
  * subscriptions/lifecycle.ts). A photographer who already has a subscription
@@ -48,6 +55,14 @@ export type PlatformPhotographer = {
   email: string;
   status: string;
   createdAt: string;
+  /** When the studio was submitted for review from the setup checklist (R7.3); null while still setting up. */
+  submittedAt: string | null;
+  /**
+   * The handle's latest change after the studio was submitted and before approval
+   * (user decision 2026-10-27; photographers/profile.ts); null if none. Kept after
+   * approval, when the handle is locked.
+   */
+  handleChangedAt: string | null;
   approvedAt: string | null;
   approvedByUserId: string | null;
   suspendedAt: string | null;
@@ -57,6 +72,8 @@ export type PlatformPhotographer = {
 export type ModerationResult =
   | { status: 'ok'; changed: boolean; photographer: PlatformPhotographer }
   | { status: 'invalid_transition'; photographer: PlatformPhotographer }
+  /** Approving a pending photographer who has not submitted for review (user decision, Phase 7). */
+  | { status: 'not_submitted'; photographer: PlatformPhotographer }
   | { status: 'not_found' };
 
 export type ModerationDeps = {
@@ -74,6 +91,8 @@ const SELECT = {
   displayName: true,
   status: true,
   createdAt: true,
+  submittedAt: true,
+  handleChangedAt: true,
   approvedAt: true,
   approvedByUserId: true,
   suspendedAt: true,
@@ -83,10 +102,31 @@ const SELECT = {
 
 type SelectedPhotographer = Prisma.PhotographerGetPayload<{ select: typeof SELECT }>;
 
-/** Every photographer, or those in one status; the newest application first. */
-export async function listPhotographers(prisma: PrismaClient, status?: PhotographerStatus): Promise<PlatformPhotographer[]> {
+/**
+ * Where a pending photographer is in onboarding (Phase 7 user decision; R7.3):
+ *
+ *   awaiting     pending AND submitted for review (`submitted_at` set): the
+ *                platform's queue, the only pending photographers approval accepts
+ *   setting_up   pending AND not submitted yet: still working through the checklist
+ *
+ * A filter of its own rather than two more values of `status`: `status` is the
+ * column's vocabulary (`photographer_status_allowed`), and every row's `status`
+ * field is one of those three values; a `status=awaiting` that no row ever
+ * carries would make the filter and the field disagree. Both imply `pending`,
+ * and filters combine with AND, so `status=approved&review=awaiting` is an
+ * honest empty list.
+ */
+export const REVIEW_FILTERS = ['awaiting', 'setting_up'] as const;
+export type ReviewFilter = (typeof REVIEW_FILTERS)[number];
+
+export type PhotographerListFilters = { status?: PhotographerStatus; review?: ReviewFilter };
+
+/** Every photographer, or those matching the filters; the newest application first. */
+export async function listPhotographers(prisma: PrismaClient, filters: PhotographerListFilters = {}): Promise<PlatformPhotographer[]> {
+  const review: Prisma.PhotographerWhereInput =
+    filters.review === undefined ? {} : { status: 'pending', submittedAt: filters.review === 'awaiting' ? { not: null } : null };
   const rows = await prisma.photographer.findMany({
-    where: status === undefined ? {} : { status },
+    where: { AND: [filters.status === undefined ? {} : { status: filters.status }, review] },
     select: SELECT,
     orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
   });
@@ -95,7 +135,9 @@ export async function listPhotographers(prisma: PrismaClient, status?: Photograp
 
 /**
  * pending -> approved, recording who and when; starts the subscription and its
- * trial (R5.1), and emails `photographer_approved` with the trial's end.
+ * trial (R5.1), and emails `photographer_approved` with the trial's end. Only a
+ * photographer who has submitted for review (Phase 7 user decision): a pending
+ * one who has not is `not_submitted`, changed in nothing.
  */
 export function approvePhotographer(deps: ModerationDeps, action: ModerationAction): Promise<ModerationResult> {
   const now = deps.now();
@@ -104,7 +146,7 @@ export function approvePhotographer(deps: ModerationDeps, action: ModerationActi
       UPDATE photographer
          SET status = 'approved', approved_at = ${now}::timestamptz, approved_by_user_id = ${action.adminUserId}::uuid,
              updated_at = ${now}::timestamptz
-       WHERE id = ${action.photographerId}::uuid AND status = 'pending'
+       WHERE id = ${action.photographerId}::uuid AND status = 'pending' AND submitted_at IS NOT NULL
       RETURNING id`;
     if (rows.length === 0) return false;
 
@@ -207,7 +249,10 @@ async function transition(
     return { status: 'ok', changed: true, photographer };
   }
   const alreadyDone = target === null ? photographer.status !== 'suspended' : photographer.status === target;
-  return alreadyDone ? { status: 'ok', changed: false, photographer } : { status: 'invalid_transition', photographer };
+  if (alreadyDone) return { status: 'ok', changed: false, photographer };
+  // Only approval has a precondition beyond the status: the submission.
+  if (name === 'approve' && photographer.status === 'pending' && photographer.submittedAt === null) return { status: 'not_submitted', photographer };
+  return { status: 'invalid_transition', photographer };
 }
 
 function toPlatformPhotographer(row: SelectedPhotographer): PlatformPhotographer {
@@ -218,6 +263,8 @@ function toPlatformPhotographer(row: SelectedPhotographer): PlatformPhotographer
     email: row.user.email,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
+    submittedAt: row.submittedAt?.toISOString() ?? null,
+    handleChangedAt: row.handleChangedAt?.toISOString() ?? null,
     approvedAt: row.approvedAt?.toISOString() ?? null,
     approvedByUserId: row.approvedByUserId,
     suspendedAt: row.suspendedAt?.toISOString() ?? null,

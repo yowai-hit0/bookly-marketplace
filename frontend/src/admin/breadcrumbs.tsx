@@ -8,7 +8,7 @@ import { navItemFor } from './nav'
 
 /**
  * The admin's breadcrumb (design-system/bookly/admin-console.md section 6.2):
- * Admin > the section > on a booking, its reference.
+ * Studio > the section > on a booking, its reference.
  *
  * The section comes from the path; the last crumb, when a page has one, is
  * reported by that page (`breadcrumb-tail.ts`).
@@ -35,8 +35,8 @@ export function Breadcrumbs({ pathname, tail, className }: { pathname: string; t
       content: (
         <>
           <House aria-hidden="true" className="size-4 shrink-0" />
-          {/* On the narrowest phones the house alone says "Admin"; the name stays for assistive tech. */}
-          <span className="max-sm:sr-only">{t('admin:nav.label')}</span>
+          {/* On the narrowest phones the house alone says "Studio"; the name stays for assistive tech. */}
+          <span className="max-sm:sr-only">{t('studio:nav.label')}</span>
         </>
       ),
     },

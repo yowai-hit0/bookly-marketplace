@@ -220,28 +220,6 @@ export function yearlySaving(prices: { monthly: number; yearly: number }): numbe
   return saving > 0 ? saving : null
 }
 
-/** A banner shows when a trial or paid period ends within this many days (Phase 5 brief, unit 2). */
-export const ENDING_SOON_DAYS = 7
-
-const DAY_MS = 24 * 60 * 60 * 1000
-
-export type SubscriptionBanner = 'past_due' | 'expired' | 'trial_ending' | 'period_ending'
-
-/**
- * The banner above every studio page for this subscription at `now`, or null:
- * lapsed (`past_due`), hidden (`expired`), or a trial or paid period ending
- * within seven days. A period already over without the status having caught up
- * is not "ending": the status the API computed at its clock says what it is.
- */
-export function subscriptionBanner(subscription: Pick<StudioSubscription, 'status' | 'currentPeriodEndsAt'> | null, now: Date): SubscriptionBanner | null {
-  if (subscription === null) return null
-  if (subscription.status === 'past_due') return 'past_due'
-  if (subscription.status === 'expired') return 'expired'
-  const left = new Date(subscription.currentPeriodEndsAt).getTime() - now.getTime()
-  if (Number.isNaN(left) || left <= 0 || left > ENDING_SOON_DAYS * DAY_MS) return null
-  return subscription.status === 'trialing' ? 'trial_ending' : 'period_ending'
-}
-
 /** The latest paid period, newest first as the API lists them; null when nothing was ever paid. */
 export function lastPaidPeriod(periods: readonly SubscriptionPeriod[]): SubscriptionPeriod | null {
   return periods.find((period) => period.kind === 'paid') ?? null

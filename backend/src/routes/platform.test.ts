@@ -96,8 +96,23 @@ const suspend = (id: string, reason: unknown = 'Clients reported shoots that nev
   post(`/api/platform/photographers/${id}/suspend`, { reason }, bearer);
 const reactivate = (id: string, bearer?: string | null) => post(`/api/platform/photographers/${id}/reactivate`, undefined, bearer);
 
-async function pendingPhotographer(): Promise<string> {
-  return (await createPhotographer(prisma, { email: PENDING_EMAIL, handle: 'new-in-town', displayName: 'New in Town', status: 'pending' })).photographerId;
+/** When `pendingPhotographer` submitted for review, unless told not to. */
+const SUBMITTED_AT = new Date('2026-10-16T09:00:00Z');
+
+/**
+ * A pending photographer, by default SUBMITTED for review from the setup
+ * checklist: approval requires it (Phase 7 user decision; R7.3).
+ */
+async function pendingPhotographer({ submitted = true, email = PENDING_EMAIL, handle = 'new-in-town' } = {}): Promise<string> {
+  return (
+    await createPhotographer(prisma, {
+      email,
+      handle,
+      displayName: 'New in Town',
+      status: 'pending',
+      ...(submitted ? { submittedAt: SUBMITTED_AT } : {}),
+    })
+  ).photographerId;
 }
 
 function photographerRow(id: string) {
@@ -309,6 +324,95 @@ describe('GET /api/platform/photographers', () => {
     expect(photographers[1]).toMatchObject({ handle: PHOTOGRAPHER_HANDLE, displayName: PHOTOGRAPHER_NAME, approvedAt: '2026-09-02T06:00:00.000Z' });
   });
 
+  it('shows when each photographer submitted for review, null for one still setting up (Phase 7)', async () => {
+    const submitted = await pendingPhotographer();
+    const settingUp = await pendingPhotographer({ submitted: false, email: 'setting.up@bookly.example', handle: 'still-setting-up' });
+
+    const res = await get('/api/platform/photographers');
+
+    await expectMatchesSpec(res, 'listPlatformPhotographers', 200);
+    const byId = new Map((res.body as { photographers: { id: string; submittedAt: string | null }[] }).photographers.map((p) => [p.id, p.submittedAt]));
+    expect(byId.get(submitted)).toBe(SUBMITTED_AT.toISOString());
+    expect(byId.get(settingUp)).toBeNull();
+    // Approved before Phase 7, by hand: the fixture never submitted.
+    expect(byId.get(world.photographerId)).toBeNull();
+  });
+
+  it('shows when a submitted studio last changed its handle, null for one that has not (Phase 7, 2026-10-27)', async () => {
+    const changed = await pendingPhotographer();
+    const unchanged = await pendingPhotographer({ email: 'unchanged@bookly.example', handle: 'never-renamed' });
+    const changedAt = new Date('2026-10-18T12:30:00Z');
+    await prisma.photographer.update({ where: { id: changed }, data: { handle: 'renamed-studio', handleChangedAt: changedAt } });
+
+    const res = await get('/api/platform/photographers?review=awaiting');
+
+    await expectMatchesSpec(res, 'listPlatformPhotographers', 200);
+    const rows = (res.body as { photographers: { id: string; handle: string; handleChangedAt: string | null }[] }).photographers;
+    expect(rows.find((p) => p.id === changed)).toMatchObject({ handle: 'renamed-studio', handleChangedAt: changedAt.toISOString() });
+    expect(rows.find((p) => p.id === unchanged)).toMatchObject({ handleChangedAt: null });
+
+    // Moderation answers the same row shape, the flag kept through approval.
+    const approved = await approve(changed);
+    await expectMatchesSpec(approved, 'approvePhotographer', 200);
+    expect(approved.body).toMatchObject({ photographer: { status: 'approved', handleChangedAt: changedAt.toISOString() } });
+  });
+
+  describe('review=awaiting|setting_up (Phase 7)', () => {
+    let submitted: string;
+    let settingUp: string;
+    let suspendedSubmitted: string;
+
+    beforeEach(async () => {
+      submitted = await pendingPhotographer();
+      settingUp = await pendingPhotographer({ submitted: false, email: 'setting.up@bookly.example', handle: 'still-setting-up' });
+      // Submitted, then suspended before approval: not awaiting anything while suspended.
+      suspendedSubmitted = await pendingPhotographer({ email: 'suspended.applicant@bookly.example', handle: 'suspended-applicant' });
+      await suspend(suspendedSubmitted);
+      // An approved photographer who did submit: approval is behind them.
+      await prisma.photographer.update({ where: { id: world.photographerId }, data: { submittedAt: SUBMITTED_AT } });
+    });
+
+    const ids = async (query: string) => {
+      const res = await get(`/api/platform/photographers${query}`);
+      expect(res.status).toBe(200);
+      return (res.body as { photographers: { id: string }[] }).photographers.map((p) => p.id).sort();
+    };
+
+    it('awaiting is exactly the pending photographers who have submitted', async () => {
+      expect(await ids('?review=awaiting')).toEqual([submitted]);
+    });
+
+    it('setting_up is exactly the pending photographers who have not', async () => {
+      expect(await ids('?review=setting_up')).toEqual([settingUp]);
+    });
+
+    it('the two split the pending list between them, with nothing left over', async () => {
+      expect([...(await ids('?review=awaiting')), ...(await ids('?review=setting_up'))].sort()).toEqual(await ids('?status=pending'));
+    });
+
+    it('combines with status by AND: with pending the same list, with any other status none', async () => {
+      expect(await ids('?status=pending&review=awaiting')).toEqual([submitted]);
+      expect(await ids('?status=pending&review=setting_up')).toEqual([settingUp]);
+      for (const status of ['approved', 'suspended']) {
+        expect(await ids(`?status=${status}&review=awaiting`)).toEqual([]);
+        expect(await ids(`?status=${status}&review=setting_up`)).toEqual([]);
+      }
+    });
+
+    it('moves a photographer from setting_up to awaiting when they submit, and off both lists at approval', async () => {
+      await prisma.photographer.update({ where: { id: settingUp }, data: { submittedAt: START } });
+      expect(await ids('?review=awaiting')).toEqual([submitted, settingUp].sort());
+      expect(await ids('?review=setting_up')).toEqual([]);
+
+      expect((await approve(settingUp)).status).toBe(200);
+      expect(await ids('?review=awaiting')).toEqual([submitted]);
+    });
+
+    it.each(['?review=pending', '?review=', '?review=awaiting&review=setting_up', '?review=AWAITING'])('answers %s with 400', async (query) => {
+      expect((await get(`/api/platform/photographers${query}`)).body).toEqual({ error: 'invalid_request' });
+    });
+  });
+
   it.each(['pending', 'approved', 'suspended'])('filters by status=%s', async (status) => {
     const pendingId = await pendingPhotographer();
     const expected = { pending: [pendingId], approved: [world.photographerId], suspended: [] }[status];
@@ -450,6 +554,82 @@ describe('POST /api/platform/photographers/:id/approve', () => {
     expect(res.body).toMatchObject({ error: 'invalid_transition', photographer: { status: 'suspended' } });
     await expect(emails('photographer_approved')).resolves.toHaveLength(0);
     await expect(prisma.subscriptionPeriod.count()).resolves.toBe(1);
+  });
+
+  describe('requires the studio to have been submitted for review (Phase 7 user decision; R7.3)', () => {
+    it('refuses a pending photographer who has not submitted with 409 not_submitted, changing nothing and sending nothing', async () => {
+      const id = await pendingPhotographer({ submitted: false });
+      const before = await photographerRow(id);
+      const log = logSink();
+
+      const res = await approve(id);
+      const direct = await approvePhotographer({ prisma, now: () => clock, log: log.log }, { photographerId: id, adminUserId: admin.id });
+
+      expect(res.status).toBe(409);
+      await expectMatchesSpec(res, 'approvePhotographer', 409);
+      expect(res.body).toMatchObject({ error: 'not_submitted', photographer: { id, status: 'pending', submittedAt: null, approvedAt: null } });
+      const after = await photographerRow(id);
+      expect(after).toEqual(before);
+      expect(after.subscription).toBeNull();
+      await expect(prisma.subscriptionPeriod.count({ where: { subscription: { photographerId: id } } })).resolves.toBe(0);
+      await expect(emails('photographer_approved')).resolves.toHaveLength(0);
+      expect(direct.status).toBe('not_submitted');
+      // A refusal is not an action: no moderation log line (R9.4).
+      expect(log.entries).toEqual([]);
+    });
+
+    it('approves the same photographer once they have submitted', async () => {
+      const id = await pendingPhotographer({ submitted: false });
+      expect((await approve(id)).body).toMatchObject({ error: 'not_submitted' });
+
+      await prisma.photographer.update({ where: { id }, data: { submittedAt: START } });
+      const res = await approve(id);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ photographer: { id, status: 'approved', submittedAt: START.toISOString(), approvedAt: START.toISOString() } });
+      await expect(emails('photographer_approved')).resolves.toHaveLength(1);
+    });
+
+    it('lets none of several simultaneous approvals through for a photographer who has not submitted', async () => {
+      const id = await pendingPhotographer({ submitted: false });
+
+      const results = await Promise.all(Array.from({ length: 5 }, () => approve(id)));
+
+      expect(results.map((res) => [res.status, (res.body as { error?: string }).error])).toEqual(Array.from({ length: 5 }, () => [409, 'not_submitted']));
+      await expect(photographerRow(id)).resolves.toMatchObject({ status: 'pending', approvedAt: null, subscription: null });
+    });
+
+    it('still answers a suspended photographer, submitted or not, with invalid_transition', async () => {
+      const notSubmitted = await pendingPhotographer({ submitted: false });
+      await suspend(notSubmitted);
+
+      expect((await approve(notSubmitted)).body).toMatchObject({ error: 'invalid_transition', photographer: { status: 'suspended' } });
+    });
+
+    it('keeps the submission through a suspension before approval: reactivated, they can be approved without submitting again', async () => {
+      const id = await pendingPhotographer();
+      await suspend(id);
+      await reactivate(id);
+
+      expect((await approve(id)).body).toMatchObject({ photographer: { status: 'approved', submittedAt: SUBMITTED_AT.toISOString() } });
+    });
+
+    it('a photographer reactivated to pending who never submitted is still not_submitted', async () => {
+      const id = await pendingPhotographer({ submitted: false });
+      await suspend(id);
+      await reactivate(id);
+
+      expect((await approve(id)).body).toMatchObject({ error: 'not_submitted', photographer: { status: 'pending' } });
+    });
+
+    it('is still a 200 that changes nothing for a photographer already approved, submitted or not (approved before Phase 7)', async () => {
+      // The fixture's photographer was approved by hand and never submitted.
+      const res = await approve(world.photographerId);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ photographer: { status: 'approved', submittedAt: null } });
+      await expect(emails('photographer_approved')).resolves.toHaveLength(0);
+    });
   });
 
   it('answers 404 for an id that names nobody, and 400 for one that is not a uuid', async () => {

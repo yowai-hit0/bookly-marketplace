@@ -1271,6 +1271,66 @@ describe('photographer_application_received (Phase 2 decision 4)', () => {
     expect(email.html).not.toContain('<script>');
     expect(email.text).toContain('<script>x</script> {{handle}} has signed up');
   });
+
+  it("variant 'signup', named, reads exactly as the variant-less Phase 2 payload", () => {
+    const named = renderWith('photographer_application_received', { variant: 'signup' });
+    const plain = renderFixture(emailFixture('photographer_application_received'));
+
+    expect([named.subject, named.text]).toEqual([plain.subject, plain.text]);
+  });
+
+  it("variant 'submitted' (R7.3) says the checklist is done and opens the console's awaiting-review list", () => {
+    const email = renderFixture(emailFixture('photographer_application_received submitted'));
+
+    expect(email.subject).toBe('A studio is ready for review');
+    expect(email.text).toContain('Kigali Lens has finished the setup checklist and submitted their studio for review.');
+    expect(email.text).toContain('kigali-lens');
+    expect(email.text).toContain('studio@kigali-lens.example');
+    expect(email.text).not.toContain('has signed up');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/platform/photographers?review=awaiting`]);
+  });
+
+  it("escapes the name the applicant typed in the 'submitted' variant too", () => {
+    const email = renderWith('photographer_application_received submitted', { displayName: '<script>x</script>' });
+
+    expect(email.subject).toBe('A studio is ready for review');
+    expect(email.html).not.toContain('<script>');
+  });
+
+  it('refuses a variant it does not know', () => {
+    expect(payloadError(() => renderWith('photographer_application_received', { variant: 'approved' })).message).toContain('variant');
+  });
+
+  it("variant 'handle_changed' (Phase 7, 2026-10-27) names the old and the new handle and opens the awaiting-review list", () => {
+    const email = renderFixture(emailFixture('photographer_application_received handle_changed'));
+
+    expect(email.subject).toBe('A studio under review changed its handle');
+    expect(email.text).toContain('Kigali Lens changed their handle after submitting their studio for review.');
+    expect(email.text).toContain('Previous handle: kigali-lens\n');
+    expect(email.text).toContain('New handle: kigali-lens-studio\n');
+    expect(email.text).toContain('studio@kigali-lens.example');
+    expect(email.text).not.toContain('has signed up');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/platform/photographers?review=awaiting`]);
+  });
+
+  it("escapes the name the applicant typed in the 'handle_changed' variant too, keeping it out of the subject", () => {
+    const email = renderWith('photographer_application_received handle_changed', { displayName: '<script>x</script>' });
+
+    expect(email.subject).toBe('A studio under review changed its handle');
+    expect(email.html).not.toContain('<script>');
+  });
+
+  it("requires the previous handle for 'handle_changed', and refuses it on any other variant", () => {
+    expect(payloadError(() => renderWith('photographer_application_received handle_changed', { previousHandle: undefined })).message).toContain(
+      'previousHandle',
+    );
+    expect(payloadError(() => renderWith('photographer_application_received handle_changed', { previousHandle: 'Not A Handle' })).message).toContain(
+      'previousHandle',
+    );
+    expect(payloadError(() => renderWith('photographer_application_received submitted', { previousHandle: 'kigali-lens' })).message).toContain(
+      'previousHandle',
+    );
+  });
 });
 
 describe('account_security_alert account_exists (Phase 2 decision 4)', () => {

@@ -186,8 +186,8 @@ describe('the current method', () => {
     await loaded()
 
     const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getAllByRole('listitem')
-    expect(crumbs.map((item) => item.textContent)).toEqual(['Admin', 'Earnings', 'Payout method'])
-    expect(within(screen.getByRole('navigation', { name: 'Admin' })).getByRole('link', { name: 'Earnings' })).toHaveAttribute('aria-current', 'page')
+    expect(crumbs.map((item) => item.textContent)).toEqual(['Studio', 'Earnings', 'Payout method'])
+    expect(within(screen.getByRole('navigation', { name: 'Studio' })).getByRole('link', { name: 'Earnings' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Payout method'])
   })
 

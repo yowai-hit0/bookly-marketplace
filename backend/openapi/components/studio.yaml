@@ -5,20 +5,54 @@ schemas:
 
   StudioMe:
     type: object
-    required: [user, photographer]
+    required: [user, photographer, subscription]
     additionalProperties: false
+    description: |
+      Everything the studio's banners need (R7.4), in one read:
+
+      - pending approval: `photographer.status` `pending`; `submittedAt` null is
+        "finish your setup", set is "waiting for review";
+      - suspended: `status` `suspended`, with `suspensionReason`;
+      - trial ending: `subscription.status` `trialing` and `endingSoon`;
+      - past due: `subscription.status` `past_due`, until `graceEndsAt`.
     properties:
       user: { $ref: 'auth.yaml#/schemas/PublicUser' }
       photographer:
         type: object
-        description: The studio the login owns. Its `status` drives the pending or suspended banner.
-        required: [id, handle, displayName, status]
+        description: The studio the login owns.
+        required: [id, handle, displayName, status, submittedAt, suspensionReason]
         additionalProperties: false
         properties:
           id: { $ref: 'common.yaml#/schemas/Uuid' }
           handle: { type: string }
           displayName: { type: string }
           status: { $ref: 'platform.yaml#/schemas/PhotographerStatus' }
+          submittedAt:
+            type: [string, 'null']
+            format: date-time
+            description: When the studio was submitted for review from the setup checklist (R7.3).
+          suspensionReason:
+            type: [string, 'null']
+            description: The reason given for the current suspension, as emailed. Null unless suspended.
+      subscription:
+        description: Null until approval creates it (R5.1).
+        oneOf:
+          - type: 'null'
+          - type: object
+            required: [status, currentPeriodEndsAt, graceEndsAt, takingBookings, endingSoon]
+            additionalProperties: false
+            properties:
+              status: { $ref: 'common.yaml#/schemas/SubscriptionStatus' }
+              currentPeriodEndsAt: { $ref: 'common.yaml#/schemas/Instant' }
+              graceEndsAt:
+                $ref: 'common.yaml#/schemas/Instant'
+                description: When `past_due` becomes `expired` for the current end.
+              takingBookings: { type: boolean }
+              endingSoon:
+                type: boolean
+                description: |
+                  `trialing` or `active`, and the period ends within the platform's
+                  earliest reminder (the largest of the reminder days, 7 by default).
 
   # --- Working hours and blocks -------------------------------------------
 

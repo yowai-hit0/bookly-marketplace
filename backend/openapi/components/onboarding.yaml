@@ -1,0 +1,183 @@
+# The studio's onboarding (marketplace-spec.md Phase 7: R7.2, R7.3): the
+# photographer's own profile, their portfolio, and the setup checklist.
+
+schemas:
+  StudioProfile:
+    type: object
+    required: [handle, handleEditable, displayName, bio, contactPhone, whatsappPhone, contactEmail, coverImageUrl, districts, categories, status, submittedAt]
+    additionalProperties: false
+    properties:
+      handle: { type: string, examples: [kigali-lens] }
+      handleEditable:
+        type: boolean
+        description: False once the photographer has ever been approved (R7.2); a different handle is then `409 handle_locked`.
+      displayName: { type: string, minLength: 1, maxLength: 80 }
+      bio: { type: [string, 'null'], maxLength: 2000 }
+      contactPhone: { type: [string, 'null'], pattern: '^\+[1-9]\d{6,14}$', description: E.164. }
+      whatsappPhone: { type: [string, 'null'], pattern: '^\+[1-9]\d{6,14}$', description: E.164. }
+      contactEmail:
+        type: [string, 'null']
+        format: email
+        description: The public contact address shown on the profile, never the login.
+      coverImageUrl: { type: [string, 'null'], format: uri, pattern: '^https://' }
+      districts:
+        type: array
+        description: In the migration's order.
+        items: { $ref: 'catalogue.yaml#/schemas/PublicDistrict' }
+      categories:
+        type: array
+        description: Active categories only, in the platform's order.
+        items: { $ref: 'catalogue.yaml#/schemas/PublicCategory' }
+      status: { $ref: 'platform.yaml#/schemas/PhotographerStatus' }
+      submittedAt:
+        type: [string, 'null']
+        format: date-time
+        description: |
+          When the studio was submitted for review from the setup checklist
+          (R7.3); null until then. While the studio is pending and submitted,
+          a different handle still saves, and every platform admin is emailed
+          the old and the new one (Phase 7, 2026-10-27).
+
+  StudioProfileEnvelope:
+    type: object
+    required: [profile]
+    additionalProperties: false
+    properties:
+      profile: { $ref: '#/schemas/StudioProfile' }
+
+  StudioProfileUpdate:
+    type: object
+    additionalProperties: false
+    description: |
+      Any subset; an absent key is left as it is. Text is trimmed, and an
+      optional field takes `null` or a blank string to clear it. Lengths count
+      characters as the database does.
+    properties:
+      handle:
+        type: string
+        description: |
+          Lowercased, then 3-30 of `a-z`, `0-9` and inner hyphens (else `400`).
+          Only before approval (`409 handle_locked` after); a reserved or taken
+          handle is `409 handle_taken`. Sending the current handle is never a change.
+      displayName: { type: string, description: 1-80 characters after trimming. }
+      bio: { type: [string, 'null'], description: At most 2,000 characters. }
+      contactPhone:
+        type: [string, 'null']
+        description: |
+          Stored E.164. A Rwandan local number (`078 123 4567`, `250 78…`) is
+          normalised to `+250…`; any other needs its `+` and country code. A
+          value that is not a phone number is a `422`.
+      whatsappPhone: { type: [string, 'null'], description: As `contactPhone`. }
+      contactEmail: { type: [string, 'null'], description: A valid address (else `400`), stored lowercased. }
+      coverImageUrl: { type: [string, 'null'], description: 'An `https://` URL of at most 2,000 characters: malformed is a `400`, another scheme a `422`.' }
+      districts:
+        type: array
+        maxItems: 30
+        description: The WHOLE set of district codes, each once (`GET /api/districts`). An unknown code or a repeat is a `422` naming `districts`.
+        items: { type: string, examples: [gasabo] }
+      categories:
+        type: array
+        maxItems: 50
+        description: |
+          The WHOLE set of active category slugs, each once (`GET /api/categories`).
+          An unknown or inactive slug, or a repeat, is a `422` naming
+          `categories`. A category the platform has deactivated stays assigned,
+          untouched and unseen.
+        items: { type: string, examples: [wedding] }
+
+  StudioPortfolioImage:
+    type: object
+    required: [id, url, caption, sortOrder, createdAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      url: { type: string, format: uri, pattern: '^https://' }
+      caption: { type: [string, 'null'], maxLength: 200 }
+      sortOrder: { type: integer }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+
+  StudioPortfolioImageEnvelope:
+    type: object
+    required: [image]
+    additionalProperties: false
+    properties:
+      image: { $ref: '#/schemas/StudioPortfolioImage' }
+
+  StudioPortfolio:
+    type: object
+    required: [images, limit]
+    additionalProperties: false
+    properties:
+      images:
+        type: array
+        maxItems: 24
+        description: In the photographer's order, which the public profile shows.
+        items: { $ref: '#/schemas/StudioPortfolioImage' }
+      limit: { const: 24, description: The most images a portfolio holds. }
+
+  PortfolioFull:
+    type: object
+    required: [error, limit]
+    additionalProperties: false
+    properties:
+      error: { const: portfolio_full }
+      limit: { const: 24 }
+
+  SetupItem:
+    type: string
+    description: |
+      One checklist item (R7.3), each decided from the studio as it is now:
+
+      - `profile`: the display name and the bio each hold a non-blank character.
+      - `categories`: at least one active category.
+      - `districts`: at least one district.
+      - `payoutMethod`: a current payout method.
+      - `services`: at least one active service with an active package.
+      - `workingHours`: at least one open weekly rule (a one-date override alone does not count).
+    enum: [profile, categories, districts, payoutMethod, services, workingHours]
+
+  Setup:
+    type: object
+    required: [items, missing, status, submittedAt, canSubmit]
+    additionalProperties: false
+    properties:
+      items:
+        type: array
+        description: Every item, always in the order of `SetupItem`.
+        items:
+          type: object
+          required: [key, done]
+          additionalProperties: false
+          properties:
+            key: { $ref: '#/schemas/SetupItem' }
+            done: { type: boolean }
+      missing:
+        type: array
+        description: The items not done, in the same order.
+        items: { $ref: '#/schemas/SetupItem' }
+      status: { $ref: 'platform.yaml#/schemas/PhotographerStatus' }
+      submittedAt:
+        type: [string, 'null']
+        format: date-time
+        description: When the studio was submitted for review. Kept through later edits.
+      canSubmit:
+        type: boolean
+        description: Pending, not submitted yet, and every item done.
+
+  SetupEnvelope:
+    type: object
+    required: [setup]
+    additionalProperties: false
+    properties:
+      setup: { $ref: '#/schemas/Setup' }
+
+  SetupIncomplete:
+    type: object
+    required: [error, missing]
+    additionalProperties: false
+    properties:
+      error: { const: setup_incomplete }
+      missing:
+        type: array
+        minItems: 1
+        items: { $ref: '#/schemas/SetupItem' }

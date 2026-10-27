@@ -181,7 +181,7 @@ The legend popover (`StageLegend`) lists the console badges on admin pages (it p
 
 ### 6.1 Shell (`AdminLayout.tsx`)
 
-The contract in `pages/admin-shell.md` holds: one `nav[aria-label="Admin"]` that reflows, no drawer or open/close state, skip link first to `#admin-content`, `min-w-0` content column, each page keeps its own `main` and width, Sign out last.
+The contract in `pages/admin-shell.md` holds: one `nav[aria-label="Studio"]` (was "Admin" until Phase 7) that reflows, no drawer or open/close state, skip link first to `#admin-content`, `min-w-0` content column, each page keeps its own `main` and width, Sign out last.
 
 ```
 >= lg
@@ -201,8 +201,8 @@ The contract in `pages/admin-shell.md` holds: one `nav[aria-label="Admin"]` that
 ```
 
 - **Top bar (from `lg`):** full width, sticky, 56px, `border-b`. Three cells separated by vertical hairlines: the **mark cell** (56px square, a decorative Bookly monogram, `aria-hidden`; never a second "Bookly" text node, because a test finds the wordmark by that text), the **breadcrumb cell** (`flex-1`, `px-6`) and the **theme cell** (the toggle, `px-3`). Nothing else.
-- **Sidebar (from `lg`):** 260px, `border-r`, `bg-sidebar`, sticky below the top bar, full remaining height, own scroll. Top: the wordmark span "Bookly" at 20px/500 with a `CalendarCheck` icon (20px). Then the five links, in their current order: 44px tall, 16px text, 18px icon, `px-3.5`, square, full width, `gap-1` between rows. **Active:** `bg-sidebar-primary text-sidebar-primary-foreground font-medium` (violet fill, not colour alone: fill + weight + `aria-current`). **Inactive:** text colour, `hover:bg-sidebar-accent`. **Sign out** pinned to the bottom above a hairline, ghost weight, `text-destructive`, `hover:bg-destructive/10`, 44px, full width.
-- **Below `lg` (as shipped, 2026-09-26):** row 1 is the top bar itself: the breadcrumb (the last two segments, the last truncating; the Admin crumb is icon-only below `sm`, still named "Admin", and a 44px square) and the theme toggle. Row 2 is the wordmark with Sign out on the right (icon-only below `sm`, as `admin-shell.md` already had it); row 3 the five links wrapping. The brief suggested the breadcrumb as a row *under* the nav; moving it there with `order-*` would make Tab visit it before the links it sits below, so DOM order and reading order were kept equal instead (raised at the checkpoint; see §9). All touch targets 44px.
+- **Sidebar (from `lg`):** 260px, `border-r`, `bg-sidebar`, sticky below the top bar, full remaining height, own scroll. Top: the wordmark span "Bookly" at 20px/500 with a `CalendarCheck` icon (20px). Then the links, in the order `pages/admin-shell.md` lists (nine since Phase 7, ten while pending): 44px tall, 16px text, 18px icon, `px-3.5`, square, full width, `gap-1` between rows. **Active:** `bg-sidebar-primary text-sidebar-primary-foreground font-medium` (violet fill, not colour alone: fill + weight + `aria-current`). **Inactive:** text colour, `hover:bg-sidebar-accent`. **Sign out** pinned to the bottom above a hairline, ghost weight, `text-destructive`, `hover:bg-destructive/10`, 44px, full width.
+- **Below `lg` (as shipped, 2026-09-26):** row 1 is the top bar itself: the breadcrumb (the last two segments, the last truncating; the Admin crumb is icon-only below `sm`, still named "Admin", and a 44px square) and the theme toggle. Row 2 is the wordmark with Sign out on the right (icon-only below `sm`, as `admin-shell.md` already had it); row 3 the links wrapping (nine, ten while pending). The brief suggested the breadcrumb as a row *under* the nav; moving it there with `order-*` would make Tab visit it before the links it sits below, so DOM order and reading order were kept equal instead (raised at the checkpoint; see §9). All touch targets 44px.
 - **Content:** `#admin-content` stays the focusable wrapper; the page's `main` gets `px-4 lg:px-12` and `py-8 lg:py-12`.
 
 ### 6.2 Breadcrumbs (new)

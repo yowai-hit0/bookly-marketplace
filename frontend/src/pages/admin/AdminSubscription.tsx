@@ -133,7 +133,7 @@ export function AdminSubscription() {
 
   return (
     <main className={cn(PAGE, 'max-w-4xl')}>
-      <PageHeader eyebrow={t('admin:nav.label')} eyebrowIcon={Repeat} title={t('admin:subscription.title')}>
+      <PageHeader eyebrow={t('studio:nav.label')} eyebrowIcon={Repeat} title={t('admin:subscription.title')}>
         <p className={cn(META, 'max-w-prose text-pretty')}>{t('admin:subscription.intro')}</p>
       </PageHeader>
 

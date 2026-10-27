@@ -41,7 +41,7 @@ loading (`role="status"`), load failed (destructive + Retry), idle, field-invali
 
 ## Admin nav
 
-This page is nav item **five** of five: calendar, bookings, catalogue, availability, **settings**. Icon `Settings` (`size-4`, `aria-hidden`). It is last in the list, and it is the only nav item that is not day-to-day work — leave it last.
+This page is the **last** nav item (Phase 7: Setup while pending, calendar, bookings, catalogue, availability, profile, portfolio, earnings, subscription, **settings**; `admin-shell.md`). Icon `Settings` (`size-4`, `aria-hidden`). It is last in the list, and it is the only nav item that is not day-to-day work — leave it last.
 
 ## Do not
 

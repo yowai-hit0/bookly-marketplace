@@ -119,8 +119,8 @@ describe('a paid payout', () => {
     renderAt()
     await screen.findByRole('heading', { level: 1 })
 
-    await waitFor(() => expect(crumbs()).toEqual(['Admin', 'Earnings', 'Payout 10 Oct 2026, 10:00']))
-    expect(within(screen.getByRole('navigation', { name: 'Admin' })).getByRole('link', { name: 'Earnings' })).toHaveAttribute('aria-current', 'page')
+    await waitFor(() => expect(crumbs()).toEqual(['Studio', 'Earnings', 'Payout 10 Oct 2026, 10:00']))
+    expect(within(screen.getByRole('navigation', { name: 'Studio' })).getByRole('link', { name: 'Earnings' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('goes back to the earnings', async () => {
@@ -170,7 +170,7 @@ describe('a payout that cannot be shown', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'This payout does not exist.' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    await waitFor(() => expect(crumbs()).toEqual(['Admin', 'Earnings']))
+    await waitFor(() => expect(crumbs()).toEqual(['Studio', 'Earnings']))
   })
 
   it('says a failed load failed, not that the payout is missing, and loads again on retry', async () => {

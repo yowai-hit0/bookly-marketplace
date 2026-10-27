@@ -181,7 +181,11 @@ model Photographer {
   status           String    @default("pending")
   /// Set by the setup checklist (R7.3).
   submittedAt      DateTime? @map("submitted_at") @db.Timestamptz(6)
-  approvedAt       DateTime? @map("approved_at") @db.Timestamptz(6)
+  /// The handle's latest change while pending and submitted (Phase 7, 2026-10-27):
+  /// the platform console's "changed since submission". CHECK
+  /// photographer_handle_changed_after_submission: never without submitted_at.
+  handleChangedAt  DateTime? @map("handle_changed_at") @db.Timestamptz(6)
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz(6)
   approvedByUserId String?   @map("approved_by_user_id") @db.Uuid
   suspendedAt      DateTime? @map("suspended_at") @db.Timestamptz(6)
   suspensionReason String?   @map("suspension_reason")

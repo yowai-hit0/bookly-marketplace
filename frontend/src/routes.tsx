@@ -13,7 +13,10 @@ import { AdminCatalogue } from '@/pages/admin/AdminCatalogue'
 import { AdminEarnings } from '@/pages/admin/AdminEarnings'
 import { AdminPayoutDetail } from '@/pages/admin/AdminPayoutDetail'
 import { AdminPayoutMethod } from '@/pages/admin/AdminPayoutMethod'
+import { AdminPortfolio } from '@/pages/admin/AdminPortfolio'
+import { AdminProfile } from '@/pages/admin/AdminProfile'
 import { AdminSettings } from '@/pages/admin/AdminSettings'
+import { AdminSetup } from '@/pages/admin/AdminSetup'
 import { AdminSubscription } from '@/pages/admin/AdminSubscription'
 import { AccountHome } from '@/pages/account/AccountHome'
 import { GoogleCallbackPage } from '@/pages/auth/GoogleCallbackPage'
@@ -122,6 +125,11 @@ export const routes: RouteObject[] = [
       // Paying for the subscription that keeps the profile bookable (Phase 5, R5.2).
       { path: 'subscription', element: <AdminSubscription /> },
       { path: 'settings', element: <AdminSettings /> },
+      // Onboarding (Phase 7, R7.2, R7.3): the public profile, its portfolio,
+      // and the checklist a pending studio submits for review.
+      { path: 'profile', element: <AdminProfile /> },
+      { path: 'portfolio', element: <AdminPortfolio /> },
+      { path: 'setup', element: <AdminSetup /> },
     ],
   },
   // Old links, emailed ones included, still land.

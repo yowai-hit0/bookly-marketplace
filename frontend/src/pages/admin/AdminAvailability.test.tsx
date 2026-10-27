@@ -539,17 +539,20 @@ describe('AdminAvailability, a block over a confirmed booking (spec §6.4)', () 
 
 describe('the admin navigation', () => {
   // Six since Phase 4 added Earnings (marketplace-spec.md R4.5); seven since
-  // Phase 5 added Subscription (R5.2).
-  it('lists the seven sections, with availability and settings among them', async () => {
+  // Phase 5 added Subscription (R5.2); nine since Phase 7 added Profile and
+  // Portfolio (R7.2). Setup shows only while pending.
+  it('lists the nine sections, with availability and settings among them', async () => {
     stubApi()
     await openPage()
-    const nav = screen.getByRole('navigation', { name: 'Admin' })
+    const nav = screen.getByRole('navigation', { name: 'Studio' })
 
     expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual([
       'Calendar',
       'Bookings',
       'Catalogue',
       'Availability',
+      'Profile',
+      'Portfolio',
       'Earnings',
       'Subscription',
       'Settings',
@@ -561,7 +564,7 @@ describe('the admin navigation', () => {
     stubApi()
     const router = renderPage()
     await screen.findByRole('heading', { name: 'Availability' })
-    const nav = screen.getByRole('navigation', { name: 'Admin' })
+    const nav = screen.getByRole('navigation', { name: 'Studio' })
 
     await user().click(within(nav).getByRole('link', { name: 'Settings' }))
 

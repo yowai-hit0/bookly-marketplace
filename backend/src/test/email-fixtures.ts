@@ -277,6 +277,24 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     payload: { displayName: 'Kigali Lens', handle: 'kigali-lens', email: 'studio@kigali-lens.example' },
   },
   {
+    name: 'photographer_application_received submitted',
+    template: 'photographer_application_received',
+    /** The setup checklist's submission (marketplace-spec.md R7.3, Phase 7). */
+    payload: { variant: 'submitted', displayName: 'Kigali Lens', handle: 'kigali-lens', email: 'studio@kigali-lens.example' },
+  },
+  {
+    name: 'photographer_application_received handle_changed',
+    template: 'photographer_application_received',
+    /** A handle changed after submitting, before approval (Phase 7, user decision 2026-10-27). */
+    payload: {
+      variant: 'handle_changed',
+      displayName: 'Kigali Lens',
+      handle: 'kigali-lens-studio',
+      previousHandle: 'kigali-lens',
+      email: 'studio@kigali-lens.example',
+    },
+  },
+  {
     name: 'photographer_approved',
     template: 'photographer_approved',
     payload: { displayName: 'Kigali Lens', handle: 'kigali-lens' },

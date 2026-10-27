@@ -466,7 +466,9 @@ describe('the bearer token', () => {
     const photographer = await prisma.photographer.findUniqueOrThrow({ where: { userId: admin.id } });
     expect(res.body).toEqual({
       user: { id: admin.id, email: EMAIL, lastLoginAt: START.toISOString() },
-      photographer: { id: photographer.id, handle: photographer.handle, displayName: 'Kigali Lens', status: 'approved' },
+      // Phase 7 (R7.4): what the banners need. This one has no subscription (approved by hand).
+      photographer: { id: photographer.id, handle: photographer.handle, displayName: 'Kigali Lens', status: 'approved', submittedAt: null, suspensionReason: null },
+      subscription: null,
     });
     expect(setCookies(res)).toEqual([]);
   });

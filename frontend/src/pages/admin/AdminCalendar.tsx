@@ -202,7 +202,7 @@ export function AdminCalendar() {
       )}
     >
       <PageHeader
-        eyebrow={t('admin:nav.label')}
+        eyebrow={t('studio:nav.label')}
         eyebrowIcon={CalendarDays}
         title={t('admin:calendar.title')}
         meta={<MetaItem icon={Globe}>{t('admin:calendar.timezoneNote')}</MetaItem>}
