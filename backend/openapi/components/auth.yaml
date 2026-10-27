@@ -118,14 +118,28 @@ schemas:
 
   AccountUser:
     type: object
-    description: A client's own view of their account. Still an allowlist.
-    required: [id, email, lastLoginAt, fullName]
+    description: |
+      A client's own view of their account. Still an allowlist: which
+      credentials the account holds, never what they are (Phase 8).
+    required: [id, email, lastLoginAt, fullName, phone, hasPassword, hasGoogle, pendingEmail]
     additionalProperties: false
     properties:
       id: { $ref: 'common.yaml#/schemas/Uuid' }
       email: { type: string, format: email }
       lastLoginAt: { type: [string, 'null'], format: date-time }
       fullName: { type: [string, 'null'] }
+      phone:
+        type: [string, 'null']
+        pattern: '^\+[1-9]\d{6,14}$'
+        description: The client's own number, E.164. Prefills the booking form; never changes a booking already made.
+      hasPassword:
+        type: boolean
+        description: False for a Google-only account, which may add one (`POST /api/account/password/set`), cannot change its address, and confirms deletion by typing its address.
+      hasGoogle: { type: boolean, description: Whether the account signs in with Google. }
+      pendingEmail:
+        type: [string, 'null']
+        format: email
+        description: An address change waiting on the link sent to the new inbox; null once that link lapses (24 hours).
 
   AccountMe:
     type: object

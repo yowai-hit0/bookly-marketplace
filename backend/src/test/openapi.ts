@@ -106,6 +106,8 @@ const MOUNTS: Record<string, string | readonly string[]> = {
   studioRouter: '/api/studio',
   platformRouter: '/api/platform',
   accountRouter: '/api/account',
+  // Phase 8: the client dashboard, mounted inside accountRouter behind requireClient.
+  accountDashboardRouter: '/api/account',
   // Login, password reset and verification, mounted inside each area's router (Phase 2 decision 1).
   areaAuthRouter: ['/api/studio/auth', '/api/platform/auth', '/api/account/auth'],
   // Mounted inside studioRouter (routes/studio.ts).

@@ -272,6 +272,58 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
     },
   },
   {
+    name: 'account_verify_email email_change',
+    template: 'account_verify_email',
+    payload: {
+      variant: 'email_change',
+      area: 'account',
+      token: FIXTURE_VERIFY_TOKEN,
+      /** format.json `formatDateTime`: 1 Jan 2027, 00:00. */
+      expiresAt: '2026-12-31T22:00:00.000Z',
+    },
+  },
+  {
+    name: 'account_security_alert password_changed',
+    template: 'account_security_alert',
+    payload: {
+      variant: 'password_changed',
+      area: 'account',
+      added: false,
+      /** format.json `formatDateTime`: 14 Mar 2026, 17:00. */
+      changedAt: '2026-03-14T15:00:00.000Z',
+    },
+  },
+  {
+    name: 'account_security_alert password_changed added',
+    template: 'account_security_alert',
+    payload: {
+      variant: 'password_changed',
+      area: 'account',
+      added: true,
+      changedAt: '2026-03-14T15:00:00.000Z',
+    },
+  },
+  {
+    name: 'account_security_alert email_changed',
+    template: 'account_security_alert',
+    payload: {
+      variant: 'email_changed',
+      area: 'account',
+      changedAt: '2026-03-14T15:00:00.000Z',
+      newEmail: 'n•••••@example.com',
+    },
+  },
+  {
+    name: 'account_security_alert account_deleted',
+    template: 'account_security_alert',
+    payload: {
+      variant: 'account_deleted',
+      area: 'account',
+      /** format.json `formatDateTime`: 14 Mar 2026, 17:00. */
+      deletedAt: '2026-03-14T15:00:00.000Z',
+    },
+  },
+  {
     name: 'photographer_application_received',
     template: 'photographer_application_received',
     payload: { displayName: 'Kigali Lens', handle: 'kigali-lens', email: 'studio@kigali-lens.example' },
@@ -380,7 +432,7 @@ export const EMAIL_FIXTURES: readonly EmailFixture[] = [
 export const TEMPLATE_VARIANTS = {
   photographer_alert: ['payment_received', 'retries_exhausted', 'refund_due', 'booking_cancelled'],
   platform_alert: ['retries_exhausted'],
-  account_security_alert: ['login_lockout', 'account_exists', 'payout_method_changed'],
+  account_security_alert: ['login_lockout', 'account_exists', 'payout_method_changed', 'password_changed', 'email_changed', 'account_deleted'],
   subscription_reminder: ['ending', 'past_due'],
 } as const satisfies Partial<Record<SendableEmailTemplate, readonly string[]>>;
 

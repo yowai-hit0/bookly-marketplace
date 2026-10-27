@@ -53,6 +53,13 @@ describe('limited endpoints', () => {
     ['/api/booking/token/payments', 'paymentsPerIp'],
     ['/api/booking/token/email', 'emailChangePerIp'],
     ['/api/bookings', 'bookingsPerIp'],
+    // Phase 8: the client dashboard's payment, credential, address and erasure routes.
+    ['/api/account/bookings/BKY-2610-AAAAA/payments', 'paymentsPerIp'],
+    ['/api/account/password', 'accountPasswordPerIp'],
+    ['/api/account/password/set', 'accountPasswordPerIp'],
+    ['/api/account/email', 'accountEmailChangePerIp'],
+    ['/api/account/email/confirm', 'accountEmailConfirmPerIp'],
+    ['/api/account/delete', 'accountDeletePerIp'],
   ] as const)('POST %s is refused with 429 past its limit (%s)', async (path, name) => {
     const app = createApp({ publicApi: undefined, rateLimits: { [name]: tight } });
 
@@ -80,6 +87,33 @@ describe('limited endpoints', () => {
     await request(app).post('/api/checkout/BKY-2610-AAAAA/token/payments').send({});
 
     expect((await request(app).post('/api/booking/token/payments').send({})).status).toBe(429);
+  });
+
+  it('shares it with the dashboard’s session-fee payment too (Phase 8)', async () => {
+    const app = createApp({ rateLimits: { paymentsPerIp: tight } });
+
+    await request(app).post('/api/booking/token/payments').send({});
+
+    expect((await request(app).post('/api/account/bookings/BKY-2610-AAAAA/payments').send({})).status).toBe(429);
+  });
+
+  it('limits the export, a GET, and leaves the rest of the dashboard’s reads alone (Phase 8, B7)', async () => {
+    const app = createApp({ rateLimits: { accountExportPerIp: tight } });
+
+    expect((await request(app).get('/api/account/export')).status).toBe(404);
+    const refused = await request(app).get('/api/account/export');
+    expect([refused.status, refused.body]).toEqual([429, { error: 'rate_limited' }]);
+
+    for (let i = 0; i < 3; i++) expect((await request(app).get('/api/account/bookings')).status).toBe(404);
+  });
+
+  it('gives the password change and the password addition one allowance (Phase 8, B5)', async () => {
+    const app = createApp({ rateLimits: { accountPasswordPerIp: tight } });
+
+    await request(app).post('/api/account/password').send({});
+
+    expect((await request(app).post('/api/account/password/set').send({})).status).toBe(429);
+    expect((await request(app).post('/api/account/email').send({})).status).toBe(404);
   });
 
   it('counts each area’s sign-in on its own: a burst at the studio login leaves the platform’s open (Phase 2 decision 8)', async () => {

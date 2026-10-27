@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import type { PublicPhotographerProfile, PublicServiceDetail } from '@/catalogue/api'
 import type { HeldBooking } from '@/catalogue/bookings'
+import { forgetAccountMe } from '@/auth/account'
+import { saveSession } from '@/auth/session'
 import { routes } from '@/routes'
 import { profile } from '@/test/marketplace-fixtures'
 
@@ -1406,5 +1408,60 @@ describe('a photographer not taking bookings (Phase 5, R5.5)', () => {
     await waitFor(() => expect(sent.filter((url) => url === PROFILE_API)).toHaveLength(2))
     expect(await screen.findByText('Could not load available times.')).toBeInTheDocument()
     expect(document.querySelector('[data-not-taking-bookings]')).toBeNull()
+  })
+})
+
+// --- A signed-in client (Phase 8) -------------------------------------------------------------
+
+describe('a signed-in client on the service page (Phase 8, decision 1)', () => {
+  const ME = {
+    id: 'c1',
+    email: 'aline@example.com',
+    lastLoginAt: null,
+    fullName: 'Aline Uwase',
+    phone: '+250788123456',
+    hasPassword: true,
+    hasGoogle: false,
+    pendingEmail: null,
+  }
+
+  afterEach(() => {
+    sessionStorage.clear()
+    forgetAccountMe()
+  })
+
+  it('the booking form starts with their name, email and phone, still editable', async () => {
+    saveSession('account', { token: 'account.jwt', expiresAt: '2099-01-01T00:00:00.000Z' })
+    stubApi({ '/api/account/me': () => json({ user: ME }) })
+    await renderLoaded()
+    await user().click(packageRadio('Standard'))
+
+    const name = await screen.findByRole('textbox', { name: 'Full name' })
+    await waitFor(() => expect(name).toHaveValue('Aline Uwase'))
+    expect(screen.getByRole('textbox', { name: 'Email' })).toHaveValue('aline@example.com')
+    expect(screen.getByRole('textbox', { name: 'Phone number' })).toHaveValue('+250788123456')
+    expect(screen.getByRole('textbox', { name: 'Shoot location' })).toHaveValue('')
+    await user().clear(name)
+    await user().type(name, 'A friend')
+    expect(name).toHaveValue('A friend')
+  })
+
+  it('a guest’s form starts empty, and nothing asks for an account', async () => {
+    const sent = stubApi()
+    await renderLoaded()
+    await user().click(packageRadio('Standard'))
+
+    expect(await screen.findByRole('textbox', { name: 'Full name' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'Email' })).toHaveValue('')
+    expect(sent.some((url) => url.startsWith('/api/account/'))).toBe(false)
+  })
+
+  it('an account that cannot be read leaves the form empty and working', async () => {
+    saveSession('account', { token: 'account.jwt', expiresAt: '2099-01-01T00:00:00.000Z' })
+    stubApi({ '/api/account/me': () => json({ error: 'internal_error' }, 500) })
+    await renderLoaded()
+    await user().click(packageRadio('Standard'))
+
+    expect(await screen.findByRole('textbox', { name: 'Full name' })).toHaveValue('')
   })
 })

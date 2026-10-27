@@ -306,6 +306,88 @@ describe('responses match the spec', () => {
     await expectMatchesSpec(await request(server).post(`${path}/approve`).set(auth), 'approvePhotographer', 200);
   });
 
+  it('the client dashboard: bookings, payments, receipts, profile, password, address, export and deletion (Phase 8)', async () => {
+    const server = app();
+    const passwordHash = await hashPassword('a-good-enough-password');
+    const client = await prisma.appUser.create({
+      data: { email: 'aline.private@example.com', role: 'client', fullName: 'Aline', passwordHash, emailVerifiedAt: NOW, phone: '+250788123456' },
+    });
+    await prisma.client.update({ where: { id: world.clientId }, data: { userId: client.id } });
+    const token = (await issueToken(TEST_SECRET, 'account', client, NOW)).token;
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const confirmed = await insertBooking(prisma, world, { status: 'confirmed' });
+    const hold = await insertBooking(prisma, world, { status: 'pending_payment' });
+    const cancelled = await insertBooking(prisma, world, { status: 'cancelled_by_client' });
+    const paid = await insertPayment(prisma, confirmed.id, { status: 'succeeded', amountRwf: 20_000 });
+    const refunded = await raw.query<{ our_ref: string }>(
+      `INSERT INTO payment (booking_id, kind, provider, method, amount_rwf, status, settled_at, refunded_at, refund_reference)
+       VALUES ($1, 'session_fee', 'mtn_momo_direct', 'momo_mtn', 5000, 'refunded', now(), now(), 'MOMO-R-1') RETURNING our_ref::text`,
+      [cancelled.id],
+    );
+    await insertPayment(prisma, cancelled.id, { status: 'refund_due', kind: 'session_fee', provider: 'cash', amountRwf: 1_000 });
+    const pending = await insertPayment(prisma, hold.id, { status: 'pending' });
+
+    await expectMatchesSpec(await request(server).get('/api/account/me').set(auth), 'getAccountMe', 200);
+    const upcoming = await request(server).get('/api/account/bookings?scope=upcoming').set(auth);
+    await expectMatchesSpec(upcoming, 'listAccountBookings', 200);
+    expect((upcoming.body as { bookings: { checkoutPath: string | null }[] }).bookings.some((row) => row.checkoutPath !== null)).toBe(true);
+    await expectMatchesSpec(await request(server).get('/api/account/bookings?scope=past').set(auth), 'listAccountBookings', 200);
+    await expectMatchesSpec(await request(server).get('/api/account/bookings?scope=all').set(auth), 'listAccountBookings', 400);
+    await expectMatchesSpec(await request(server).get('/api/account/bookings?page=0').set(auth), 'listAccountBookings', 422);
+    await expectMatchesSpec(await request(server).get(`/api/account/bookings/${confirmed.reference}`).set(auth), 'getAccountBooking', 200);
+    await expectMatchesSpec(await request(server).get(`/api/account/bookings/${hold.reference}`).set(auth), 'getAccountBooking', 200);
+    await expectMatchesSpec(await request(server).get('/api/account/bookings/BKY-2610-ZZZZZ').set(auth), 'getAccountBooking', 404);
+    await expectMatchesSpec(await request(server).post(`/api/account/bookings/${hold.reference}/cancel`).set(auth), 'cancelAccountBooking', 409);
+
+    const pay = { method: 'momo_mtn', phone: '0788123456' };
+    await expectMatchesSpec(await request(server).post(`/api/account/bookings/${cancelled.reference}/payments`).set(auth).send(pay), 'payAccountBookingSessionFee', 409);
+    await expectMatchesSpec(await request(server).post(`/api/account/bookings/${confirmed.reference}/payments`).set(auth).send({ ...pay, phone: 'x' }), 'payAccountBookingSessionFee', 422);
+    await expectMatchesSpec(await request(server).post(`/api/account/bookings/${confirmed.reference}/payments`).set(auth).send(pay), 'payAccountBookingSessionFee', 201);
+    await expectMatchesSpec(await request(server).post(`/api/account/bookings/${confirmed.reference}/payments`).set(auth).send(pay), 'payAccountBookingSessionFee', 409);
+
+    await expectMatchesSpec(await request(server).get('/api/account/payments').set(auth), 'listAccountPayments', 200);
+    await expectMatchesSpec(await request(server).get(`/api/account/payments/${paid.ourRef}`).set(auth), 'getAccountReceipt', 200);
+    await expectMatchesSpec(await request(server).get(`/api/account/payments/${refunded.rows[0]?.our_ref}`).set(auth), 'getAccountReceipt', 200);
+    await expectMatchesSpec(await request(server).get(`/api/account/payments/${pending.ourRef}`).set(auth), 'getAccountReceipt', 409);
+    await expectMatchesSpec(await request(server).get('/api/account/payments/not-a-uuid').set(auth), 'getAccountReceipt', 404);
+
+    await expectMatchesSpec(await request(server).get('/api/account/profile').set(auth), 'getAccountProfile', 200);
+    await expectMatchesSpec(await request(server).patch('/api/account/profile').set(auth).send({ fullName: 'Aline U.', phone: null }), 'updateAccountProfile', 200);
+    await expectMatchesSpec(await request(server).patch('/api/account/profile').set(auth).send({ phone: 'nope' }), 'updateAccountProfile', 422);
+    await expectMatchesSpec(await request(server).patch('/api/account/profile').set(auth).send({ fullName: null }), 'updateAccountProfile', 400);
+
+    await expectMatchesSpec(await request(server).get('/api/account/export').set(auth), 'exportAccount', 200);
+
+    await expectMatchesSpec(await request(server).post('/api/account/email').set(auth).send({ newEmail: 'aline.private@example.com', password: 'x' }), 'requestAccountEmailChange', 422);
+    await expectMatchesSpec(await request(server).post('/api/account/email').set(auth).send({ newEmail: 'aline.new@example.com', password: 'wrong password' }), 'requestAccountEmailChange', 403);
+    await expectMatchesSpec(await request(server).post('/api/account/email').set(auth).send({ newEmail: 'aline.new@example.com', password: 'a-good-enough-password' }), 'requestAccountEmailChange', 202);
+    const link = await prisma.outbox.findFirstOrThrow({ where: { template: 'account_verify_email', recipient: 'aline.new@example.com' } });
+    const confirmToken = String((link.payload as Record<string, unknown>).token);
+    await expectMatchesSpec(await request(server).post('/api/account/email/confirm').send({ token: confirmToken, password: 'wrong password' }), 'confirmAccountEmailChange', 400);
+    await expectMatchesSpec(await request(server).post('/api/account/email/confirm').send({ token: confirmToken, password: 'a-good-enough-password' }), 'confirmAccountEmailChange', 200);
+
+    await expectMatchesSpec(await request(server).post('/api/account/password/set').set(auth).send({ newPassword: 'another-good-password' }), 'setAccountPassword', 409);
+    await expectMatchesSpec(await request(server).post('/api/account/password').set(auth).send({ currentPassword: 'wrong password', newPassword: 'another-good-password' }), 'changeAccountPassword', 403);
+    await expectMatchesSpec(await request(server).post('/api/account/password').set(auth).send({ currentPassword: 'x', newPassword: 'short' }), 'changeAccountPassword', 422);
+    const changed = await request(server).post('/api/account/password').set(auth).send({ currentPassword: 'a-good-enough-password', newPassword: 'another-good-password' });
+    await expectMatchesSpec(changed, 'changeAccountPassword', 200);
+    const fresh = { Authorization: `Bearer ${(changed.body as { token: string }).token}` };
+
+    const google = await prisma.appUser.create({ data: { email: 'g.only@example.com', role: 'client', googleSub: 'g-sub', emailVerifiedAt: NOW } });
+    const googleAuth = { Authorization: `Bearer ${(await issueToken(TEST_SECRET, 'account', google, NOW)).token}` };
+    await expectMatchesSpec(await request(server).post('/api/account/email').set(googleAuth).send({ newEmail: 'g.new@example.com', password: 'x' }), 'requestAccountEmailChange', 409);
+    await expectMatchesSpec(await request(server).post('/api/account/password').set(googleAuth).send({ currentPassword: 'x', newPassword: 'another-good-password' }), 'changeAccountPassword', 409);
+    await expectMatchesSpec(await request(server).post('/api/account/delete').set(googleAuth).send({ confirmEmail: 'nope@example.com' }), 'deleteAccount', 403);
+    await expectMatchesSpec(await request(server).post('/api/account/password/set').set(googleAuth).send({ newPassword: 'another-good-password' }), 'setAccountPassword', 200);
+
+    await expectMatchesSpec(await request(server).post('/api/account/delete').set(fresh).send({}), 'deleteAccount', 400);
+    await expectMatchesSpec(await request(server).post('/api/account/delete').set(fresh).send({ password: 'wrong password' }), 'deleteAccount', 403);
+    const deleted = await request(server).post('/api/account/delete').set(fresh).send({ password: 'another-good-password' });
+    expect(deleted.status).toBe(204);
+    await expectMatchesSpec(await request(server).get('/api/account/export').set(fresh), 'exportAccount', 401);
+  });
+
   it('studio availability, settings and calendar', async () => {
     const server = app();
     const auth = { Authorization: `Bearer ${await studioToken()}` };

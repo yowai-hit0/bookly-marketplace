@@ -77,7 +77,9 @@ export function createApp(options: AppOptions = {}): Express {
   // Allowlisted to the web app's origin. No `credentials`: auth is a
   // bearer token in the Authorization header, not a cookie, so no request needs
   // the browser to attach credentials on its behalf (plan.md Task 7, rev 2.3).
-  app.use(cors({ origin: [corsOrigin] }));
+  // Content-Disposition exposed so the account export's download keeps the
+  // filename the API chose (`GET /api/account/export`).
+  app.use(cors({ origin: [corsOrigin], exposedHeaders: ['Content-Disposition'] }));
   // Before the JSON parser, which would otherwise consume a callback's body
   // before its signature could be checked against the bytes (plan.md Task 17).
   if (options.webhooks) app.use('/api/webhooks', paymentWebhooksRouter(options.webhooks));
@@ -92,6 +94,8 @@ export function createApp(options: AppOptions = {}): Express {
   const payments = rateLimit(limiters.paymentsPerIp, now);
   app.post('/api/checkout/:reference/:token/payments', payments);
   app.post('/api/booking/:token/payments', payments);
+  // The same session fee, paid from the client dashboard (Phase 8, R8.1).
+  app.post('/api/account/bookings/:reference/payments', payments);
   // A photographer paying for the subscription prompts a phone the same way (R5.2).
   app.post('/api/studio/subscription/payments', payments);
   app.post('/api/booking/:token/email', rateLimit(limiters.emailChangePerIp, now));
@@ -109,6 +113,15 @@ export function createApp(options: AppOptions = {}): Express {
   app.post('/api/account/auth/google/callback', rateLimit(limiters.googleCallbackPerIp, now, areaIpKey('account')));
   // Redirecting payouts is what a takeover aims for (R4.1).
   app.put('/api/studio/payout-method', rateLimit(limiters.payoutMethodPerIp, now, areaIpKey('studio')));
+  // The client dashboard's credential, privacy and erasure routes (Phase 8, R8.3).
+  const accountIp = areaIpKey('account');
+  const accountPassword = rateLimit(limiters.accountPasswordPerIp, now, accountIp);
+  app.post('/api/account/password', accountPassword);
+  app.post('/api/account/password/set', accountPassword);
+  app.post('/api/account/email', rateLimit(limiters.accountEmailChangePerIp, now, accountIp));
+  app.post('/api/account/email/confirm', rateLimit(limiters.accountEmailConfirmPerIp, now, accountIp));
+  app.post('/api/account/delete', rateLimit(limiters.accountDeletePerIp, now, accountIp));
+  app.get('/api/account/export', rateLimit(limiters.accountExportPerIp, now, accountIp));
 
   app.use('/api', healthRouter);
   if (options.publicApi) {
@@ -162,7 +175,22 @@ export function createApp(options: AppOptions = {}): Express {
       }),
     );
     app.use('/api/platform', platformRouter(options.auth));
-    app.use('/api/account', accountRouter({ ...options.auth, ...(options.google === undefined ? {} : { google: options.google }) }));
+    // The dashboard pays session fees through the same routing as the guest page,
+    // and signs a live hold's "finish payment" link with the checkout's secret.
+    const checkout = options.publicApi?.payments;
+    app.use(
+      '/api/account',
+      accountRouter({
+        ...options.auth,
+        ...(options.google === undefined ? {} : { google: options.google }),
+        ...(checkout === undefined
+          ? {}
+          : {
+              payments: { routing: checkout.routing, ...(checkout.providerTimeoutMs === undefined ? {} : { providerTimeoutMs: checkout.providerTimeoutMs }) },
+              checkoutSecret: checkout.secret,
+            }),
+      }),
+    );
   }
 
   app.use((_req, res) => {

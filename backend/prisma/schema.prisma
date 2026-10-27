@@ -40,8 +40,8 @@ model AppUser {
   fullName               String?   @map("full_name")
   /// Argon2id. Never logged, never serialised by any endpoint. Nullable BECAUSE a
   /// Google-only client has none (R2.4); CHECK app_user_has_credential keeps at
-  /// least one of this and google_sub.
-  passwordHash           String?   @map("password_hash")
+  /// least one of this and google_sub, except on an erased row (Phase 8).
+  passwordHash          String?   @map("password_hash")
   /// Google's stable subject id. Clients only (CHECK app_user_google_client_only);
   /// partial unique WHERE NOT NULL.
   googleSub              String?   @map("google_sub")
@@ -67,6 +67,15 @@ model AppUser {
   /// a Google-only client, who has no password to change, needs (Phase 2,
   /// decision 2). CHECK app_user_token_version_non_negative.
   tokenVersion           Int       @default(0) @map("token_version")
+  /// A client's own phone, E.164 (Phase 8 decision 1; CHECK app_user_phone_e164).
+  /// Prefills the booking form; a booking keeps its own contact snapshot.
+  phone                  String?
+  /// An address change waiting on a click from the new inbox (R8.3). All three
+  /// or none (CHECK app_user_pending_email_complete); the hash is SHA-256 of a
+  /// 256-bit token, partial unique WHERE NOT NULL.
+  pendingEmail           String?   @map("pending_email")
+  pendingEmailTokenHash  String?   @map("pending_email_token_hash")
+  pendingEmailExpiresAt  DateTime? @map("pending_email_expires_at") @db.Timestamptz(6)
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -951,6 +960,9 @@ model Outbox {
   /// Email provider's id, for tracing a bounce.
   providerMessageId String?   @map("provider_message_id")
   completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+  /// Erase recipient and payload when the worker reaches `done` or `failed`
+  /// (Phase 8: the account-deletion notice). CHECK outbox_erase_on_completion_email_only.
+  eraseOnCompletion Boolean   @default(false) @map("erase_on_completion")
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   booking      Booking?      @relation(fields: [bookingId], references: [id], onDelete: Restrict)

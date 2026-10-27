@@ -1,0 +1,490 @@
+# The client dashboard (marketplace-spec.md Phase 8: R8.1-R8.4): a signed-in
+# client's bookings across photographers, their payments and receipts, their
+# profile, and their privacy (export, deletion).
+
+schemas:
+  AccountPhotographer:
+    type: object
+    description: Whose booking it is, as the public profile names them (`/p/{handle}`).
+    required: [handle, displayName]
+    additionalProperties: false
+    properties:
+      handle: { type: string, examples: [kigali-lens] }
+      displayName: { type: string }
+
+  AccountBookingRow:
+    type: object
+    required: [reference, photographer, serviceName, packageName, startsAt, endsAt, status, stage, amounts, holdExpiresAt, checkoutPath]
+    additionalProperties: false
+    properties:
+      reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+      photographer: { $ref: '#/schemas/AccountPhotographer' }
+      serviceName: { type: string }
+      packageName: { type: string }
+      startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+      status: { $ref: 'common.yaml#/schemas/BookingStatus' }
+      stage:
+        $ref: 'common.yaml#/schemas/BookingStage'
+        description: Never `needs_review` for a client.
+      amounts:
+        type: object
+        description: From `bookingTotals()`, the guest page's helper.
+        required: [totalRwf, paidRwf, dueRwf, refundDueRwf]
+        additionalProperties: false
+        properties:
+          totalRwf: { $ref: 'common.yaml#/schemas/Rwf', description: The grand total (package, every add-on). }
+          paidRwf: { $ref: 'common.yaml#/schemas/Rwf', description: What has been collected. }
+          dueRwf: { $ref: 'common.yaml#/schemas/Rwf', description: Still to pay; nought once the booking no longer stands. }
+          refundDueRwf: { $ref: 'common.yaml#/schemas/Rwf', description: Owed back and not yet sent. }
+      holdExpiresAt:
+        type: [string, 'null']
+        format: date-time
+        description: A `pending_payment` booking's live hold; null otherwise.
+      checkoutPath:
+        type: [string, 'null']
+        description: |
+          The web app's checkout page for a live hold, `/checkout/{reference}/{token}`
+          ("finish payment"); null once the hold lapses, for any other status, and
+          when payments are off.
+        examples: [/checkout/BKY-2610-7MAR5/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJeXXXXXXXXXXX]
+
+  AccountBookingsPage:
+    type: object
+    required: [scope, bookings, total, page, pageSize, pageCount]
+    additionalProperties: false
+    properties:
+      scope: { type: string, enum: [upcoming, past] }
+      bookings:
+        type: array
+        items: { $ref: '#/schemas/AccountBookingRow' }
+      total: { type: integer, minimum: 0, description: Every booking in the scope, across pages. }
+      page: { type: integer, minimum: 1, description: The page answered; the last one when the one asked for is past the end. }
+      pageSize: { type: integer, const: 20 }
+      pageCount: { type: integer, minimum: 1 }
+
+  AccountPhotographerContact:
+    type: object
+    description: "Who the photographer is and how to reach them (R8.1): the public profile's contact details."
+    required: [handle, displayName, contactPhone, whatsappPhone, email]
+    additionalProperties: false
+    properties:
+      handle: { type: string }
+      displayName: { type: string }
+      contactPhone: { type: [string, 'null'], description: E.164. }
+      whatsappPhone: { type: [string, 'null'], description: E.164. }
+      email: { type: [string, 'null'], format: email, description: The public contact address they chose, never their login. }
+
+  AccountBookingDetail:
+    type: object
+    description: |
+      The dashboard's booking page: `booking` is exactly the guest page's view
+      (`GET /api/booking/{token}`), so the same components render it.
+    required: [booking, photographer, checkoutPath, holdExpiresAt]
+    additionalProperties: false
+    properties:
+      booking: { $ref: 'booking.yaml#/schemas/ClientBooking' }
+      photographer: { $ref: '#/schemas/AccountPhotographerContact' }
+      checkoutPath:
+        type: [string, 'null']
+        description: A live hold's checkout page, as in the list.
+      holdExpiresAt:
+        type: [string, 'null']
+        format: date-time
+        description: When that live hold ends; null whenever `checkoutPath` is.
+
+  AccountBookingConflict:
+    type: object
+    description: The refusal, with the booking page as it now stands.
+    required: [error, booking, photographer, checkoutPath, holdExpiresAt]
+    additionalProperties: false
+    properties:
+      error: { type: string, enum: [not_cancellable, nothing_to_pay] }
+      booking: { $ref: 'booking.yaml#/schemas/ClientBooking' }
+      photographer: { $ref: '#/schemas/AccountPhotographerContact' }
+      checkoutPath: { type: [string, 'null'] }
+      holdExpiresAt: { type: [string, 'null'], format: date-time }
+
+  PaidWith:
+    type: [string, 'null']
+    description: The client's method, `cash` for money the photographer recorded by hand, or null when none was recorded.
+    enum: [momo_mtn, momo_airtel, card, cash, null]
+
+  RefundState:
+    description: Whether this payment is owed back (`due`) or was sent back (`refunded`, with the transfer's reference).
+    oneOf:
+      - type: object
+        required: [state]
+        additionalProperties: false
+        properties:
+          state: { const: none }
+      - type: object
+        required: [state, amountRwf]
+        additionalProperties: false
+        properties:
+          state: { const: due }
+          amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      - type: object
+        required: [state, amountRwf, refundedAt, reference]
+        additionalProperties: false
+        properties:
+          state: { const: refunded }
+          amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          refundedAt: { type: [string, 'null'], format: date-time }
+          reference: { type: [string, 'null'] }
+
+  Overpayment:
+    description: The part paid above what was asked, which the platform sends back; null when exactly what was asked was paid.
+    oneOf:
+      - type: 'null'
+      - type: object
+        required: [amountRwf, refundedAt, reference]
+        additionalProperties: false
+        properties:
+          amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          refundedAt: { type: [string, 'null'], format: date-time }
+          reference: { type: [string, 'null'] }
+
+  AccountPaymentRow:
+    type: object
+    required: [ourRef, kind, method, amountRwf, status, failure, createdAt, settledAt, refund, overpayment, hasReceipt, booking]
+    additionalProperties: false
+    properties:
+      ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { $ref: 'common.yaml#/schemas/PaymentKind' }
+      method: { $ref: '#/schemas/PaidWith' }
+      amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      status:
+        type: string
+        description: Every status but `initiated` in the list; any status in the export.
+        enum: [initiated, pending, succeeded, failed, refund_due, refunded]
+      failure:
+        type: [string, 'null']
+        enum: [declined, unavailable, null]
+        description: Why a failed payment failed, in the public words; null otherwise.
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      settledAt: { type: [string, 'null'], format: date-time }
+      refund: { $ref: '#/schemas/RefundState' }
+      overpayment: { $ref: '#/schemas/Overpayment' }
+      hasReceipt:
+        type: boolean
+        description: True for `succeeded`, `refund_due` and `refunded`, the payments `GET /api/account/payments/{ourRef}` answers.
+      booking:
+        type: object
+        required: [reference, startsAt, serviceName, packageName, photographer]
+        additionalProperties: false
+        properties:
+          reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+          startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          serviceName: { type: string }
+          packageName: { type: string }
+          photographer: { $ref: '#/schemas/AccountPhotographer' }
+
+  AccountPaymentsPage:
+    type: object
+    required: [payments, total, page, pageSize, pageCount]
+    additionalProperties: false
+    properties:
+      payments:
+        type: array
+        items: { $ref: '#/schemas/AccountPaymentRow' }
+      total: { type: integer, minimum: 0 }
+      page: { type: integer, minimum: 1 }
+      pageSize: { type: integer, const: 20 }
+      pageCount: { type: integer, minimum: 1 }
+
+  Receipt:
+    type: object
+    description: What the printable receipt page shows (R8.2). A refunded payment's receipt says so in `refund`.
+    required: [ourRef, kind, method, amountRwf, status, createdAt, settledAt, refund, overpayment, billedTo, photographer, booking]
+    additionalProperties: false
+    properties:
+      ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+      kind: { $ref: 'common.yaml#/schemas/PaymentKind' }
+      method: { $ref: '#/schemas/PaidWith' }
+      amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      status: { type: string, enum: [succeeded, refund_due, refunded] }
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      settledAt: { type: [string, 'null'], format: date-time }
+      refund: { $ref: '#/schemas/RefundState' }
+      overpayment: { $ref: '#/schemas/Overpayment' }
+      billedTo: { type: string, description: The name on the booking, as it was booked. }
+      photographer: { $ref: '#/schemas/AccountPhotographer' }
+      booking:
+        type: object
+        required: [reference, startsAt, endsAt, serviceName, packageName, packagePriceRwf, bookingFeeRwf, addons]
+        additionalProperties: false
+        properties:
+          reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+          startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+          serviceName: { type: string }
+          packageName: { type: string }
+          packagePriceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          bookingFeeRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          addons:
+            type: array
+            items:
+              type: object
+              required: [name, quantity, unitPriceRwf, amountRwf, stage]
+              additionalProperties: false
+              properties:
+                name: { type: string }
+                quantity: { type: integer, minimum: 1 }
+                unitPriceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+                amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+                stage: { type: string, enum: [at_booking, post_shoot] }
+
+  ReceiptEnvelope:
+    type: object
+    required: [receipt]
+    additionalProperties: false
+    properties:
+      receipt: { $ref: '#/schemas/Receipt' }
+
+  NoReceipt:
+    type: object
+    description: The account's own payment, which took no money (yet), so it has no receipt.
+    required: [error, payment]
+    additionalProperties: false
+    properties:
+      error: { const: no_receipt }
+      payment:
+        type: object
+        required: [status]
+        additionalProperties: false
+        properties:
+          status: { type: string, enum: [initiated, pending, failed] }
+
+  AccountProfile:
+    type: object
+    required: [fullName, phone]
+    additionalProperties: false
+    properties:
+      fullName: { type: [string, 'null'] }
+      phone: { type: [string, 'null'], pattern: '^\+[1-9]\d{6,14}$', description: E.164. }
+
+  AccountProfileEnvelope:
+    type: object
+    required: [profile]
+    additionalProperties: false
+    properties:
+      profile: { $ref: '#/schemas/AccountProfile' }
+
+  AccountProfileUpdate:
+    type: object
+    additionalProperties: false
+    description: Any subset; an absent key is left as it is. Text is trimmed; lengths count characters as the database does.
+    properties:
+      fullName:
+        type: string
+        description: 1-200 characters (blank is a 422; null a 400).
+      phone:
+        type: [string, 'null']
+        maxLength: 40
+        description: |
+          Stored E.164: a Rwandan local `078 123 4567` or `250…` becomes `+250…`;
+          any other number needs its `+`. Not a phone number is a 422. `null` or
+          a blank string clears it. Never changes a booking already made: each
+          keeps its own contact snapshot.
+
+  PasswordChangeRequest:
+    type: object
+    required: [currentPassword, newPassword]
+    additionalProperties: false
+    properties:
+      currentPassword: { type: string, minLength: 1, maxLength: 1024 }
+      newPassword: { type: string, minLength: 12, maxLength: 1024 }
+
+  PasswordSetRequest:
+    type: object
+    required: [newPassword]
+    additionalProperties: false
+    properties:
+      newPassword: { type: string, minLength: 12, maxLength: 1024 }
+
+  EmailChangeRequest:
+    type: object
+    required: [newEmail, password]
+    additionalProperties: false
+    properties:
+      newEmail: { type: string, format: email, maxLength: 320 }
+      password: { type: string, minLength: 1, maxLength: 1024 }
+
+  EmailChangeConfirm:
+    type: object
+    required: [token, password]
+    properties:
+      token:
+        type: string
+        description: From the link's path, `/account/email-confirm/{token}`.
+      password: { type: string, minLength: 1, maxLength: 1024 }
+
+  DeleteAccountRequest:
+    description: |
+      `{ password }` for an account with a password; `{ confirmEmail }`, the
+      account's address typed again, for a Google-only account (`hasPassword`
+      false in `/me`). Both, neither or another key is a 400.
+    oneOf:
+      - type: object
+        required: [password]
+        additionalProperties: false
+        properties:
+          password: { type: string, minLength: 1, maxLength: 1024 }
+      - type: object
+        required: [confirmEmail]
+        additionalProperties: false
+        properties:
+          confirmEmail: { type: string, minLength: 1, maxLength: 320 }
+
+  AccountExport:
+    type: object
+    description: |
+      Everything the account holds, and nothing else (T8.4). No hash, token,
+      Google subject, lockout state or row id; no photographer's private note
+      (a cash payment's), provider reference or failure text; no deleted note.
+    required: [format, version, exportedAt, account, contacts, bookings, payments]
+    additionalProperties: false
+    properties:
+      format: { const: bookly-account-export }
+      version: { const: 1 }
+      exportedAt: { $ref: 'common.yaml#/schemas/Instant' }
+      account:
+        type: object
+        required: [email, fullName, phone, emailVerifiedAt, createdAt, lastLoginAt, hasPassword, hasGoogle, pendingEmail]
+        additionalProperties: false
+        properties:
+          email: { type: string, format: email }
+          fullName: { type: [string, 'null'] }
+          phone: { type: [string, 'null'] }
+          emailVerifiedAt: { type: [string, 'null'], format: date-time }
+          createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+          lastLoginAt: { type: [string, 'null'], format: date-time }
+          hasPassword: { type: boolean }
+          hasGoogle: { type: boolean }
+          pendingEmail: { type: [string, 'null'], format: email }
+      contacts:
+        type: array
+        description: The contact records the bookings were made under, one per address, as they now stand.
+        items:
+          type: object
+          required: [fullName, email, phone]
+          additionalProperties: false
+          properties:
+            fullName: { type: string }
+            email: { type: string }
+            phone: { type: [string, 'null'] }
+      bookings:
+        type: array
+        items:
+          type: object
+          required: [reference, photographer, status, createdAt, startsAt, endsAt, contact, serviceName, packageName, packagePriceRwf, packagePhotoCount, packageDurationMinutes, locationText, partySize, specialRequests, consentAt, bookingFeeRwf, addons, totals, cancellation, confirmedAt, completedAt, cancelledAt, cancellationReason, rescheduledAt, originalStartsAt, delivery, notes]
+          additionalProperties: false
+          properties:
+            reference: { $ref: 'common.yaml#/schemas/BookingReference' }
+            photographer: { $ref: '#/schemas/AccountPhotographer' }
+            status: { $ref: 'common.yaml#/schemas/BookingStatus' }
+            createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+            startsAt: { $ref: 'common.yaml#/schemas/Instant' }
+            endsAt: { $ref: 'common.yaml#/schemas/Instant' }
+            contact:
+              type: object
+              description: The booking's own contact snapshot, as it was booked.
+              required: [name, email, phone]
+              additionalProperties: false
+              properties:
+                name: { type: string }
+                email: { type: string }
+                phone: { type: string }
+            serviceName: { type: string }
+            packageName: { type: string }
+            packagePriceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+            packagePhotoCount: { type: integer }
+            packageDurationMinutes: { type: integer }
+            locationText: { type: string }
+            partySize: { type: [integer, 'null'] }
+            specialRequests: { type: [string, 'null'] }
+            consentAt: { $ref: 'common.yaml#/schemas/Instant' }
+            bookingFeeRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+            addons:
+              type: array
+              items:
+                type: object
+                required: [name, quantity, unitPriceRwf, amountRwf, stage, addedAt]
+                additionalProperties: false
+                properties:
+                  name: { type: string }
+                  quantity: { type: integer }
+                  unitPriceRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+                  amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+                  stage: { type: string, enum: [at_booking, post_shoot] }
+                  addedAt: { $ref: 'common.yaml#/schemas/Instant' }
+            totals: { $ref: 'booking.yaml#/schemas/Totals' }
+            cancellation:
+              type: object
+              required: [deadline, bookingFeeRefundable]
+              additionalProperties: false
+              properties:
+                deadline: { $ref: 'common.yaml#/schemas/Instant' }
+                bookingFeeRefundable: { type: boolean }
+            confirmedAt: { type: [string, 'null'], format: date-time }
+            completedAt: { type: [string, 'null'], format: date-time }
+            cancelledAt: { type: [string, 'null'], format: date-time }
+            cancellationReason: { type: [string, 'null'] }
+            rescheduledAt: { type: [string, 'null'], format: date-time }
+            originalStartsAt: { type: [string, 'null'], format: date-time }
+            delivery:
+              description: Once the photos were sent; `url` is null after the link expires.
+              oneOf:
+                - type: 'null'
+                - type: object
+                  required: [url, expiresOn, expired, sentAt, note]
+                  additionalProperties: false
+                  properties:
+                    url: { type: [string, 'null'], format: uri }
+                    expiresOn: { type: [string, 'null'], format: date }
+                    expired: { type: boolean }
+                    sentAt: { $ref: 'common.yaml#/schemas/Instant' }
+                    note: { type: [string, 'null'] }
+            notes:
+              type: array
+              description: The photographer's notes to the client that are still shown on the booking page.
+              items:
+                type: object
+                required: [body, createdAt]
+                additionalProperties: false
+                properties:
+                  body: { type: string }
+                  createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      payments:
+        type: array
+        description: Every payment on the account's bookings, every status, newest first.
+        items: { $ref: '#/schemas/AccountPaymentRow' }
+
+responses:
+  WrongPassword:
+    description: |
+      The password was wrong (`invalid_password`, counted toward the login
+      lockout) or the account is locked by failed attempts (`password_locked`,
+      nothing checked).
+    content:
+      application/json:
+        schema: { $ref: 'common.yaml#/schemas/Error' }
+        examples:
+          invalid_password: { value: { error: invalid_password } }
+          password_locked: { value: { error: password_locked } }
+
+parameters:
+  BookingScope:
+    name: scope
+    in: query
+    required: false
+    description: "`upcoming` (the default): confirmed with the shoot not over, and live holds, soonest first. `past`: completed, no-show, cancelled, and confirmed whose shoot is over, latest first. An expired hold is in neither."
+    schema: { type: string, enum: [upcoming, past], default: upcoming }
+
+  Page:
+    name: page
+    in: query
+    required: false
+    description: 1-based; past the last page, the last page is answered.
+    schema: { type: integer, minimum: 1, maximum: 1000000 }

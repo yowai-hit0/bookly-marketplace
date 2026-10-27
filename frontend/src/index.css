@@ -957,3 +957,64 @@
         min-height: 2.75rem;
     }
 }
+
+/* The printable receipt (Phase 8, R8.2; design-system/bookly/pages/
+   account-payments.md, "Print"). Only while a receipt is on the page
+   (`[data-receipt]`): the client shell's header and footer, the account nav
+   and the skip link go (the page hides its own controls with `print:hidden`),
+   the tokens become black on white in either theme, tints become white, and
+   the page margins keep the receipt on one A4 or Letter sheet. */
+@media print {
+    @page {
+        margin: 14mm;
+    }
+
+    :root:has([data-receipt]) {
+        color-scheme: light;
+        --background: #fff;
+        --foreground: #000;
+        --card: #fff;
+        --popover: #fff;
+        --muted: #fff;
+        --muted-foreground: #333;
+        --subtle-foreground: #222;
+        --border: #999;
+        --input: #999;
+        --primary: #000;
+        --primary-foreground: #fff;
+        --destructive: #000;
+        --console-link: #000;
+        --console-link-hover: #000;
+        --console-accent: #fff;
+        --console-info-foreground: #000;
+        --console-info-icon: #000;
+        --console-success: #000;
+        --console-success-tint: #fff;
+        --console-warning: #000;
+        --console-warning-tint: #fff;
+        --console-danger-tint: #fff;
+    }
+
+    :root:has([data-receipt]) body {
+        background: #fff;
+        color: #000;
+    }
+
+    :root:has([data-receipt]) :is(header, footer, [data-account-nav], [data-slot="skip-link"]) {
+        display: none !important;
+    }
+
+    :root:has([data-receipt]) #main-content > main {
+        padding: 0;
+        max-width: none;
+    }
+
+    [data-receipt] {
+        break-inside: avoid;
+        font-size: 11pt;
+    }
+
+    [data-receipt] :is(section, dl, table, tr) {
+        break-inside: avoid;
+    }
+}

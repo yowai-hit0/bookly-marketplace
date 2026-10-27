@@ -202,6 +202,8 @@ describe('the constraints Prisma cannot see', () => {
     'app_user_google_sub_unique',
     'app_user_password_reset_token_hash_unique',
     'app_user_email_verify_token_hash_unique',
+    // Phase 8: an account's address change (migration 20261027120000_account_dashboard).
+    'app_user_pending_email_token_hash_unique',
   ])('still has partial unique index %s, by name', async (indexName) => {
     const result = await db.query<{ indexdef: string }>(
       `SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1`,
@@ -1303,6 +1305,46 @@ describe('app_user CHECKs', () => {
     const expires = new Date();
     expect(await insertUser({ role: 'client', password_hash: 'x', password_reset_token_hash: 'same', password_reset_expires_at: expires })).toBeUndefined();
     expect(await insertUser({ role: 'client', password_hash: 'x', password_reset_token_hash: 'same', password_reset_expires_at: expires })).toBe('23505');
+  });
+
+  // --- Phase 8 (migration 20261027120000_account_dashboard) ---------------------------
+
+  it.each(['+250788123456', '+12025550123', '+4930123456'])('accepts the E.164 phone %s (decision 1)', async (phone) => {
+    expect(await insertUser({ role: 'client', password_hash: 'x', phone })).toBeUndefined();
+  });
+
+  it.each(['0788123456', '250788123456', '+0788123456', '+25078812345678901', '+25', '+250 788 123 456', ''])(
+    'refuses the phone %j: only E.164 is stored',
+    async (phone) => {
+      expect(await insertUser({ role: 'client', password_hash: 'x', phone })).toBe('23514');
+    },
+  );
+
+  it('refuses a pending address change without all three of its address, hash and expiry', async () => {
+    const at = new Date();
+    for (const partial of [
+      { pending_email: 'new@example.com' },
+      { pending_email_token_hash: 'p1' },
+      { pending_email_expires_at: at },
+      { pending_email: 'new@example.com', pending_email_token_hash: 'p2' },
+      { pending_email: 'new@example.com', pending_email_expires_at: at },
+      { pending_email_token_hash: 'p3', pending_email_expires_at: at },
+    ]) {
+      expect(await insertUser({ role: 'client', password_hash: 'x', ...partial }), JSON.stringify(Object.keys(partial))).toBe('23514');
+    }
+    expect(await insertUser({ role: 'client', password_hash: 'x', pending_email: 'new@example.com', pending_email_token_hash: 'p4', pending_email_expires_at: at })).toBeUndefined();
+  });
+
+  it('lets a pending address change token address one login only', async () => {
+    const pending = { pending_email: 'new@example.com', pending_email_token_hash: 'same-pending', pending_email_expires_at: new Date() };
+    expect(await insertUser({ role: 'client', password_hash: 'x', ...pending })).toBeUndefined();
+    expect(await insertUser({ role: 'client', password_hash: 'x', ...pending, pending_email: 'other@example.com' })).toBe('23505');
+  });
+
+  it('admits an ERASED login with no credential, and still refuses a live one (R8.3)', async () => {
+    expect(await insertUser({ role: 'client', anonymized_at: new Date() })).toBeUndefined();
+    expect(await insertUser({ role: 'client' })).toBe('23514');
+    expect(await insertUser({ role: 'client', disabled_at: new Date() })).toBe('23514');
   });
 });
 

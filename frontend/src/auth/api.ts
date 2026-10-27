@@ -43,22 +43,32 @@ export function apiUrl(path: string): string {
  * dropped rather than retried; the other areas' sessions are left alone.
  */
 export async function apiFetch<T>(area: Area, path: string, init: RequestInit = {}): Promise<T> {
+  const res = await apiResponse(area, path, init)
+  if (!res.ok) throw await apiError(res)
+  // A delete answers 204 with no body to parse.
+  if (res.status === 204) return undefined as T
+  return (await res.json()) as T
+}
+
+/**
+ * `apiFetch`'s request without reading the answer: the token, the `Accept`
+ * header and the 401 rule are the same, and the caller gets the response, for
+ * an answer that is not JSON (a download) or whose refusals it reads itself.
+ */
+export async function apiResponse(area: Area, path: string, init: RequestInit = {}): Promise<Response> {
   const session = readSession(area)
   if (session === null) throw new UnauthenticatedError()
 
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${session.token}`)
-  headers.set('Accept', 'application/json')
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json')
 
   const res = await fetch(apiUrl(path), { ...init, headers })
   if (res.status === 401) {
     clearSession(area)
     throw new UnauthenticatedError()
   }
-  if (!res.ok) throw await apiError(res)
-  // A delete answers 204 with no body to parse.
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+  return res
 }
 
 /**

@@ -117,7 +117,7 @@
     },
     {
       "name": "Account",
-      "description": "A client's own account."
+      "description": "A client's own account and dashboard (Phase 8): bookings across photographers, payments and receipts, profile, password, address, export and deletion."
     },
     {
       "name": "Webhooks",
@@ -5592,6 +5592,7 @@
           "Account"
         ],
         "summary": "The signed-in client",
+        "description": "The account as the dashboard needs it (Phase 8): the name and phone,\nwhich credentials it holds (`hasPassword`, `hasGoogle`; never what they\nare), and an address change still waiting on its link (`pendingEmail`).\n`Cache-Control: no-store`.\n",
         "security": [
           {
             "accountBearer": []
@@ -5610,6 +5611,778 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/account/email/confirm": {
+      "post": {
+        "operationId": "confirmAccountEmailChange",
+        "tags": [
+          "Account auth"
+        ],
+        "summary": "Confirm a change of my email address",
+        "description": "Posted by the page the link opens (opening it changes nothing). Needs no\nsession -- the link opens in a new tab -- but the token AND the\naccount's password: the token proves the new inbox, the password the\nperson. Either wrong, or the link lapsed, replaced or used, is one\nanswer, `400 invalid_confirmation`; a wrong password counts toward the\nlockout.\n\nOn success the account's address is the new one, verified now; bookings\nalready linked stay linked, and the unclaimed bookings made under the\nnew address are linked too (decision 3). The old address is told, with\nthe new one masked. Google sign-in keeps working. The answer is a\nlogin's. `409 email_taken`: another account took the address since the\nrequest; the pending change is withdrawn.\n",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeConfirm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed and signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed body (`invalid_request`), or a refused confirmation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_request": {
+                    "value": {
+                      "error": "invalid_request"
+                    }
+                  },
+                  "invalid_confirmation": {
+                    "value": {
+                      "error": "invalid_confirmation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The address now belongs to another account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "email_taken"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/bookings": {
+      "get": {
+        "operationId": "listAccountBookings",
+        "tags": [
+          "Account"
+        ],
+        "summary": "My bookings, across photographers",
+        "description": "Every booking made under an address the account has proven (R8.1, R8.4),\nwhichever photographer it is with: a guest booking made later with the\naccount's verified address appears here by itself.\n\n`upcoming`: `confirmed` with the shoot not yet over (in progress\nincluded), and a `pending_payment` hold while it is live, with\n`checkoutPath` to finish paying it. Soonest first. `past`: `completed`,\n`no_show`, every cancellation, and `confirmed` whose shoot is over.\nLatest first. An expired hold is in neither list (it never became a\nbooking); its reference still opens its page. Pages of 20.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BookingScope"
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBookingsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "A page below 1 or above 1,000,000.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/bookings/{reference}": {
+      "get": {
+        "operationId": "getAccountBooking",
+        "tags": [
+          "Account"
+        ],
+        "summary": "One of my bookings",
+        "description": "The guest booking page's view, authorised by the session instead of the access token, with the photographer's contact details.",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Reference"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The booking page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBookingDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/account/bookings/{reference}/cancel": {
+      "post": {
+        "operationId": "cancelAccountBooking",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Cancel one of my bookings",
+        "description": "The guest page's cancellation (R1.8, T8.2): a `confirmed` booking before\nthe cut-off its photographer set when it was made. The booking fee is\nrefunded only where that policy says so; a session fee already paid is\nalways owed back. Both emails go as from the guest page.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Reference"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled; the booking page as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBookingDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Already cancelled, past the cut-off, or never confirmed. Nothing changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBookingConflict"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/bookings/{reference}/payments": {
+      "post": {
+        "operationId": "payAccountBookingSessionFee",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Pay the session fee of one of my bookings",
+        "description": "The guest page's session-fee payment, with the same safety: the amount\nis computed on the server, one attempt at a time, and the provider is the\none the method routes to (R3.1). Only mounted when payments are\nconfigured. Shares the guest payment's rate limit.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Reference"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The phone is being prompted. Poll `GET /api/payments/{ourRef}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentStarted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Nothing owed (`nothing_to_pay`, with the booking page), or an attempt already waiting (`payment_in_progress`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountBookingConflict"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PaymentInProgress"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A method not on offer, or an unusable phone number.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "The provider refused the request or could not be reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentNotStarted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/payments": {
+      "get": {
+        "operationId": "listAccountPayments",
+        "tags": [
+          "Account"
+        ],
+        "summary": "My payments",
+        "description": "Every payment on my bookings that moved money or tried to (R8.2):\npending, succeeded, failed, owed back or refunded, newest first, with its\nrefund and any overpayment. Not an `initiated` row: a request the\nphotographer made that nobody has paid yet (the booking page asks for it),\nor a provider call in its first seconds. Pages of 20.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountPaymentsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "description": "A page below 1 or above 1,000,000.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/payments/{ourRef}": {
+      "get": {
+        "operationId": "getAccountReceipt",
+        "tags": [
+          "Account"
+        ],
+        "summary": "The receipt of one of my payments",
+        "description": "What the printable receipt page shows (R8.2). Only a payment that took\nmoney has one: `succeeded`, `refund_due`, `refunded`. Another of my\npayments is `409 no_receipt`; a payment that is not mine, or a malformed\n`ourRef`, is `404`.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OurRef"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "My payment, which took no money (yet).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/profile": {
+      "get": {
+        "operationId": "getAccountProfile",
+        "tags": [
+          "Account"
+        ],
+        "summary": "My name and phone",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfileEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateAccountProfile",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Edit my name and phone",
+        "description": "Bookings already made keep their own contact details (decision 1).",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfileEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          }
+        }
+      }
+    },
+    "/api/account/password": {
+      "post": {
+        "operationId": "changeAccountPassword",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Change my password",
+        "description": "For an account with a password. The current one is checked with the\nlogin's lockout. On success every other session is signed out (the\ntoken fingerprint covers the password), a pending reset link dies, an\n`account_security_alert` (`password_changed`) is emailed, and the answer\nis a login's, with a fresh token for this session.\n\n- `409 no_password`: a Google-only account; use `/password/set`.\n- `409 credentials_changed`: the credentials changed between the check and the save; nothing was saved.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed; a fresh token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/WrongPassword"
+          },
+          "409": {
+            "description": "No password to change, or the credentials changed meanwhile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "no_password": {
+                    "value": {
+                      "error": "no_password"
+                    }
+                  },
+                  "credentials_changed": {
+                    "value": {
+                      "error": "credentials_changed"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/password/set": {
+      "post": {
+        "operationId": "setAccountPassword",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Add a password to my Google account",
+        "description": "For a Google-only account (decision 2); afterwards it signs in either\nway. There is no old password to check: the session is the proof, and\nan `account_security_alert` (`password_changed`, `added`) tells the\ninbox. Every other session is signed out; the answer is a login's, with\na fresh token for this one. `409 password_exists` for an account that\nhas a password (change it instead).\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordSetRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Added; a fresh token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The account already has a password.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "password_exists"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/email": {
+      "post": {
+        "operationId": "requestAccountEmailChange",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Change my email address",
+        "description": "Confirmed with the password. Stores the new address as pending (`/me`\nshows it) and emails it a link to `/account/email-confirm/{token}`,\nvalid 24 hours; a new request replaces the old one. Nothing changes until\nthe link's page posts it with the password (`POST /api/account/email/confirm`).\n\nThe answer is `202` whether or not the new address already has an\naccount; if it has one, no link is sent and the change cannot complete.\n\n- `409 password_required`: a Google-only account cannot change its\n  address (decision 2); add a password first.\n- `422 validation_failed` `['newEmail']`: it is already the account's address.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Asked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/WrongPassword"
+          },
+          "409": {
+            "description": "A Google-only account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "password_required"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/export": {
+      "get": {
+        "operationId": "exportAccount",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Export my data",
+        "description": "Everything the account holds as one JSON document, sent as an\nattachment (`Content-Disposition: attachment; filename=\"bookly-account-YYYY-MM-DD.json\"`):\nthe account, its contact records, its bookings and their payments\n(R8.3, T8.4). Rate-limited.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The export.",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/account/delete": {
+      "post": {
+        "operationId": "deleteAccount",
+        "tags": [
+          "Account"
+        ],
+        "summary": "Delete my account",
+        "description": "Confirmed with the password, or, for a Google-only account, by typing\nits address. The account is anonymised: its address becomes a dead one,\nits name, phone and both credentials are erased, and every token stops\nworking. The bookings stay for the photographers' records (Rwanda law\n058/2021), linked to no account; upcoming ones carry on through the\nlinks already emailed to them (decision 4). A later Google sign-in makes\na new account, and so does a later signup with the address, which links\nthe unclaimed bookings once verified, like any signup.\n\nThe account's own mail (verification, reset and security emails) is\nerased from the outbox, and one `account_security_alert`\n(`account_deleted`) is sent to the erased address; that row erases the\naddress itself once it has been delivered or given up on. Booking\nemails are left as they are.\n\n- `403 invalid_password` / `password_locked`: an account with a password.\n- `403 invalid_confirmation`: a Google-only account whose typed address was missing or not its own.\n",
+        "security": [
+          {
+            "accountBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted. Discard the token."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The confirmation was wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "invalid_password": {
+                    "value": {
+                      "error": "invalid_password"
+                    }
+                  },
+                  "password_locked": {
+                    "value": {
+                      "error": "password_locked"
+                    }
+                  },
+                  "invalid_confirmation": {
+                    "value": {
+                      "error": "invalid_confirmation"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
@@ -5811,7 +6584,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "HS256 JWT from `POST /api/account/auth/login`, `/verify` or\n`/google/callback`, audience `bookly-account`, valid 7 days. Revoked\nlike the studio's (a Google-only client by a token revocation or by\nadding a password); refused outside the account area.\n"
+        "description": "HS256 JWT from `POST /api/account/auth/login`, `/verify`,\n`/google/callback`, `/api/account/email/confirm`, or a password change\nor addition (`/api/account/password`, `/password/set`, which answer a\nfresh one), audience `bookly-account`, valid 7 days. Revoked like the\nstudio's (a Google-only client by a token revocation or by adding a\npassword; every client by deleting the account); refused outside the\naccount area.\n"
       }
     },
     "schemas": {
@@ -11809,12 +12582,16 @@
       },
       "AccountUser": {
         "type": "object",
-        "description": "A client's own view of their account. Still an allowlist.",
+        "description": "A client's own view of their account. Still an allowlist: which\ncredentials the account holds, never what they are (Phase 8).\n",
         "required": [
           "id",
           "email",
           "lastLoginAt",
-          "fullName"
+          "fullName",
+          "phone",
+          "hasPassword",
+          "hasGoogle",
+          "pendingEmail"
         ],
         "additionalProperties": false,
         "properties": {
@@ -11837,6 +12614,30 @@
               "string",
               "null"
             ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+[1-9]\\d{6,14}$",
+            "description": "The client's own number, E.164. Prefills the booking form; never changes a booking already made."
+          },
+          "hasPassword": {
+            "type": "boolean",
+            "description": "False for a Google-only account, which may add one (`POST /api/account/password/set`), cannot change its address, and confirms deletion by typing its address."
+          },
+          "hasGoogle": {
+            "type": "boolean",
+            "description": "Whether the account signs in with Google."
+          },
+          "pendingEmail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email",
+            "description": "An address change waiting on the link sent to the new inbox; null once that link lapses (24 hours)."
           }
         }
       },
@@ -11851,6 +12652,1276 @@
             "$ref": "#/components/schemas/AccountUser"
           }
         }
+      },
+      "EmailChangeConfirm": {
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "From the link's path, `/account/email-confirm/{token}`."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "AccountPhotographer": {
+        "type": "object",
+        "description": "Whose booking it is, as the public profile names them (`/p/{handle}`).",
+        "required": [
+          "handle",
+          "displayName"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "handle": {
+            "type": "string",
+            "examples": [
+              "kigali-lens"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "AccountBookingRow": {
+        "type": "object",
+        "required": [
+          "reference",
+          "photographer",
+          "serviceName",
+          "packageName",
+          "startsAt",
+          "endsAt",
+          "status",
+          "stage",
+          "amounts",
+          "holdExpiresAt",
+          "checkoutPath"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "reference": {
+            "$ref": "#/components/schemas/BookingReference"
+          },
+          "photographer": {
+            "$ref": "#/components/schemas/AccountPhotographer"
+          },
+          "serviceName": {
+            "type": "string"
+          },
+          "packageName": {
+            "type": "string"
+          },
+          "startsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "endsAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BookingStatus"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/BookingStage",
+            "description": "Never `needs_review` for a client."
+          },
+          "amounts": {
+            "type": "object",
+            "description": "From `bookingTotals()`, the guest page's helper.",
+            "required": [
+              "totalRwf",
+              "paidRwf",
+              "dueRwf",
+              "refundDueRwf"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "totalRwf": {
+                "$ref": "#/components/schemas/Rwf",
+                "description": "The grand total (package",
+                "every add-on).": null
+              },
+              "paidRwf": {
+                "$ref": "#/components/schemas/Rwf",
+                "description": "What has been collected."
+              },
+              "dueRwf": {
+                "$ref": "#/components/schemas/Rwf",
+                "description": "Still to pay; nought once the booking no longer stands."
+              },
+              "refundDueRwf": {
+                "$ref": "#/components/schemas/Rwf",
+                "description": "Owed back and not yet sent."
+              }
+            }
+          },
+          "holdExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "A `pending_payment` booking's live hold; null otherwise."
+          },
+          "checkoutPath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The web app's checkout page for a live hold, `/checkout/{reference}/{token}`\n(\"finish payment\"); null once the hold lapses, for any other status, and\nwhen payments are off.\n",
+            "examples": [
+              "/checkout/BKY-2610-7MAR5/Zx9Q2mT7vL4pR8sK1nB6yH3cF5dG0wJeXXXXXXXXXXX"
+            ]
+          }
+        }
+      },
+      "AccountBookingsPage": {
+        "type": "object",
+        "required": [
+          "scope",
+          "bookings",
+          "total",
+          "page",
+          "pageSize",
+          "pageCount"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "upcoming",
+              "past"
+            ]
+          },
+          "bookings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountBookingRow"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every booking in the scope",
+            "across pages.": null
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The page answered; the last one when the one asked for is past the end."
+          },
+          "pageSize": {
+            "type": "integer",
+            "const": 20
+          },
+          "pageCount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "AccountPhotographerContact": {
+        "type": "object",
+        "description": "Who the photographer is and how to reach them (R8.1): the public profile's contact details.",
+        "required": [
+          "handle",
+          "displayName",
+          "contactPhone",
+          "whatsappPhone",
+          "email"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "contactPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "E.164."
+          },
+          "whatsappPhone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "E.164."
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email",
+            "description": "The public contact address they chose",
+            "never their login.": null
+          }
+        }
+      },
+      "AccountBookingDetail": {
+        "type": "object",
+        "description": "The dashboard's booking page: `booking` is exactly the guest page's view\n(`GET /api/booking/{token}`), so the same components render it.\n",
+        "required": [
+          "booking",
+          "photographer",
+          "checkoutPath",
+          "holdExpiresAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "booking": {
+            "$ref": "#/components/schemas/ClientBooking"
+          },
+          "photographer": {
+            "$ref": "#/components/schemas/AccountPhotographerContact"
+          },
+          "checkoutPath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A live hold's checkout page, as in the list."
+          },
+          "holdExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When that live hold ends; null whenever `checkoutPath` is."
+          }
+        }
+      },
+      "AccountBookingConflict": {
+        "type": "object",
+        "description": "The refusal, with the booking page as it now stands.",
+        "required": [
+          "error",
+          "booking",
+          "photographer",
+          "checkoutPath",
+          "holdExpiresAt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "not_cancellable",
+              "nothing_to_pay"
+            ]
+          },
+          "booking": {
+            "$ref": "#/components/schemas/ClientBooking"
+          },
+          "photographer": {
+            "$ref": "#/components/schemas/AccountPhotographerContact"
+          },
+          "checkoutPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "holdExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "PaidWith": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The client's method, `cash` for money the photographer recorded by hand, or null when none was recorded.",
+        "enum": [
+          "momo_mtn",
+          "momo_airtel",
+          "card",
+          "cash",
+          null
+        ]
+      },
+      "RefundState": {
+        "description": "Whether this payment is owed back (`due`) or was sent back (`refunded`, with the transfer's reference).",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "none"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "state",
+              "amountRwf"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "due"
+              },
+              "amountRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "state",
+              "amountRwf",
+              "refundedAt",
+              "reference"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "refunded"
+              },
+              "amountRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "refundedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "reference": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "Overpayment": {
+        "description": "The part paid above what was asked, which the platform sends back; null when exactly what was asked was paid.",
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "required": [
+              "amountRwf",
+              "refundedAt",
+              "reference"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "amountRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "refundedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "reference": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "AccountPaymentRow": {
+        "type": "object",
+        "required": [
+          "ourRef",
+          "kind",
+          "method",
+          "amountRwf",
+          "status",
+          "failure",
+          "createdAt",
+          "settledAt",
+          "refund",
+          "overpayment",
+          "hasReceipt",
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ourRef": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PaymentKind"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaidWith"
+          },
+          "amountRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "status": {
+            "type": "string",
+            "description": "Every status but `initiated` in the list; any status in the export.",
+            "enum": [
+              "initiated",
+              "pending",
+              "succeeded",
+              "failed",
+              "refund_due",
+              "refunded"
+            ]
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "declined",
+              "unavailable",
+              null
+            ],
+            "description": "Why a failed payment failed, in the public words; null otherwise."
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "settledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "refund": {
+            "$ref": "#/components/schemas/RefundState"
+          },
+          "overpayment": {
+            "$ref": "#/components/schemas/Overpayment"
+          },
+          "hasReceipt": {
+            "type": "boolean",
+            "description": "True for `succeeded`, `refund_due` and `refunded`, the payments `GET /api/account/payments/{ourRef}` answers."
+          },
+          "booking": {
+            "type": "object",
+            "required": [
+              "reference",
+              "startsAt",
+              "serviceName",
+              "packageName",
+              "photographer"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/BookingReference"
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "serviceName": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "photographer": {
+                "$ref": "#/components/schemas/AccountPhotographer"
+              }
+            }
+          }
+        }
+      },
+      "AccountPaymentsPage": {
+        "type": "object",
+        "required": [
+          "payments",
+          "total",
+          "page",
+          "pageSize",
+          "pageCount"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountPaymentRow"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pageSize": {
+            "type": "integer",
+            "const": 20
+          },
+          "pageCount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "Receipt": {
+        "type": "object",
+        "description": "What the printable receipt page shows (R8.2). A refunded payment's receipt says so in `refund`.",
+        "required": [
+          "ourRef",
+          "kind",
+          "method",
+          "amountRwf",
+          "status",
+          "createdAt",
+          "settledAt",
+          "refund",
+          "overpayment",
+          "billedTo",
+          "photographer",
+          "booking"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ourRef": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PaymentKind"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaidWith"
+          },
+          "amountRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "refund_due",
+              "refunded"
+            ]
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "settledAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "refund": {
+            "$ref": "#/components/schemas/RefundState"
+          },
+          "overpayment": {
+            "$ref": "#/components/schemas/Overpayment"
+          },
+          "billedTo": {
+            "type": "string",
+            "description": "The name on the booking",
+            "as it was booked.": null
+          },
+          "photographer": {
+            "$ref": "#/components/schemas/AccountPhotographer"
+          },
+          "booking": {
+            "type": "object",
+            "required": [
+              "reference",
+              "startsAt",
+              "endsAt",
+              "serviceName",
+              "packageName",
+              "packagePriceRwf",
+              "bookingFeeRwf",
+              "addons"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/BookingReference"
+              },
+              "startsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "endsAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "serviceName": {
+                "type": "string"
+              },
+              "packageName": {
+                "type": "string"
+              },
+              "packagePriceRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "bookingFeeRwf": {
+                "$ref": "#/components/schemas/Rwf"
+              },
+              "addons": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "quantity",
+                    "unitPriceRwf",
+                    "amountRwf",
+                    "stage"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "unitPriceRwf": {
+                      "$ref": "#/components/schemas/Rwf"
+                    },
+                    "amountRwf": {
+                      "$ref": "#/components/schemas/Rwf"
+                    },
+                    "stage": {
+                      "type": "string",
+                      "enum": [
+                        "at_booking",
+                        "post_shoot"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ReceiptEnvelope": {
+        "type": "object",
+        "required": [
+          "receipt"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "receipt": {
+            "$ref": "#/components/schemas/Receipt"
+          }
+        }
+      },
+      "NoReceipt": {
+        "type": "object",
+        "description": "The account's own payment, which took no money (yet), so it has no receipt.",
+        "required": [
+          "error",
+          "payment"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "const": "no_receipt"
+          },
+          "payment": {
+            "type": "object",
+            "required": [
+              "status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "initiated",
+                  "pending",
+                  "failed"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "AccountProfile": {
+        "type": "object",
+        "required": [
+          "fullName",
+          "phone"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\+[1-9]\\d{6,14}$",
+            "description": "E.164."
+          }
+        }
+      },
+      "AccountProfileEnvelope": {
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/AccountProfile"
+          }
+        }
+      },
+      "AccountProfileUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Any subset; an absent key is left as it is. Text is trimmed; lengths count characters as the database does.",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "description": "1-200 characters (blank is a 422; null a 400)."
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 40,
+            "description": "Stored E.164: a Rwandan local `078 123 4567` or `250…` becomes `+250…`;\nany other number needs its `+`. Not a phone number is a 422. `null` or\na blank string clears it. Never changes a booking already made: each\nkeeps its own contact snapshot.\n"
+          }
+        }
+      },
+      "PasswordChangeRequest": {
+        "type": "object",
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024
+          }
+        }
+      },
+      "PasswordSetRequest": {
+        "type": "object",
+        "required": [
+          "newPassword"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "newPassword": {
+            "type": "string",
+            "minLength": 12,
+            "maxLength": 1024
+          }
+        }
+      },
+      "EmailChangeRequest": {
+        "type": "object",
+        "required": [
+          "newEmail",
+          "password"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "newEmail": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "AccountExport": {
+        "type": "object",
+        "description": "Everything the account holds, and nothing else (T8.4). No hash, token,\nGoogle subject, lockout state or row id; no photographer's private note\n(a cash payment's), provider reference or failure text; no deleted note.\n",
+        "required": [
+          "format",
+          "version",
+          "exportedAt",
+          "account",
+          "contacts",
+          "bookings",
+          "payments"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "const": "bookly-account-export"
+          },
+          "version": {
+            "const": 1
+          },
+          "exportedAt": {
+            "$ref": "#/components/schemas/Instant"
+          },
+          "account": {
+            "type": "object",
+            "required": [
+              "email",
+              "fullName",
+              "phone",
+              "emailVerifiedAt",
+              "createdAt",
+              "lastLoginAt",
+              "hasPassword",
+              "hasGoogle",
+              "pendingEmail"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "fullName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "emailVerifiedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "createdAt": {
+                "$ref": "#/components/schemas/Instant"
+              },
+              "lastLoginAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "hasPassword": {
+                "type": "boolean"
+              },
+              "hasGoogle": {
+                "type": "boolean"
+              },
+              "pendingEmail": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "email"
+              }
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "description": "The contact records the bookings were made under, one per address, as they now stand.",
+            "items": {
+              "type": "object",
+              "required": [
+                "fullName",
+                "email",
+                "phone"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "fullName": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "phone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "bookings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "reference",
+                "photographer",
+                "status",
+                "createdAt",
+                "startsAt",
+                "endsAt",
+                "contact",
+                "serviceName",
+                "packageName",
+                "packagePriceRwf",
+                "packagePhotoCount",
+                "packageDurationMinutes",
+                "locationText",
+                "partySize",
+                "specialRequests",
+                "consentAt",
+                "bookingFeeRwf",
+                "addons",
+                "totals",
+                "cancellation",
+                "confirmedAt",
+                "completedAt",
+                "cancelledAt",
+                "cancellationReason",
+                "rescheduledAt",
+                "originalStartsAt",
+                "delivery",
+                "notes"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "reference": {
+                  "$ref": "#/components/schemas/BookingReference"
+                },
+                "photographer": {
+                  "$ref": "#/components/schemas/AccountPhotographer"
+                },
+                "status": {
+                  "$ref": "#/components/schemas/BookingStatus"
+                },
+                "createdAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "startsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "endsAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "contact": {
+                  "type": "object",
+                  "description": "The booking's own contact snapshot, as it was booked.",
+                  "required": [
+                    "name",
+                    "email",
+                    "phone"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "serviceName": {
+                  "type": "string"
+                },
+                "packageName": {
+                  "type": "string"
+                },
+                "packagePriceRwf": {
+                  "$ref": "#/components/schemas/Rwf"
+                },
+                "packagePhotoCount": {
+                  "type": "integer"
+                },
+                "packageDurationMinutes": {
+                  "type": "integer"
+                },
+                "locationText": {
+                  "type": "string"
+                },
+                "partySize": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "specialRequests": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "consentAt": {
+                  "$ref": "#/components/schemas/Instant"
+                },
+                "bookingFeeRwf": {
+                  "$ref": "#/components/schemas/Rwf"
+                },
+                "addons": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "quantity",
+                      "unitPriceRwf",
+                      "amountRwf",
+                      "stage",
+                      "addedAt"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "quantity": {
+                        "type": "integer"
+                      },
+                      "unitPriceRwf": {
+                        "$ref": "#/components/schemas/Rwf"
+                      },
+                      "amountRwf": {
+                        "$ref": "#/components/schemas/Rwf"
+                      },
+                      "stage": {
+                        "type": "string",
+                        "enum": [
+                          "at_booking",
+                          "post_shoot"
+                        ]
+                      },
+                      "addedAt": {
+                        "$ref": "#/components/schemas/Instant"
+                      }
+                    }
+                  }
+                },
+                "totals": {
+                  "$ref": "#/components/schemas/Totals"
+                },
+                "cancellation": {
+                  "type": "object",
+                  "required": [
+                    "deadline",
+                    "bookingFeeRefundable"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "deadline": {
+                      "$ref": "#/components/schemas/Instant"
+                    },
+                    "bookingFeeRefundable": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "confirmedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "completedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "cancelledAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "cancellationReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rescheduledAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "originalStartsAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "delivery": {
+                  "description": "Once the photos were sent; `url` is null after the link expires.",
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "url",
+                        "expiresOn",
+                        "expired",
+                        "sentAt",
+                        "note"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uri"
+                        },
+                        "expiresOn": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date"
+                        },
+                        "expired": {
+                          "type": "boolean"
+                        },
+                        "sentAt": {
+                          "$ref": "#/components/schemas/Instant"
+                        },
+                        "note": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "notes": {
+                  "type": "array",
+                  "description": "The photographer's notes to the client that are still shown on the booking page.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "body",
+                      "createdAt"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "body": {
+                        "type": "string"
+                      },
+                      "createdAt": {
+                        "$ref": "#/components/schemas/Instant"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "payments": {
+            "type": "array",
+            "description": "Every payment on the account's bookings, every status, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/AccountPaymentRow"
+            }
+          }
+        }
+      },
+      "DeleteAccountRequest": {
+        "description": "`{ password }` for an account with a password; `{ confirmEmail }`, the\naccount's address typed again, for a Google-only account (`hasPassword`\nfalse in `/me`). Both, neither or another key is a 400.\n",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "password"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "password": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "confirmEmail"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "confirmEmail": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            }
+          }
+        ]
       }
     },
     "parameters": {
@@ -11909,6 +13980,31 @@
         "required": true,
         "schema": {
           "$ref": "#/components/schemas/Uuid"
+        }
+      },
+      "BookingScope": {
+        "name": "scope",
+        "in": "query",
+        "required": false,
+        "description": "`upcoming` (the default): confirmed with the shoot not over, and live holds, soonest first. `past`: completed, no-show, cancelled, and confirmed whose shoot is over, latest first. An expired hold is in neither.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "upcoming",
+            "past"
+          ],
+          "default": "upcoming"
+        }
+      },
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "required": false,
+        "description": "1-based; past the last page, the last page is answered.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
         }
       }
     },
@@ -12149,6 +14245,28 @@
               "properties": {
                 "addon": {
                   "$ref": "#/components/schemas/AdminAddon"
+                }
+              }
+            }
+          }
+        }
+      },
+      "WrongPassword": {
+        "description": "The password was wrong (`invalid_password`, counted toward the login\nlockout) or the account is locked by failed attempts (`password_locked`,\nnothing checked).\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "examples": {
+              "invalid_password": {
+                "value": {
+                  "error": "invalid_password"
+                }
+              },
+              "password_locked": {
+                "value": {
+                  "error": "password_locked"
                 }
               }
             }

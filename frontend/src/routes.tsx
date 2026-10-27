@@ -18,7 +18,14 @@ import { AdminProfile } from '@/pages/admin/AdminProfile'
 import { AdminSettings } from '@/pages/admin/AdminSettings'
 import { AdminSetup } from '@/pages/admin/AdminSetup'
 import { AdminSubscription } from '@/pages/admin/AdminSubscription'
-import { AccountHome } from '@/pages/account/AccountHome'
+import { AccountBookingPage, AccountPaymentProgressPage } from '@/pages/account/AccountBookingPage'
+import { AccountDashboard } from '@/pages/account/AccountDashboard'
+import { AccountDeletedPage } from '@/pages/account/AccountDeletedPage'
+import { AccountEmailConfirmPage } from '@/pages/account/AccountEmailConfirmPage'
+import { AccountLayout } from '@/pages/account/AccountLayout'
+import { AccountPayments } from '@/pages/account/AccountPayments'
+import { AccountProfile } from '@/pages/account/AccountProfile'
+import { AccountReceipt } from '@/pages/account/AccountReceipt'
 import { GoogleCallbackPage } from '@/pages/auth/GoogleCallbackPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage'
@@ -75,15 +82,29 @@ export const routes: RouteObject[] = [
       { path: '/booking/:token', element: <BookingPage /> },
       { path: '/booking/:token/payments/:ourRef', element: <PaymentProgressPage /> },
       // The client's account (Phase 2): its sign-in pages wear the client
-      // shell; `/account` itself needs the account session. Phase 8 builds it out.
+      // shell. The dashboard (Phase 8, R8.1-R8.3) needs the account session:
+      // the account nav, then the bookings, one booking and its session-fee
+      // payment, the payments and a receipt, and the profile.
       {
         path: '/account',
         element: (
           <RequireSession area="account">
-            <AccountHome />
+            <AccountLayout />
           </RequireSession>
         ),
+        children: [
+          { index: true, element: <AccountDashboard /> },
+          { path: 'bookings/:reference', element: <AccountBookingPage /> },
+          { path: 'bookings/:reference/payments/:ourRef', element: <AccountPaymentProgressPage /> },
+          { path: 'payments', element: <AccountPayments /> },
+          { path: 'payments/:ourRef/receipt', element: <AccountReceipt /> },
+          { path: 'profile', element: <AccountProfile /> },
+        ],
       },
+      // No session needed: the address-change link opens in any tab, and the
+      // deleted page follows the session's end.
+      { path: '/account/email-confirm/:token', element: <AccountEmailConfirmPage /> },
+      { path: '/account/deleted', element: <AccountDeletedPage /> },
       { path: '/account/login', element: <LoginPage area="account" /> },
       { path: '/account/signup', element: <SignupPage area="account" /> },
       { path: '/account/verify/:token', element: <VerifyPage area="account" /> },

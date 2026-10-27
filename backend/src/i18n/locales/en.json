@@ -324,6 +324,38 @@
         "destinationBank": "{{bank}} account ending {{last4}}",
         "ifNotYou": "If this was not you, someone else knows your password. Reset it now, then contact the platform so that no payout is sent to this destination.",
         "button": "Review your payout method"
+      },
+      "passwordChanged": {
+        "changed": {
+          "subject": "Your password was changed",
+          "heading": "Your password was changed",
+          "intro": "On {{when}} (Kigali time), the password of your account was changed."
+        },
+        "added": {
+          "subject": "A password was added to your account",
+          "heading": "A password was added to your account",
+          "intro": "On {{when}} (Kigali time), a password was added to your account. You can now sign in with your email address and this password, as well as with Google."
+        },
+        "preheader": "Every other device signed in to your account has been signed out.",
+        "signedOut": "Every other device signed in to your account has been signed out.",
+        "ifNotYou": "If this was not you, someone else can sign in to your account. Use “Forgot password” on the sign-in page now to choose a new password.",
+        "signIn": "Go to the sign-in page"
+      },
+      "emailChanged": {
+        "subject": "Your account email was changed",
+        "preheader": "Your account now uses a different email address.",
+        "heading": "Your account email was changed",
+        "intro": "On {{when}} (Kigali time), the email address of your account was changed to {{email}}. This is the last message about your account we will send to this address.",
+        "bookings": "Bookings already made under this address stay in your account.",
+        "ifNotYou": "If you did not make this change, someone else knows your password. Reply to this email straight away so we can help you get your account back."
+      },
+      "accountDeleted": {
+        "subject": "Your account was deleted",
+        "preheader": "Your account and its sign-in details are erased.",
+        "heading": "Your account was deleted",
+        "intro": "On {{when}} (Kigali time), your account was deleted at your request. Your name, phone number and sign-in details are erased, and you can no longer sign in. This is the last message about your account we will send.",
+        "bookings": "Bookings you made stay with the photographers who took them, who must keep their records. An upcoming booking goes ahead: open it with the link in its confirmation email.",
+        "ifNotYou": "If you did not ask for this, reply to this email straight away."
       }
     },
     "accountVerifyEmail": {
@@ -333,7 +365,15 @@
       "intro": "Confirm this address to finish setting up your account. The link below works once, until {{until}} (Kigali time), and asks for the password you chose when you signed up.",
       "button": "Confirm my email address",
       "notYourPassword": "If the page asks for a password you never chose, someone else signed up with your address. Use “Forgot password” on the sign-in page instead: choosing a new password confirms your address and makes the account yours.",
-      "ignore": "If you did not sign up, you can ignore this email."
+      "ignore": "If you did not sign up, you can ignore this email.",
+      "emailChange": {
+        "subject": "Confirm your new email address",
+        "preheader": "The link works once, until {{until}} (Kigali time).",
+        "heading": "Confirm your new email address",
+        "intro": "You asked to use this address for your account. Confirm it below: the link works once, until {{until}} (Kigali time), and asks for your account password.",
+        "button": "Confirm my new email address",
+        "ignore": "If you did not ask for this, you can ignore this email: nothing changes until the link is used."
+      }
     },
     "photographerApplicationReceived": {
       "subject": "New photographer application",

@@ -106,6 +106,12 @@ export type OutboxMessage =
        * is used -- and naming a different one is refused.
        */
       photographerId?: string | null;
+      /**
+       * Erase the recipient and the payload once the worker is done with the
+       * row, delivered or given up on (outbox/erasure.ts). For mail to an
+       * address that is itself being erased: the account-deletion notice.
+       */
+      eraseOnCompletion?: boolean;
     }
   | {
       kind: 'gcal_create' | 'gcal_update' | 'gcal_delete';
@@ -133,6 +139,7 @@ export async function enqueue(
         photographerId,
         template: message.kind === 'email' ? message.template : null,
         recipient: message.kind === 'email' ? message.recipient : null,
+        eraseOnCompletion: message.kind === 'email' && message.eraseOnCompletion === true,
       },
     ],
     skipDuplicates: true,

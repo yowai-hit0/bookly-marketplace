@@ -1184,3 +1184,92 @@ describe('logging', () => {
     }
   });
 });
+
+// --- Erase on completion (Phase 8 follow-up, 2026-10-27) ------------------------------
+
+describe('a row marked erase_on_completion', () => {
+  const DELETED = 'leaving.client@example.com';
+
+  async function markedRow(seed: RowSeed = {}): Promise<string> {
+    const id = await seedRow({
+      template: 'account_security_alert',
+      recipient: DELETED,
+      dedupeKey: `email:account_security_alert:account_deleted:test-${seedCounter + 1}`,
+      payload: { variant: 'account_deleted', area: 'account', deletedAt: '2026-10-27T06:00:00.000Z' },
+      ...seed,
+    });
+    await raw.query('UPDATE outbox SET erase_on_completion = true WHERE id = $1', [id]);
+    return id;
+  }
+
+  async function personalOf(id: string) {
+    return firstRow(await raw.query<{ recipient: string | null; payload: unknown; status: string }>('SELECT recipient, payload, status FROM outbox WHERE id = $1', [id]));
+  }
+
+  it('is delivered with its address, then erases its recipient and payload as it becomes done', async () => {
+    const id = await markedRow();
+    const seen: OutboxRow[] = [];
+
+    await processNext(deps({ email: async (row) => (seen.push(row), { providerMessageId: 'p-1' }) }));
+
+    expect(seen.map((row) => [row.recipient, row.payload])).toEqual([[DELETED, { variant: 'account_deleted', area: 'account', deletedAt: '2026-10-27T06:00:00.000Z' }]]);
+    expect(await personalOf(id)).toEqual({ recipient: '[erased]', payload: null, status: 'done' });
+    expect(await stateOf(id)).toMatchObject({ completed: true, provider_message_id: 'p-1' });
+  });
+
+  it('keeps both through a retry, which needs them, and erases them once it finally goes', async () => {
+    const id = await markedRow();
+
+    await processNext(deps({ email: failing() }));
+    expect(await personalOf(id)).toMatchObject({ recipient: DELETED, status: 'pending' });
+    expect((await personalOf(id)).payload).not.toBeNull();
+
+    await makeDue(id);
+    await processNext(deps({ email: succeeding() }));
+    expect(await personalOf(id)).toEqual({ recipient: '[erased]', payload: null, status: 'done' });
+  });
+
+  it('erases them when it fails for good, and the platform’s alert names no address', async () => {
+    await seedPlatformAdmin();
+    const id = await markedRow({ attempts: OUTBOX_MAX_ATTEMPTS - 1 });
+
+    await processNext(deps({ email: failing('Resend refused the message') }));
+
+    expect(await personalOf(id)).toEqual({ recipient: '[erased]', payload: null, status: 'failed' });
+    const alerts = await alertRows();
+    expect(alerts).toHaveLength(1);
+    expect(JSON.stringify(alerts[0]?.payload)).not.toContain(DELETED);
+  });
+
+  it('erases them when a permanent error fails it at once', async () => {
+    await seedPlatformAdmin();
+    const id = await markedRow();
+
+    await processNext(deps({ email: async () => { throw new PermanentOutboxError('recipient refused'); } }));
+
+    expect(await personalOf(id)).toEqual({ recipient: '[erased]', payload: null, status: 'failed' });
+  });
+
+  it('erases them when it is failed as abandoned mid-delivery', async () => {
+    await seedPlatformAdmin();
+    const id = await markedRow({ status: 'processing', attempts: OUTBOX_MAX_ATTEMPTS });
+
+    await claimNext(prisma, ['email'], () => undefined);
+
+    expect(await personalOf(id)).toEqual({ recipient: '[erased]', payload: null, status: 'failed' });
+  });
+
+  it('leaves an unmarked row’s recipient and payload as the permanent outbox always has', async () => {
+    const id = await seedRow();
+
+    await processNext(deps({ email: succeeding() }));
+
+    expect(await personalOf(id)).toMatchObject({ recipient: CLIENT_EMAIL, status: 'done' });
+    expect((await personalOf(id)).payload).toEqual({ clientName: CLIENT_NAME, accessToken: TOKEN });
+  });
+
+  it('can only be an email (CHECK outbox_erase_on_completion_email_only)', async () => {
+    const id = await seedRow({ kind: 'gcal_create', template: null, recipient: null });
+    await expect(raw.query('UPDATE outbox SET erase_on_completion = true WHERE id = $1', [id])).rejects.toMatchObject({ code: '23514' });
+  });
+});

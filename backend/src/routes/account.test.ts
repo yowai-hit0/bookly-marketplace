@@ -164,7 +164,22 @@ describe('POST /api/{area}/auth/verify', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     expect(res.body).toMatchObject({ tokenType: 'Bearer', user: { email: 'new.client@bookly.example' } });
     const me = await request(app()).get('/api/account/me').set('Authorization', `Bearer ${(res.body as { token: string }).token}`);
-    expect([me.status, me.body]).toEqual([200, { user: { id: expect.any(String), email: 'new.client@bookly.example', fullName: 'Aline', lastLoginAt: NOW.toISOString() } }]);
+    // Phase 8 adds the phone, which credentials the account holds, and a pending address change.
+    expect([me.status, me.body]).toEqual([
+      200,
+      {
+        user: {
+          id: expect.any(String),
+          email: 'new.client@bookly.example',
+          fullName: 'Aline',
+          lastLoginAt: NOW.toISOString(),
+          phone: null,
+          hasPassword: true,
+          hasGoogle: false,
+          pendingEmail: null,
+        },
+      },
+    ]);
   });
 
   it.each(AUTH_AREAS)('answers one 400 invalid_verification in the %s area for a bad token or a wrong password', async (area) => {

@@ -24,6 +24,24 @@ import { type EmailContext, defineTemplate, instant, siteUrl, tr } from './share
  *                   and the last four digits only, and says what to do if it
  *                   was not them. Its button goes to the payout-method page.
  *
+ *   password_changed  the account's password was changed, or -- `added` -- a
+ *                   first password was added to a Google-only client account
+ *                   (marketplace-spec.md Phase 8, decision 2). Every other
+ *                   token was revoked with it; the copy says so, and what to do
+ *                   if it was not them. Its button goes to the area's sign-in page.
+ *   email_changed   sent to the OLD address once a change of the account's
+ *                   address is confirmed from the new inbox (R8.3). Names the
+ *                   new address masked (`a•••••@example.com`): whoever reads
+ *                   the old inbox learns where the account went only enough to
+ *                   recognise it. No button: the old address signs in nowhere now.
+ *   account_deleted the client's account was deleted at their request (R8.3;
+ *                   user decision 2026-10-27, deletion follow-up), sent to the
+ *                   address being erased. Says what was erased, that bookings
+ *                   stay with their photographers and upcoming ones go ahead
+ *                   through their own links, and what to do if it was not them.
+ *                   No button: there is no account left to open. The row erases
+ *                   its own recipient and payload once delivered (`erase_on_completion`).
+ *
  * `login_lockout` was a variant of `admin_alert` before the marketplace, with
  * the same payload.
  */
@@ -56,13 +74,97 @@ const payoutMethodChanged = z.object({
   destination: maskedDestination,
 });
 
+const passwordChanged = z.object({
+  variant: z.literal('password_changed'),
+  area: z.enum(AUTH_AREAS),
+  /** A first password added to a Google-only account, rather than one replaced. */
+  added: z.boolean(),
+  changedAt: instant,
+});
+
+/** `maskEmail`'s form: a character, five bullets, the domain. Never a full address. */
+const maskedAddress = z
+  .string()
+  .max(320)
+  .regex(/^[^@\s]•{5}@[^@\s]+$/u);
+
+const emailChanged = z.object({
+  variant: z.literal('email_changed'),
+  area: z.literal('account'),
+  changedAt: instant,
+  /** The new address, masked. */
+  newEmail: maskedAddress,
+});
+
+const accountDeleted = z.object({
+  variant: z.literal('account_deleted'),
+  area: z.literal('account'),
+  deletedAt: instant,
+});
+
 export const accountSecurityAlert = defineTemplate({
-  payload: z.discriminatedUnion('variant', [loginLockout, accountExists, payoutMethodChanged]),
+  payload: z.discriminatedUnion('variant', [loginLockout, accountExists, payoutMethodChanged, passwordChanged, emailChanged, accountDeleted]),
   compose(p, ctx): ComposedEmail {
-    if (p.variant === 'payout_method_changed') return composePayoutMethodChanged(p, ctx);
-    return p.variant === 'account_exists' ? composeAccountExists(p, ctx) : composeLoginLockout(p, ctx);
+    switch (p.variant) {
+      case 'payout_method_changed':
+        return composePayoutMethodChanged(p, ctx);
+      case 'account_exists':
+        return composeAccountExists(p, ctx);
+      case 'password_changed':
+        return composePasswordChanged(p, ctx);
+      case 'email_changed':
+        return composeEmailChanged(p, ctx);
+      case 'account_deleted':
+        return composeAccountDeleted(p, ctx);
+      case 'login_lockout':
+        return composeLoginLockout(p, ctx);
+    }
   },
 });
+
+function composePasswordChanged(p: z.infer<typeof passwordChanged>, ctx: EmailContext): ComposedEmail {
+  const when = formatDateTime(p.changedAt);
+  const key = p.added ? 'added' : 'changed';
+  return {
+    subject: tr(ctx, `email:accountSecurityAlert.passwordChanged.${key}.subject`),
+    preheader: tr(ctx, 'email:accountSecurityAlert.passwordChanged.preheader'),
+    blocks: [
+      { type: 'heading', text: tr(ctx, `email:accountSecurityAlert.passwordChanged.${key}.heading`) },
+      { type: 'paragraph', text: tr(ctx, `email:accountSecurityAlert.passwordChanged.${key}.intro`, { when }) },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.passwordChanged.signedOut') },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.passwordChanged.ifNotYou') },
+      { type: 'button', label: tr(ctx, 'email:accountSecurityAlert.passwordChanged.signIn'), href: siteUrl(ctx, AREA_WEB_PATHS[p.area].login) },
+    ],
+  };
+}
+
+function composeAccountDeleted(p: z.infer<typeof accountDeleted>, ctx: EmailContext): ComposedEmail {
+  const when = formatDateTime(p.deletedAt);
+  return {
+    subject: tr(ctx, 'email:accountSecurityAlert.accountDeleted.subject'),
+    preheader: tr(ctx, 'email:accountSecurityAlert.accountDeleted.preheader'),
+    blocks: [
+      { type: 'heading', text: tr(ctx, 'email:accountSecurityAlert.accountDeleted.heading') },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.accountDeleted.intro', { when }) },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.accountDeleted.bookings') },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.accountDeleted.ifNotYou') },
+    ],
+  };
+}
+
+function composeEmailChanged(p: z.infer<typeof emailChanged>, ctx: EmailContext): ComposedEmail {
+  const when = formatDateTime(p.changedAt);
+  return {
+    subject: tr(ctx, 'email:accountSecurityAlert.emailChanged.subject'),
+    preheader: tr(ctx, 'email:accountSecurityAlert.emailChanged.preheader'),
+    blocks: [
+      { type: 'heading', text: tr(ctx, 'email:accountSecurityAlert.emailChanged.heading') },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.emailChanged.intro', { when, email: p.newEmail }) },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.emailChanged.bookings') },
+      { type: 'paragraph', text: tr(ctx, 'email:accountSecurityAlert.emailChanged.ifNotYou') },
+    ],
+  };
+}
 
 /** `MTN MoMo number ending 4567` or `Bank of Kigali account ending 0012`. */
 export function destinationText(ctx: EmailContext, destination: z.infer<typeof maskedDestination>): string {

@@ -361,6 +361,10 @@ describe('links point at WEB_ORIGIN, never at the API host', () => {
         'cancellation (by client)',
         // To the old address after an email change: it must not get a way into the booking.
         'email_changed_notice',
+        // The same for an account's address (Phase 8): the old address signs in nowhere now.
+        'account_security_alert email_changed',
+        // The deletion notice: there is no account left to open.
+        'account_security_alert account_deleted',
         // A photographer's note: no token plaintext exists to link with.
         'client_note',
       ].sort(),
@@ -1462,5 +1466,99 @@ describe('the subscription emails (Phase 5: R5.1, R5.3, R5.4)', () => {
       expect(email.html, name).toContain('&lt;b&gt;Lens&lt;/b&gt;');
       expect(email.text, name).toContain('<b>Lens</b> & {{amount}}');
     }
+  });
+});
+
+// --- Phase 8: the client dashboard's account mail ---------------------------------
+
+describe('account_verify_email email_change (marketplace-spec.md Phase 8, R8.3)', () => {
+  it('links /account/email-confirm/<token>, carries the token nowhere else, and says nothing changes until it is used', () => {
+    const email = renderFixture(emailFixture('account_verify_email email_change'));
+    const link = `${FIXTURE_WEB_ORIGIN}/account/email-confirm/${FIXTURE_VERIFY_TOKEN}`;
+
+    expect(email.subject).toBe('Confirm your new email address');
+    expect(links(email.html)).toEqual([link]);
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain(link);
+      expect(body.replaceAll(link, '<link>')).not.toContain(FIXTURE_VERIFY_TOKEN);
+    }
+    expect(email.text).toContain('asks for your account password');
+    expect(email.text).toContain('nothing changes until the link is used');
+    // Not the signup's copy: there is no password the reader never chose.
+    expect(email.text).not.toContain('someone else signed up with your address');
+  });
+
+  it('is the signup link when the variant is absent, as rows queued before Phase 8 are', () => {
+    const { variant: _variant, ...legacy } = emailFixture('account_verify_email email_change').payload as Payload;
+    expect(links(render('account_verify_email', legacy).html)).toEqual([`${FIXTURE_WEB_ORIGIN}/account/verify/${FIXTURE_VERIFY_TOKEN}`]);
+  });
+
+  it.each([['area', 'studio'], ['area', 'platform'], ['variant', 'email_changed'], ['token', 'short']])('refuses %s %j, naming the field', (field, value) => {
+    expect(payloadError(() => renderWith('account_verify_email email_change', { [field]: value })).message).toContain(field);
+  });
+});
+
+describe('account_security_alert password_changed (Phase 8, decision 2)', () => {
+  it('changed: says when, that every other device is signed out, and sends to the account sign-in page', () => {
+    const email = renderFixture(emailFixture('account_security_alert password_changed'));
+
+    expect(email.subject).toBe('Your password was changed');
+    expect(email.text).toContain('14 Mar 2026, 17:00');
+    expect(email.text).toContain('Every other device signed in to your account has been signed out.');
+    expect(email.text).toContain('“Forgot password”');
+    expect(links(email.html)).toEqual([`${FIXTURE_WEB_ORIGIN}/account/login`]);
+  });
+
+  it('added: says a password was added, and that Google still works', () => {
+    const email = renderFixture(emailFixture('account_security_alert password_changed added'));
+
+    expect(email.subject).toBe('A password was added to your account');
+    expect(email.text).toContain('as well as with Google');
+  });
+
+  it.each([['added', 'yes'], ['changedAt', 'yesterday'], ['area', 'admin']])('refuses %s %j, naming the field', (field, value) => {
+    expect(payloadError(() => renderWith('account_security_alert password_changed', { [field]: value })).message).toContain(field);
+  });
+});
+
+describe('account_security_alert email_changed (Phase 8, R8.3)', () => {
+  it('tells the old address when and to which masked address, and has no button', () => {
+    const email = renderFixture(emailFixture('account_security_alert email_changed'));
+
+    expect(email.subject).toBe('Your account email was changed');
+    expect(email.text).toContain('14 Mar 2026, 17:00');
+    expect(email.text).toContain('n•••••@example.com');
+    expect(email.text).toContain('the last message about your account');
+    expect(links(email.html)).toEqual([]);
+  });
+
+  it.each([
+    ['a full address', 'new.address@example.com'],
+    ['too few bullets', 'n••@example.com'],
+    ['no domain', 'n•••••'],
+  ])('refuses %s: the payload never carries the new address in clear', (_label, newEmail) => {
+    expect(payloadError(() => renderWith('account_security_alert email_changed', { newEmail })).message).toContain('newEmail');
+  });
+
+  it('refuses any area but the account', () => {
+    expect(payloadError(() => renderWith('account_security_alert email_changed', { area: 'studio' })).message).toContain('area');
+  });
+});
+
+describe('account_security_alert account_deleted (Phase 8 follow-up, 2026-10-27)', () => {
+  it('says when, what was erased, that bookings stay and go ahead through their own links, and has no button', () => {
+    const email = renderFixture(emailFixture('account_security_alert account_deleted'));
+
+    expect(email.subject).toBe('Your account was deleted');
+    expect(email.text).toContain('14 Mar 2026, 17:00');
+    expect(email.text).toContain('you can no longer sign in');
+    expect(email.text).toContain('Bookings you made stay with the photographers who took them');
+    expect(email.text).toContain('the link in its confirmation email');
+    expect(email.text).toContain('If you did not ask for this');
+    expect(links(email.html)).toEqual([]);
+  });
+
+  it.each([['deletedAt', 'yesterday'], ['area', 'studio']])('refuses %s %j, naming the field', (field, value) => {
+    expect(payloadError(() => renderWith('account_security_alert account_deleted', { [field]: value })).message).toContain(field);
   });
 });

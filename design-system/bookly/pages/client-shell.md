@@ -72,3 +72,20 @@ The checkout and booking pages get the shell too. They are reached from an email
 ## Marketplace footer (Phase 6, 2026-10-22, R6.4)
 
 The placeholder contact block (`lib/contact.ts` `PHOTOGRAPHER_CONTACT`: "demo studio name", `+250 700 000 000`, `hello@example.com`) is removed: on a marketplace the footer belongs to no one photographer, and the contact details shown anywhere are a photographer's own, on their profile and service pages. The first column is now the wordmark and one neutral line, "Bookly: find and book photographers across Rwanda." (new key). The ABOUT column gains **List your studio** → `/studio/signup` (new key). Everything else above (siblings, no `dl`, no buttons, no radios, the links' names) holds.
+
+## Account nav (Phase 8, 2026-10-27, R8.1-R8.3)
+
+Every signed-in account page (`/account`, `/account/bookings/*`, `/account/payments/*`, `/account/profile`) sits in a layout route, `pages/account/AccountLayout.tsx`, inside the client shell and behind the account session guard. It renders one bar and then the page; the bar is a **sibling of the page's own `main`**, never a wrapper (the siblings rule above holds: one `main` per page).
+
+```
+div#main-content
+├── nav[aria-label="Your account"][data-account-nav]   (AccountLayout)
+└── main                                               (the page)
+```
+
+- **The bar:** a bottom hairline, the `container` row, 48px tall. Left, a `ul` of three links, 15px: **Bookings** (`/account`; current on `/account` and `/account/bookings/*`), **Payments** (`/account/payments*`), **Profile** (`/account/profile`). The current one is the text colour, 500, sitting on a 2px text-colour underline over the bar's hairline, with `aria-current="page"`; the others secondary text, violet on hover. Right, **Sign out**: a quiet text button with `LogOut` (the icon drops below 400px), which forgets the account session only and goes to `/`.
+- Gaps 20px below `sm`, 32px from it: the four items fit 343px at 375 with no scroll and no menu.
+- **Focus order:** the skip link targets `#main-content`, which now begins with this bar; the next Tab after the skip link is Bookings, then the page. The bar is short and the page's first control follows it.
+- **Print:** hidden (`print:hidden`, and the receipt's print block), as are the header and footer while a receipt is printed (`account-payments.md`).
+- The header's account link (the client's name, or "Sign in") is unchanged and still leads to `/account`.
+- The account's signed-out pages (`/account/login`, `/signup`, `/verify/*`, `/reset-password`, `/google/callback`, `/email-confirm/*`, `/deleted`) are outside the layout: no account nav.

@@ -43,10 +43,22 @@ export type CancelDeps = { prisma: PrismaClient; now: () => Date };
  * cancels nothing.
  */
 export async function cancelByClient(deps: CancelDeps, token: string): Promise<CancelResult> {
+  return cancelLoaded(deps, () => findBookingByToken(deps.prisma, token));
+}
+
+/**
+ * The same cancellation, of a booking the caller has already found its own
+ * way -- the client dashboard, by the signed-in account's booking reference
+ * (marketplace-spec.md R8.1, T8.2). `load` is how that caller finds it: it is
+ * called once to decide and once more for the view of the booking as it then
+ * stands, so the dashboard and the guest link share every rule, refund and
+ * email here.
+ */
+export async function cancelLoaded(deps: CancelDeps, load: () => Promise<AccessedBooking | null>): Promise<CancelResult> {
   const { prisma } = deps;
   const now = deps.now();
 
-  const booking = await findBookingByToken(prisma, token);
+  const booking = await load();
   if (booking === null || !canCancel(booking, now)) return { status: 'not_cancellable' };
 
   const cancelled = await prisma.$transaction(async (tx) => {
@@ -128,7 +140,7 @@ export async function cancelByClient(deps: CancelDeps, token: string): Promise<C
 
   if (cancelled === null) return { status: 'not_cancellable' };
 
-  const after = await findBookingByToken(prisma, token);
+  const after = await load();
   // The link cannot have stopped working in between, but the view is the
   // booking as it now stands, not as it was read before the change.
   if (after === null) return { status: 'not_cancellable' };

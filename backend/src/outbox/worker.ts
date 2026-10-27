@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { type OutboxKind, type SendableEmailTemplate, enqueue } from './enqueue.js';
+import { ERASE_IF_MARKED } from './erasure.js';
 import { photographerRecipient, platformAdminRecipients } from './recipients.js';
 
 /**
@@ -24,6 +25,12 @@ import { photographerRecipient, platformAdminRecipients } from './recipients.js'
  * Delivery is at-least-once. A crash between the provider accepting a message
  * and the row being marked `done` sends it again after the lease; handlers pass
  * the `dedupe_key` to the provider as an idempotency key to close that gap.
+ *
+ * A row marked `erase_on_completion` (Phase 8: the account-deletion notice,
+ * sent to the very address the deletion erases) erases its recipient and
+ * payload in the same statement that moves it to `done` or `failed`, an
+ * abandoned row included (`ERASE_IF_MARKED`, outbox/erasure.ts). A retry keeps
+ * both: the next attempt needs them.
  */
 
 export type OutboxRow = {
@@ -184,7 +191,8 @@ export async function processNext(deps: OutboxWorkerDeps): Promise<boolean> {
     UPDATE outbox
        SET status = 'done',
            completed_at = now(),
-           provider_message_id = ${result?.providerMessageId ?? null}
+           provider_message_id = ${result?.providerMessageId ?? null},
+           ${ERASE_IF_MARKED}
      WHERE id = ${row.id}::uuid
        AND status = 'processing'`;
   return true;
@@ -265,10 +273,13 @@ async function recordFailure(
   }
 
   const failed = await deps.prisma.$transaction(async (tx) => {
-    const { count } = await tx.outbox.updateMany({
-      where: { id: row.id, status: 'processing' },
-      data: { status: 'failed', lastError },
-    });
+    const count = await tx.$executeRaw`
+      UPDATE outbox
+         SET status = 'failed',
+             last_error = ${lastError},
+             ${ERASE_IF_MARKED}
+       WHERE id = ${row.id}::uuid
+         AND status = 'processing'`;
     if (count === 0) return false;
     await alertOnFailure(tx, row, lastError, log);
     return true;
@@ -289,7 +300,8 @@ async function failAbandoned(
     const rows = await tx.$queryRaw<ClaimedRowRecord[]>`
       UPDATE outbox
          SET status = 'failed',
-             last_error = ${ABANDONED_ERROR}
+             last_error = ${ABANDONED_ERROR},
+             ${ERASE_IF_MARKED}
        WHERE status = 'processing'
          AND next_attempt_at <= now()
          AND attempts >= ${OUTBOX_MAX_ATTEMPTS}

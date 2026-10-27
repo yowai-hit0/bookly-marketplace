@@ -124,13 +124,23 @@ export async function cancelBooking(token: string): Promise<CancelBookingResult>
   }
   if (res.status === 404) return { status: 'not_found' }
   try {
-    const body = (await res.json()) as { booking?: unknown; error?: unknown }
-    const booking = bookingOf(body)
-    if (res.ok && booking !== null) return { status: 'cancelled', booking }
-    if (res.status === 409) return { status: 'not_cancellable', booking }
+    return cancelResultOf(res.status, await res.json())
   } catch {
     // Not the JSON this status promises.
+    return { status: 'failed' }
   }
+}
+
+/**
+ * A cancellation's answer, from its status and body: shared by the guest page
+ * (the token) and the dashboard (the session, marketplace-spec R8.1), whose
+ * answers carry the booking under the same key. Status 0 is no answer.
+ */
+export function cancelResultOf(status: number, body: unknown): CancelBookingResult {
+  if (status === 404) return { status: 'not_found' }
+  const booking = bookingOf(body)
+  if (status >= 200 && status < 300 && booking !== null) return { status: 'cancelled', booking }
+  if (status === 409) return { status: 'not_cancellable', booking }
   return { status: 'failed' }
 }
 
@@ -151,26 +161,35 @@ export async function startSessionFeePayment(
   }
 
   try {
-    const body = (await res.json()) as {
-      error?: unknown
-      reason?: unknown
-      fields?: unknown
-      payment?: { ourRef?: unknown } | null
-    } | null
-    const ourRef = typeof body?.payment?.ourRef === 'string' ? body.payment.ourRef : null
-    if (res.status === 201 && ourRef !== null) return { status: 'started', ourRef }
-    if (res.status === 404) return { status: 'not_found' }
-    if (res.status === 409) {
-      if (body?.error === 'payment_in_progress' && ourRef !== null) return { status: 'in_progress', ourRef }
-      // Paid, cancelled or rescheduled under the page: reloading shows which.
-      return { status: 'closed' }
-    }
-    if (res.status === 422 && Array.isArray(body?.fields)) return { status: 'invalid', fields: body.fields.map(String) }
-    if (res.status === 502 && (body?.reason === 'rejected' || body?.reason === 'unavailable')) {
-      return { status: 'not_started', reason: body.reason }
-    }
+    return sessionFeeResultOf(res.status, await res.json())
   } catch {
     // Not the JSON this status promises.
+    return { status: 'failed' }
+  }
+}
+
+/**
+ * A session-fee payment's answer, from its status and body: shared by the
+ * guest page and the dashboard, which answer alike. Status 0 is no answer.
+ */
+export function sessionFeeResultOf(status: number, raw: unknown): StartPaymentResult {
+  const body = raw as {
+    error?: unknown
+    reason?: unknown
+    fields?: unknown
+    payment?: { ourRef?: unknown } | null
+  } | null
+  const ourRef = typeof body?.payment?.ourRef === 'string' ? body.payment.ourRef : null
+  if (status === 201 && ourRef !== null) return { status: 'started', ourRef }
+  if (status === 404) return { status: 'not_found' }
+  if (status === 409) {
+    if (body?.error === 'payment_in_progress' && ourRef !== null) return { status: 'in_progress', ourRef }
+    // Paid, cancelled or rescheduled under the page: reloading shows which.
+    return { status: 'closed' }
+  }
+  if (status === 422 && Array.isArray(body?.fields)) return { status: 'invalid', fields: body.fields.map(String) }
+  if (status === 502 && (body?.reason === 'rejected' || body?.reason === 'unavailable')) {
+    return { status: 'not_started', reason: body.reason }
   }
   return { status: 'failed' }
 }

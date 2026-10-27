@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next'
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
+import { useAccount } from '@/auth/account'
 import {
   type PublicPhotographerProfile,
   type PublicServiceDetail,
@@ -29,7 +30,7 @@ import { container, eyebrow, pageTitle, pageY, panel, panelTitle } from '@/pages
 import { NotFound } from '@/pages/NotFound'
 import { NotTakingBookingsNotice, PhotographerUnavailable } from '@/pages/photographers/notices'
 import { ContactList } from '@/pages/photographers/PhotographerContact'
-import { BookingDetailsForm } from './BookingDetailsForm'
+import { type BookingPrefill, BookingDetailsForm } from './BookingDetailsForm'
 import { BookingHeld } from './BookingHeld'
 import { PriceSummary } from './PriceSummary'
 import { SlotPicker, type SlotPickerHandle } from './SlotPicker'
@@ -156,6 +157,12 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
   /** Learned after the page loaded: the API refused the package, and the profile says no bookings now. */
   const [stopped, setStopped] = useState(false)
   const takingBookings = !stopped && photographer.takingBookings !== false && service.takingBookings !== false
+  // A signed-in client's own details fill the booking form (Phase 8, decision 1); a guest's form starts empty.
+  const account = useAccount()
+  const prefill: BookingPrefill | null =
+    account.state === 'ready'
+      ? { key: account.user.id, fullName: account.user.fullName, email: account.user.email, phone: account.user.phone }
+      : null
 
   const cover = safeHttpsUrl(service.coverImageUrl)
   useDocumentMeta({
@@ -389,7 +396,7 @@ function ServiceView({ handle, photographer, service }: ViewProps) {
                   onChange={setStartsAt}
                   onPackageRefused={() => void recheckPhotographer()}
                 />
-                <BookingDetailsForm id={formId} invalid={invalid} onSubmit={(event) => void submit(event)} />
+                <BookingDetailsForm id={formId} invalid={invalid} onSubmit={(event) => void submit(event)} prefill={prefill} />
               </>
             )}
           </div>

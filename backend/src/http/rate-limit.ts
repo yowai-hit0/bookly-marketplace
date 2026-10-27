@@ -64,7 +64,12 @@ export type RateLimitName =
   | 'googleStartPerIp'
   | 'googleCallbackPerIp'
   | 'emailChangePerIp'
-  | 'payoutMethodPerIp';
+  | 'payoutMethodPerIp'
+  | 'accountPasswordPerIp'
+  | 'accountEmailChangePerIp'
+  | 'accountEmailConfirmPerIp'
+  | 'accountDeletePerIp'
+  | 'accountExportPerIp';
 
 const MINUTE = 60_000;
 
@@ -100,6 +105,18 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitName, RateLimitRule> = {
   // script holding a stolen token does not get to keep trying. The password
   // check also counts toward the login lockout.
   payoutMethodPerIp: { limit: 10, windowMs: 60 * MINUTE },
+  // The client dashboard (Phase 8). Changing or adding a password hashes one
+  // (Argon2), checks the current one too, and sends a security email; so does
+  // asking to change the address, which also emails the new one. The address's
+  // confirmation checks a password like a verification. Deleting checks one.
+  // Each check also counts toward the login lockout, which is the real guard.
+  accountPasswordPerIp: { limit: 10, windowMs: 60 * MINUTE },
+  accountEmailChangePerIp: { limit: 10, windowMs: 60 * MINUTE },
+  accountEmailConfirmPerIp: { limit: 10, windowMs: 60 * MINUTE },
+  accountDeletePerIp: { limit: 10, windowMs: 60 * MINUTE },
+  // The export reads everything the account holds: a person downloads it once
+  // or twice, a script holding a stolen token does not get to loop on it.
+  accountExportPerIp: { limit: 10, windowMs: 60 * MINUTE },
 };
 
 export type RateLimitOverrides = Partial<Record<RateLimitName, RateLimitRule>>;

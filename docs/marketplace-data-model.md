@@ -11,6 +11,8 @@ Companion to `docs/marketplace-spec.md`. Supersedes `docs/data-model_v2.md` for 
 - **New table `oauth_flow`** (Phase 2 decision 6, §3.14), migration `20261017104433_oauth_flow`. The marketplace therefore has **27** tables once subscriptions and payouts land (22 after Phase 2).
 - `account_verify_email` and `photographer_application_received` have renderers from Phase 2 (no CHECK change); `account_security_alert` gains the variant `account_exists` (marketplace-spec.md R2.1c).
 - **Linking** (§2.8) runs on verification, on a password reset that verifies, and on Google sign-in; it skips erased client rows (`anonymized_at IS NULL`).
+- **Phase 8, the client dashboard** (migration `20261027120000_account_dashboard`; marketplace-spec.md Phase 8 as built): `app_user` gains `phone text` (CHECK `app_user_phone_e164`), and `pending_email text`, `pending_email_token_hash text`, `pending_email_expires_at timestamptz` for an address change (CHECK `app_user_pending_email_complete`: all three or none; partial unique `app_user_pending_email_token_hash_unique`). `app_user_has_credential` is relaxed to `password_hash IS NOT NULL OR google_sub IS NOT NULL OR anonymized_at IS NOT NULL`, so an erased account may hold no credential. No template CHECK change: `account_verify_email` gains the variant `email_change`, `account_security_alert` the variants `password_changed` and `email_changed` (§2.14). Linking (§2.8) also runs when an address change is confirmed, for the new address; deleting an account clears `client.user_id` on its rows.
+- **Phase 8 follow-up, account deletion and the outbox** (migration `20261027140000_outbox_erase_on_completion`, user decisions 2026-10-27): `outbox` gains `erase_on_completion boolean NOT NULL DEFAULT false` (CHECK `outbox_erase_on_completion_email_only`), and `account_security_alert` the variant `account_deleted`. Deleting an account erases the user's account-mail rows and sends one notice that erases itself once delivered (§2.14).
 
 | | |
 |---|---|
@@ -120,6 +122,7 @@ The row is created in the same transaction as `photographer`.
 - **Linking:**
   - On email verification: `UPDATE client SET user_id = $user WHERE lower(email) = lower($verified_email) AND user_id IS NULL`.
   - In `upsertClient` (`booking/client.ts:24-36`), set `user_id` from a verified client account with the same email. On conflict, use `COALESCE(client.user_id, EXCLUDED.user_id)`.
+  - Phase 8: on a confirmed address change, the same UPDATE for the new address. On account erasure, `UPDATE client SET user_id = NULL WHERE user_id = $user`; the rows themselves are kept.
 - **Privacy:** photographer endpoints show only the booking snapshots (`contact_*`), never the live `client` row.
 
 ### 2.9 `Booking` (`booking`)
@@ -275,6 +278,9 @@ ALTER TABLE "outbox"
   - Account and platform mail (`account_*`, `platform_alert`) has no `photographer_id`.
   - When the worker gives up on a row, the alert goes to the row's photographer as `photographer_alert`. A row with no photographer alerts every platform admin whose login is on, one `platform_alert` row each. A failed alert is logged only.
   - The names reserved for later phases (`account_verify_email`, `photographer_*` lifecycle mail, `subscription_*`, `payout_sent`) are in the CHECK but have no renderer yet. In code, `RESERVED_EMAIL_TEMPLATES` lists them and `enqueue()` refuses them at the type level.
+- **Phase 8 (no CHECK change):** the client dashboard's mail reuses two account templates as variants, rather than adding names. `account_verify_email` variant `email_change` (an address change's confirmation link, `/account/email-confirm/<token>`, to the NEW address; absent `variant` is the signup's link, so older rows still render). `account_security_alert` variants `password_changed` (`added: true` when a Google-only account added its first password; to the account) and `email_changed` (to the OLD address once the change is confirmed, naming the new one masked). Like all account mail, no `photographer_id`. `email_changed_notice` stays the booking contact-email change's, whose payload is a booking's.
+- **Account mail and erasure (Phase 8 follow-up, 2026-10-27).** *Account mail* is exactly `account_verify_email`, `account_password_reset` and `account_security_alert` (`outbox/erasure.ts` `ACCOUNT_MAIL_TEMPLATES`): rows with no booking and no photographer, addressed to a login, whose dedupe key names the user's id. Deleting a client's account erases theirs in the deletion's transaction, by the rule of data-model_v2.md §10.2: `recipient` → `'[erased]'`, `payload` → null, and a `pending` or `processing` row → `cancelled`. A row is theirs when addressed to the current or the pending address (case-insensitive) or keyed by their id. Booking mail (every template filed under a booking: confirmations, receipts, cancellations, contact-email changes, notes, deliveries) is never touched by an account deletion; it is the photographer's record, and the client erasure of §10.2 is a separate act.
+- **`erase_on_completion`** (same migration): a row so marked erases its own `recipient` and `payload` in the statement that moves it to `done` or `failed`, an abandoned row included; a retry (back to `pending`) keeps both. Its one user is the deletion notice (`account_security_alert` variant `account_deleted`, dedupe `email:account_security_alert:account_deleted:<user>`), which goes to the very address being erased and is enqueued after the scrub, so the scrub never erases it. `last_error` is not erased.
 
 ## 3. New models
 
@@ -298,6 +304,10 @@ model AppUser {
   disabledAt             DateTime? @map("disabled_at") @db.Timestamptz(6)
   anonymizedAt           DateTime? @map("anonymized_at") @db.Timestamptz(6)
   tokenVersion           Int       @default(0) @map("token_version")   /// Phase 2: revokes every token when bumped
+  phone                  String?                                       /// Phase 8: the client's own, E.164
+  pendingEmail           String?   @map("pending_email")               /// Phase 8: an address change awaiting the new inbox
+  pendingEmailTokenHash  String?   @map("pending_email_token_hash")    /// SHA-256 of its 256-bit token; partial unique
+  pendingEmailExpiresAt  DateTime? @map("pending_email_expires_at") @db.Timestamptz(6)   /// 24 hours
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -310,6 +320,12 @@ model AppUser {
 }
 ```
 `photographer.user_id` must point at a user with `role = 'photographer'`. This is enforced in the signup transaction and covered by a test.
+
+**Phase 8 (the client dashboard; migration `20261027120000_account_dashboard`, user decisions 2026-10-27):**
+- **`phone`** is the client's own number (decision 1), stored E.164 as the studio's contact phones are (`booking/phone.ts`, then `^\+[1-9]\d{6,14}$`; CHECK `app_user_phone_e164`). It prefills the booking form. A booking keeps its own `contact_*` snapshot and the shared `client` row its own phone, so editing the account never rewrites either.
+- **`pending_email`, `pending_email_token_hash`, `pending_email_expires_at`**: an address change asked for with the password and not yet confirmed from the new inbox. The token is 256 bits, emailed to the new address only (`account_verify_email`, variant `email_change`), stored as its SHA-256, 24 hours, replaced by a newer request, cleared on confirmation, on `email_taken`, and on erasure. CHECK `app_user_pending_email_complete` (all three or none); partial unique `app_user_pending_email_token_hash_unique`. An address another account holds is stored pending too (no enumeration), but no link is sent to it.
+- **Confirming** sets `email` to the pending address and `email_verified_at` to now, clears the pending columns, any verification link and any reset link (the latter went to the old inbox), and links the unclaimed `client` rows under the new address (§2.8). Rows linked under the old address stay linked. `google_sub` is untouched: Google sign-in finds the account by subject first.
+- **Erasure** (R8.3, decision 4) anonymises the row instead of deleting it: `email` becomes `deleted-<id>@deleted.invalid` (unique, never deliverable), `full_name`, `phone`, `password_hash`, `google_sub`, `email_verified_at`, `last_login_at`, every token hash and expiry and the pending change become null, the lockout is cleared, `anonymized_at` is set and `token_version` incremented. `disabled_at` is left null: it is a platform admin's reversible switch. `client.user_id` is cleared on the account's rows; the `client` rows, the bookings and their snapshots stay. `app_user_has_credential` admits the erased row (`… OR anonymized_at IS NOT NULL`). A later Google sign-in with the same Google account creates a new row; so does a later signup with the address, which links the unclaimed `client` rows once verified, like any signup. The same transaction erases the user's account mail from the outbox and enqueues the deletion notice (§2.14).
 
 ### 3.2 `PlatformSetting` and `PhotographerSetting`
 ```prisma
@@ -925,5 +941,5 @@ Paths are relative to `backend/src/`.
 - **Districts:** 30 rows, FK enforced. `test/database.ts` must not truncate `district`.
 - **Outbox:** a `booking_id` requires a `photographer_id`; the new templates are accepted; `admin_alert` is refused.
 - **Referential:** a photographer with bookings can't be deleted; configuration rows cascade; deleting a user sets `client.user_id` to null; a category in use can't be deleted.
-- **app_user:** Google-only for clients only; at least one credential.
+- **app_user:** Google-only for clients only; at least one credential. Phase 8: an erased row may hold none (a live or disabled one still may not); the phone is E.164 or null; a pending address change is all three columns or none; its token hash addresses one login (`app_user_pending_email_token_hash_unique`).
 - **Fixtures:** `test/payment-fixtures.ts` and `db/seed.test.ts` are updated to create a photographer with a live subscription.

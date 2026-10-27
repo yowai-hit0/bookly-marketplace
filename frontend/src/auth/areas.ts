@@ -20,8 +20,12 @@ export const AREA_PATHS: Record<Area, AreaPaths> = {
   account: { prefix: '/account', login: '/account/login', home: '/account' },
 }
 
-/** The signed-out pages under each area's prefix: never a place to return to after signing in. */
-const SIGNED_OUT_PAGES = ['login', 'signup', 'reset-password', 'verify', 'google']
+/**
+ * The signed-out pages under each area's prefix: never a place to return to
+ * after signing in. The account's address-change confirmation and its
+ * "deleted" page (Phase 8) are among them.
+ */
+const SIGNED_OUT_PAGES = ['login', 'signup', 'reset-password', 'verify', 'google', 'email-confirm', 'deleted']
 
 /** The query parameter the login page reads its return path from. */
 export const NEXT_PARAM = 'next'

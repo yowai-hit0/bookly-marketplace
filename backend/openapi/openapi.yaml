@@ -86,7 +86,7 @@ tags:
   - name: Account auth
     description: Signup, login, email verification, password reset and Google sign-in for a client.
   - name: Account
-    description: A client's own account.
+    description: "A client's own account and dashboard (Phase 8): bookings across photographers, payments and receipts, profile, password, address, export and deletion."
   - name: Webhooks
     description: Inbound payment-provider callbacks. Called by providers, never by browsers.
 paths:
@@ -298,6 +298,32 @@ paths:
     $ref: paths/account.yaml#/googleCallback
   /api/account/me:
     $ref: paths/account.yaml#/me
+  /api/account/email/confirm:
+    $ref: paths/account.yaml#/emailConfirm
+  /api/account/bookings:
+    $ref: paths/account.yaml#/bookings
+  /api/account/bookings/{reference}:
+    $ref: paths/account.yaml#/booking
+  /api/account/bookings/{reference}/cancel:
+    $ref: paths/account.yaml#/bookingCancel
+  /api/account/bookings/{reference}/payments:
+    $ref: paths/account.yaml#/bookingPayments
+  /api/account/payments:
+    $ref: paths/account.yaml#/payments
+  /api/account/payments/{ourRef}:
+    $ref: paths/account.yaml#/payment
+  /api/account/profile:
+    $ref: paths/account.yaml#/profile
+  /api/account/password:
+    $ref: paths/account.yaml#/password
+  /api/account/password/set:
+    $ref: paths/account.yaml#/passwordSet
+  /api/account/email:
+    $ref: paths/account.yaml#/email
+  /api/account/export:
+    $ref: paths/account.yaml#/export
+  /api/account/delete:
+    $ref: paths/account.yaml#/delete
   # --- Webhooks -------------------------------------------------------------
   /api/webhooks/mtn-momo/{ourRef}/{signature}:
     $ref: paths/webhooks.yaml#/mtnMomo
@@ -327,7 +353,10 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: |
-        HS256 JWT from `POST /api/account/auth/login`, `/verify` or
-        `/google/callback`, audience `bookly-account`, valid 7 days. Revoked
-        like the studio's (a Google-only client by a token revocation or by
-        adding a password); refused outside the account area.
+        HS256 JWT from `POST /api/account/auth/login`, `/verify`,
+        `/google/callback`, `/api/account/email/confirm`, or a password change
+        or addition (`/api/account/password`, `/password/set`, which answer a
+        fresh one), audience `bookly-account`, valid 7 days. Revoked like the
+        studio's (a Google-only client by a token revocation or by adding a
+        password; every client by deleting the account); refused outside the
+        account area.

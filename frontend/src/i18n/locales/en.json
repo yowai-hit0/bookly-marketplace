@@ -1955,6 +1955,232 @@
       "loading": "Loading your account…",
       "loadFailed": "Could not load your account. Check your connection and try again.",
       "retry": "Try again"
+    },
+    "nav": {
+      "label": "Your account",
+      "bookings": "Bookings",
+      "payments": "Payments",
+      "profile": "Profile",
+      "signOut": "Sign out"
+    },
+    "dashboard": {
+      "lead": "Your bookings with every photographer, in one place.",
+      "tabsLabel": "Which bookings",
+      "upcoming": "Upcoming",
+      "past": "Past",
+      "loading": "Loading your bookings…",
+      "loadFailed": "Could not load your bookings. Check your connection and try again.",
+      "emptyUpcomingTitle": "No upcoming bookings",
+      "emptyUpcomingBody": "When you book a photographer with this account's email, the booking shows up here.",
+      "emptyPastTitle": "No past bookings yet",
+      "emptyPastBody": "A booking moves here once its shoot is over or it is cancelled.",
+      "findPhotographer": "Find a photographer",
+      "heldUntil": "Held until {{time}}. Pay the booking fee to confirm it.",
+      "finishPayment": "Finish payment",
+      "count_one": "{{count}} booking",
+      "count_other": "{{count}} bookings"
+    },
+    "pagination": {
+      "label": "Pages",
+      "previous": "Previous page",
+      "next": "Next page",
+      "status": "Page {{page}} of {{count}}"
+    },
+    "booking": {
+      "back": "All bookings",
+      "notFoundTitle": "Booking not found",
+      "notFoundBody": "There is no booking with that reference on this account. It may belong to another account, or the address may be mistyped.",
+      "photographerTitle": "Your photographer",
+      "profileLink": "See their profile",
+      "noContact": "They have not shared contact details on Bookly yet. Their profile has their services and terms.",
+      "heldTitle": "Not confirmed yet",
+      "heldBody": "This time is held for you, but not booked yet. Pay the booking fee before the hold ends to confirm it.",
+      "heldEnds": "The hold ends {{time}}."
+    },
+    "progress": {
+      "back": "Back to your booking"
+    },
+    "payments": {
+      "title": "Payments",
+      "lead": "Every payment on your bookings, newest first.",
+      "loading": "Loading your payments…",
+      "loadFailed": "Could not load your payments. Check your connection and try again.",
+      "emptyTitle": "No payments yet",
+      "emptyBody": "Payments you make for your bookings show up here, with a receipt for each one that went through.",
+      "kind": {
+        "booking_fee": "Booking fee",
+        "session_fee": "Session fee"
+      },
+      "status": {
+        "initiated": "Started",
+        "pending": "Waiting for approval",
+        "succeeded": "Paid",
+        "failed": "Did not go through",
+        "refund_due": "Refund due",
+        "refunded": "Refunded"
+      },
+      "method": {
+        "momo_mtn": "MTN MoMo",
+        "momo_airtel": "Airtel Money",
+        "card": "Card",
+        "cash": "Paid to the photographer"
+      },
+      "failure": {
+        "declined": "It was declined on the phone, or not approved in time.",
+        "unavailable": "Mobile Money could not be reached at the time."
+      },
+      "labels": {
+        "booking": "Booking",
+        "method": "Method",
+        "date": "Date",
+        "reference": "Payment reference"
+      },
+      "refundDue": "{{amount}} is owed back to you.",
+      "refunded": "{{amount}} was refunded on {{date}}.",
+      "refundedNoDate": "{{amount}} was refunded.",
+      "transfer": "Transfer reference: {{reference}}",
+      "overpaid": "{{amount}} more than was asked was paid. It is being sent back to you.",
+      "overpaidRefunded": "{{amount}} more than was asked was paid, and was refunded on {{date}}.",
+      "receipt": "View receipt"
+    },
+    "receipt": {
+      "back": "All payments",
+      "eyebrow": "Receipt",
+      "title": "Payment receipt",
+      "print": "Print",
+      "loading": "Loading the receipt…",
+      "loadFailed": "Could not load the receipt. Check your connection and try again.",
+      "notFoundTitle": "Receipt not found",
+      "notFoundBody": "There is no payment with that reference on this account.",
+      "noReceiptTitle": "No receipt for this payment",
+      "noReceiptPending": "This payment is still waiting for approval. Its receipt appears here once the money arrives.",
+      "noReceiptFailed": "This payment did not go through, so no money was taken and there is no receipt.",
+      "labels": {
+        "receiptNo": "Receipt number",
+        "billedTo": "Billed to",
+        "photographer": "Photographer",
+        "booking": "Booking reference",
+        "service": "Service",
+        "session": "Session",
+        "paidFor": "Payment for",
+        "method": "Method",
+        "paidOn": "Paid on",
+        "status": "Status"
+      },
+      "itemsTitle": "Booking price",
+      "addonLine": "{{name}} × {{quantity}}",
+      "addedAfter": "Added after the shoot",
+      "bookingFee": "Of which the booking fee, paid when booking",
+      "amountPaid": "Amount paid",
+      "refundTitle": "Refund",
+      "kigaliTime": "All times are Kigali time."
+    },
+    "profile": {
+      "title": "Profile",
+      "lead": "Your details, how you sign in, and your data.",
+      "loading": "Loading your profile…",
+      "loadFailed": "Could not load your profile. Check your connection and try again.",
+      "emailChanged": "Your email is changed. You now sign in with {{email}}."
+    },
+    "details": {
+      "title": "Your details",
+      "intro": "We fill these in for you when you book. Bookings you have already made keep the details they were made with.",
+      "fullName": "Full name",
+      "phone": "Phone number",
+      "phoneHint": "Optional. A Rwandan number like 078 123 4567, or any number starting with + and the country code.",
+      "save": "Save details",
+      "saving": "Saving…",
+      "saved": "Your details are saved.",
+      "errors": {
+        "phone": "Enter a phone number like 078 123 4567, or one starting with + and the country code.",
+        "failed": "Could not save your details. Check your connection and try again."
+      }
+    },
+    "password": {
+      "title": "Password",
+      "changeIntro": "Changing your password signs you out on every other device.",
+      "current": "Current password",
+      "new": "New password",
+      "change": "Change password",
+      "changing": "Changing…",
+      "changed": "Your password is changed. You are signed out on every other device.",
+      "addIntro": "You sign in with Google. Add a password to sign in with your email and password too.",
+      "add": "Add password",
+      "adding": "Adding…",
+      "added": "Password added. You can sign in with your email and password, or with Google.",
+      "errors": {
+        "current": "That is not your current password.",
+        "locked": "Too many wrong passwords. Wait a few minutes and try again, or reset your password from the sign-in page.",
+        "changedElsewhere": "Your password was changed somewhere else just now. Sign in again with the new one.",
+        "exists": "This account already has a password, so you can change it here instead.",
+        "noPassword": "This account has no password yet, so you can add one here instead.",
+        "failed": "Could not save the password. Check your connection and try again.",
+        "required": "Enter your current password."
+      }
+    },
+    "email": {
+      "title": "Email",
+      "current": "You sign in with {{email}}.",
+      "pending": "Waiting for you to confirm {{email}} from its inbox. Until then you sign in with {{current}}.",
+      "intro": "We send a link to the new address. The change happens once you open it and enter your password.",
+      "googleOnly": "Your email is the one you signed up with through Google. To change it here, add a password first: it confirms the change.",
+      "newEmail": "New email",
+      "password": "Your password",
+      "submit": "Send the link",
+      "submitting": "Sending…",
+      "sent": "If {{email}} can be used, we've sent a link to it. Open it within 24 hours to finish the change.",
+      "errors": {
+        "same": "That is already your email.",
+        "password": "That is not your password.",
+        "passwordRequired": "Add a password first: it confirms the change.",
+        "failed": "Could not send the link. Check your connection and try again.",
+        "enterPassword": "Enter your password."
+      }
+    },
+    "export": {
+      "title": "Your data",
+      "intro": "Download everything your account holds, your details, bookings and payments, as one JSON file.",
+      "download": "Download my data",
+      "downloading": "Preparing…",
+      "done": "Your download has started.",
+      "failed": "Could not prepare the download. Check your connection and try again."
+    },
+    "delete": {
+      "title": "Delete account",
+      "intro": "Removes your name, phone number and sign-in details for good. Photographers keep the records of bookings made with them.",
+      "open": "Delete my account",
+      "dialogTitle": "Delete your account?",
+      "warning": "This cannot be undone. Your name, phone number and sign-in details are removed, and you are signed out.",
+      "upcoming": "Upcoming bookings carry on. Open them from the links in your booking emails; the photographer still has the details you booked with.",
+      "passwordLabel": "Enter your password to confirm",
+      "emailLabel": "Type your email to confirm",
+      "emailHint": "Your email is {{email}}.",
+      "confirm": "Yes, delete my account",
+      "deleting": "Deleting…",
+      "keep": "Keep my account",
+      "close": "Close",
+      "errors": {
+        "password": "That is not your password.",
+        "email": "That is not this account's email.",
+        "required": "Fill this in to confirm.",
+        "failed": "Could not delete the account. Check your connection and try again."
+      },
+      "emailNotice": "We send a confirmation to {{email}} once it is done."
+    },
+    "deleted": {
+      "title": "Your account is deleted",
+      "body": "We have removed your details, signed you out and emailed a confirmation to your address. Upcoming bookings carry on: open them from the links in your booking emails.",
+      "findBooking": "Get my booking links"
+    },
+    "emailConfirm": {
+      "title": "Confirm your new email",
+      "intro": "Enter your Bookly password to finish changing the email you sign in with.",
+      "password": "Password",
+      "submit": "Confirm and sign in",
+      "submitting": "Confirming…",
+      "invalid": "That did not work. The link may have expired, been replaced or used already, or the password is not this account's.",
+      "taken": "Another account now uses that address, so the change was withdrawn. You still sign in with your old email.",
+      "failed": "Could not confirm the change. Check your connection and try again."
     }
   },
   "directory": {

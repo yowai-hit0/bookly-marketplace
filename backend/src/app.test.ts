@@ -32,6 +32,8 @@ describe('the API', () => {
       // Admin auth is a bearer token, not a cookie (plan.md Task 7, rev 2.3), so
       // nothing needs the browser to attach credentials.
       expect(res.headers['access-control-allow-credentials']).toBeUndefined();
+      // The account export's filename must reach the page that saves it.
+      expect(res.headers['access-control-expose-headers']).toBe('Content-Disposition');
     });
 
     it('sends no Allow-Origin header to an unlisted origin', async () => {

@@ -26,13 +26,36 @@ export function toPublicUser(user: AppUser): PublicUser {
 }
 
 /**
- * A client's own view of their account (`GET /api/account/me`): the public user
- * and the name they gave, for the greeting. Still an allowlist; whether the
- * account has a password or a Google identity stays private (Phase 8 decides
- * what the profile page needs).
+ * A client's own view of their account (`GET /api/account/me`): the public user,
+ * the name they gave for the greeting, and what the dashboard's profile page
+ * needs (marketplace-spec.md Phase 8, decisions 1 and 2):
+ *
+ * - `phone`: their own number, E.164, which prefills the booking form;
+ * - `hasPassword` and `hasGoogle`: which credentials the account holds -- whether,
+ *   never what. The page offers "change password" or "add a password", and
+ *   asks a Google-only account to type its address to delete it;
+ * - `pendingEmail`: an address change waiting on the new inbox, while its link
+ *   still works; null once it has lapsed.
+ *
+ * Still an allowlist: the hashes, the Google subject, the token version and
+ * the lockout state never leave.
  */
-export type AccountUser = PublicUser & { fullName: string | null };
+export type AccountUser = PublicUser & {
+  fullName: string | null;
+  phone: string | null;
+  hasPassword: boolean;
+  hasGoogle: boolean;
+  pendingEmail: string | null;
+};
 
-export function toAccountUser(user: AppUser): AccountUser {
-  return { ...toPublicUser(user), fullName: user.fullName };
+export function toAccountUser(user: AppUser, now: Date): AccountUser {
+  const pendingLive = user.pendingEmail !== null && user.pendingEmailExpiresAt !== null && user.pendingEmailExpiresAt > now;
+  return {
+    ...toPublicUser(user),
+    fullName: user.fullName,
+    phone: user.phone,
+    hasPassword: user.passwordHash !== null,
+    hasGoogle: user.googleSub !== null,
+    pendingEmail: pendingLive ? user.pendingEmail : null,
+  };
 }

@@ -4,7 +4,7 @@ import type { FormEvent } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import type { DetailField } from '@/catalogue/bookings'
-import { BookingDetailsForm } from './BookingDetailsForm'
+import { type BookingPrefill, BookingDetailsForm } from './BookingDetailsForm'
 
 /**
  * The booking form (plan.md Task 13, spec §3.1 step 6, A-13): exactly the
@@ -196,5 +196,64 @@ describe('the booking form', () => {
     for (const email of screen.getAllByRole('textbox', { name: 'Email' })) {
       expect(email).toHaveAccessibleDescription('Enter a valid email address.')
     }
+  })
+})
+
+/**
+ * A signed-in client's own details fill the empty name, email and phone
+ * (marketplace-spec Phase 8, decision 1): editable, never over what was
+ * typed, once per account, and nothing at all for a guest.
+ */
+describe('the prefill', () => {
+  const PREFILL: BookingPrefill = { key: 'c1', fullName: 'Aline Uwase', email: 'aline@example.com', phone: '+250788123456' }
+
+  function renderWith(prefill: BookingPrefill | null) {
+    const ui = (value: BookingPrefill | null) => <BookingDetailsForm id={FORM_ID} invalid={new Set()} onSubmit={vi.fn()} prefill={value} />
+    const view = render(ui(prefill))
+    return { rerender: (value: BookingPrefill | null) => view.rerender(ui(value)) }
+  }
+
+  it('fills the name, email and phone, and leaves the rest empty', () => {
+    renderWith(PREFILL)
+    expect(screen.getByRole('textbox', { name: 'Full name' })).toHaveValue('Aline Uwase')
+    expect(screen.getByRole('textbox', { name: 'Email' })).toHaveValue('aline@example.com')
+    expect(screen.getByRole('textbox', { name: 'Phone number' })).toHaveValue('+250788123456')
+    expect(screen.getByRole('textbox', { name: 'Shoot location' })).toHaveValue('')
+  })
+
+  it('the filled values stay editable', async () => {
+    renderWith(PREFILL)
+    const user = userEvent.setup({ delay: null })
+    const name = screen.getByRole('textbox', { name: 'Full name' })
+    await user.clear(name)
+    await user.type(name, 'Someone Else')
+    expect(name).toHaveValue('Someone Else')
+  })
+
+  it('arriving late, it never writes over what was typed, and fills only what is empty', async () => {
+    const view = renderWith(null)
+    await userEvent.setup({ delay: null }).type(screen.getByRole('textbox', { name: 'Email' }), 'typed@example.com')
+    view.rerender(PREFILL)
+    expect(screen.getByRole('textbox', { name: 'Email' })).toHaveValue('typed@example.com')
+    expect(screen.getByRole('textbox', { name: 'Full name' })).toHaveValue('Aline Uwase')
+  })
+
+  it('a field cleared after filling stays clear when the account answers again', async () => {
+    const view = renderWith(PREFILL)
+    await userEvent.setup({ delay: null }).clear(screen.getByRole('textbox', { name: 'Phone number' }))
+    view.rerender({ ...PREFILL })
+    expect(screen.getByRole('textbox', { name: 'Phone number' })).toHaveValue('')
+  })
+
+  it('an account with no name or phone fills only the email', () => {
+    renderWith({ ...PREFILL, fullName: null, phone: null })
+    expect(screen.getByRole('textbox', { name: 'Full name' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'Phone number' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'Email' })).toHaveValue('aline@example.com')
+  })
+
+  it('a guest gets an empty form', () => {
+    renderWith(null)
+    for (const name of ['Full name', 'Email', 'Phone number']) expect(screen.getByRole('textbox', { name })).toHaveValue('')
   })
 })

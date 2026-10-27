@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 import { bookingPath } from '@/catalogue/booking-access'
 import { type PaymentProgress, checkoutPath, fetchPaymentProgress } from '@/catalogue/payments'
+import { BackLink } from '@/components/ui/back-link'
 import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -61,7 +62,18 @@ function viewOf(progress: PaymentProgress): View {
   }
 }
 
-export function PaymentProgressPage() {
+type Props = {
+  /**
+   * Where another attempt starts, when it is not one of the guest pages: the
+   * dashboard's booking page for a session fee paid from the account
+   * (marketplace-spec R8.1). Without it, the checkout or the guest booking page.
+   */
+  payAgainAt?: string
+  /** A way back to where the payment started, shown under every outcome (the dashboard's booking). */
+  back?: { to: string; label: string }
+}
+
+export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Props = {}) {
   const { t } = useTranslation()
   const { reference = '', token = '', ourRef = '' } = useParams()
   /** Tagged with the payment it describes, so another payment's answer is never shown as this one's. */
@@ -152,7 +164,7 @@ export function PaymentProgressPage() {
   const { booking } = progress
   // The booking fee is paid from a checkout link, the session fee from the
   // client's own booking page: another attempt belongs where this one started.
-  const payAgainAt = reference === '' ? bookingPath(token) : checkoutPath(reference, token)
+  const payAgainAt = payAgainOverride ?? (reference === '' ? bookingPath(token) : checkoutPath(reference, token))
 
   const heading = (key: string) => (
     <h1 ref={headingRef} tabIndex={-1} className={cn(statusTitle, 'outline-none')}>
@@ -262,6 +274,8 @@ export function PaymentProgressPage() {
         startsAt={booking.startsAt}
         endsAt={booking.endsAt}
       />
+
+      {back !== undefined && <BackLink to={back.to}>{back.label}</BackLink>}
     </main>
   )
 }

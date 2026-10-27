@@ -1,5 +1,5 @@
 import { Check, CircleAlert } from 'lucide-react'
-import { type FormEvent, useId } from 'react'
+import { type FormEvent, useEffect, useId, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { DetailField } from '@/catalogue/bookings'
 import { Input } from '@/components/ui/input'
@@ -25,7 +25,17 @@ type Props = {
   /** Fields to mark wrong: the form's own check, or the API's 422. */
   invalid: ReadonlySet<DetailField>
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  /**
+   * A signed-in client's own details (marketplace-spec Phase 8, decision 1):
+   * written into the name, email and phone fields that are still empty, once
+   * per account, and editable like anything typed. Null for a guest.
+   */
+  prefill?: BookingPrefill | null
 }
+
+export type BookingPrefill = { key: string; fullName: string | null; email: string | null; phone: string | null }
+
+const PREFILLED = ['fullName', 'email', 'phone'] as const
 
 type TextField = {
   name: Exclude<DetailField, 'consent'>
@@ -49,13 +59,28 @@ const TEXT_FIELDS: readonly TextField[] = [
   { name: 'specialRequests', multiline: true, hint: true, wide: true },
 ]
 
-export function BookingDetailsForm({ id, invalid, onSubmit }: Props) {
+export function BookingDetailsForm({ id, invalid, onSubmit, prefill = null }: Props) {
   const { t } = useTranslation()
   const idPrefix = useId()
   const headingId = `${idPrefix}heading`
+  const formRef = useRef<HTMLFormElement>(null)
+  /** The account already written in: a field the visitor then clears stays clear. */
+  const prefilledFor = useRef<string | null>(null)
+
+  useEffect(() => {
+    const form = formRef.current
+    if (prefill === null || form === null || prefilledFor.current === prefill.key) return
+    prefilledFor.current = prefill.key
+    for (const name of PREFILLED) {
+      const value = prefill[name]?.trim() ?? ''
+      const input = form.elements.namedItem(name)
+      // Never over what the visitor has already typed.
+      if (value !== '' && input instanceof HTMLInputElement && input.value === '') input.value = value
+    }
+  }, [prefill])
 
   return (
-    <form id={id} noValidate onSubmit={onSubmit} aria-labelledby={headingId} className="flex flex-col gap-5">
+    <form ref={formRef} id={id} noValidate onSubmit={onSubmit} aria-labelledby={headingId} className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
         <h2 id={headingId} className={cn(panelTitle, stepNumber)}>
           {t('services:booking.title')}

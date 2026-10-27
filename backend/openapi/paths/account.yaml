@@ -281,6 +281,11 @@ me:
     operationId: getAccountMe
     tags: [Account]
     summary: The signed-in client
+    description: |
+      The account as the dashboard needs it (Phase 8): the name and phone,
+      which credentials it holds (`hasPassword`, `hasGoogle`; never what they
+      are), and an address change still waiting on its link (`pendingEmail`).
+      `Cache-Control: no-store`.
     security:
       - accountBearer: []
     responses:
@@ -291,3 +296,504 @@ me:
             schema: { $ref: ../components/auth.yaml#/schemas/AccountMe }
       '401':
         $ref: ../components/common.yaml#/responses/Unauthorized
+
+# --- The client dashboard (marketplace-spec.md Phase 8) ------------------------
+# Every operation below but `emailConfirm` is the signed-in client's own. A
+# booking reference or a payment's `ourRef` that is not the account's answers
+# exactly like one that names nothing: 404 not_found (T8.1).
+# `Cache-Control: no-store` throughout.
+
+bookings:
+  get:
+    operationId: listAccountBookings
+    tags: [Account]
+    summary: My bookings, across photographers
+    description: |
+      Every booking made under an address the account has proven (R8.1, R8.4),
+      whichever photographer it is with: a guest booking made later with the
+      account's verified address appears here by itself.
+
+      `upcoming`: `confirmed` with the shoot not yet over (in progress
+      included), and a `pending_payment` hold while it is live, with
+      `checkoutPath` to finish paying it. Soonest first. `past`: `completed`,
+      `no_show`, every cancellation, and `confirmed` whose shoot is over.
+      Latest first. An expired hold is in neither list (it never became a
+      booking); its reference still opens its page. Pages of 20.
+    security:
+      - accountBearer: []
+    parameters:
+      - $ref: ../components/account.yaml#/parameters/BookingScope
+      - $ref: ../components/account.yaml#/parameters/Page
+    responses:
+      '200':
+        description: One page.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountBookingsPage }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        description: A page below 1 or above 1,000,000.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+booking:
+  get:
+    operationId: getAccountBooking
+    tags: [Account]
+    summary: One of my bookings
+    description: The guest booking page's view, authorised by the session instead of the access token, with the photographer's contact details.
+    security:
+      - accountBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/Reference
+    responses:
+      '200':
+        description: The booking page.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountBookingDetail }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+bookingCancel:
+  post:
+    operationId: cancelAccountBooking
+    tags: [Account]
+    summary: Cancel one of my bookings
+    description: |
+      The guest page's cancellation (R1.8, T8.2): a `confirmed` booking before
+      the cut-off its photographer set when it was made. The booking fee is
+      refunded only where that policy says so; a session fee already paid is
+      always owed back. Both emails go as from the guest page.
+    security:
+      - accountBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/Reference
+    responses:
+      '200':
+        description: Cancelled; the booking page as it now stands.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountBookingDetail }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Already cancelled, past the cut-off, or never confirmed. Nothing changed.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountBookingConflict }
+
+bookingPayments:
+  post:
+    operationId: payAccountBookingSessionFee
+    tags: [Account]
+    summary: Pay the session fee of one of my bookings
+    description: |
+      The guest page's session-fee payment, with the same safety: the amount
+      is computed on the server, one attempt at a time, and the provider is the
+      one the method routes to (R3.1). Only mounted when payments are
+      configured. Shares the guest payment's rate limit.
+    security:
+      - accountBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/Reference
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/common.yaml#/schemas/PayRequest }
+    responses:
+      '201':
+        description: The phone is being prompted. Poll `GET /api/payments/{ourRef}`.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/PaymentStarted }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Nothing owed (`nothing_to_pay`, with the booking page), or an attempt already waiting (`payment_in_progress`).
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: ../components/account.yaml#/schemas/AccountBookingConflict
+                - $ref: ../components/common.yaml#/schemas/PaymentInProgress
+      '422':
+        description: A method not on offer, or an unusable phone number.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+      '502':
+        description: The provider refused the request or could not be reached.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/PaymentNotStarted }
+
+payments:
+  get:
+    operationId: listAccountPayments
+    tags: [Account]
+    summary: My payments
+    description: |
+      Every payment on my bookings that moved money or tried to (R8.2):
+      pending, succeeded, failed, owed back or refunded, newest first, with its
+      refund and any overpayment. Not an `initiated` row: a request the
+      photographer made that nobody has paid yet (the booking page asks for it),
+      or a provider call in its first seconds. Pages of 20.
+    security:
+      - accountBearer: []
+    parameters:
+      - $ref: ../components/account.yaml#/parameters/Page
+    responses:
+      '200':
+        description: One page.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountPaymentsPage }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        description: A page below 1 or above 1,000,000.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
+
+payment:
+  get:
+    operationId: getAccountReceipt
+    tags: [Account]
+    summary: The receipt of one of my payments
+    description: |
+      What the printable receipt page shows (R8.2). Only a payment that took
+      money has one: `succeeded`, `refund_due`, `refunded`. Another of my
+      payments is `409 no_receipt`; a payment that is not mine, or a malformed
+      `ourRef`, is `404`.
+    security:
+      - accountBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/OurRef
+    responses:
+      '200':
+        description: The receipt.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/ReceiptEnvelope }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: My payment, which took no money (yet).
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/NoReceipt }
+
+profile:
+  get:
+    operationId: getAccountProfile
+    tags: [Account]
+    summary: My name and phone
+    security:
+      - accountBearer: []
+    responses:
+      '200':
+        description: The profile.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountProfileEnvelope }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  patch:
+    operationId: updateAccountProfile
+    tags: [Account]
+    summary: Edit my name and phone
+    description: Bookings already made keep their own contact details (decision 1).
+    security:
+      - accountBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/account.yaml#/schemas/AccountProfileUpdate }
+    responses:
+      '200':
+        description: Saved.
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountProfileEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+
+password:
+  post:
+    operationId: changeAccountPassword
+    tags: [Account]
+    summary: Change my password
+    description: |
+      For an account with a password. The current one is checked with the
+      login's lockout. On success every other session is signed out (the
+      token fingerprint covers the password), a pending reset link dies, an
+      `account_security_alert` (`password_changed`) is emailed, and the answer
+      is a login's, with a fresh token for this session.
+
+      - `409 no_password`: a Google-only account; use `/password/set`.
+      - `409 credentials_changed`: the credentials changed between the check and the save; nothing was saved.
+    security:
+      - accountBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/account.yaml#/schemas/PasswordChangeRequest }
+    responses:
+      '200':
+        description: Changed; a fresh token.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '403':
+        $ref: ../components/account.yaml#/responses/WrongPassword
+      '409':
+        description: No password to change, or the credentials changed meanwhile.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            examples:
+              no_password: { value: { error: no_password } }
+              credentials_changed: { value: { error: credentials_changed } }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+passwordSet:
+  post:
+    operationId: setAccountPassword
+    tags: [Account]
+    summary: Add a password to my Google account
+    description: |
+      For a Google-only account (decision 2); afterwards it signs in either
+      way. There is no old password to check: the session is the proof, and
+      an `account_security_alert` (`password_changed`, `added`) tells the
+      inbox. Every other session is signed out; the answer is a login's, with
+      a fresh token for this one. `409 password_exists` for an account that
+      has a password (change it instead).
+    security:
+      - accountBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/account.yaml#/schemas/PasswordSetRequest }
+    responses:
+      '200':
+        description: Added; a fresh token.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '409':
+        description: The account already has a password.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: password_exists }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+email:
+  post:
+    operationId: requestAccountEmailChange
+    tags: [Account]
+    summary: Change my email address
+    description: |
+      Confirmed with the password. Stores the new address as pending (`/me`
+      shows it) and emails it a link to `/account/email-confirm/{token}`,
+      valid 24 hours; a new request replaces the old one. Nothing changes until
+      the link's page posts it with the password (`POST /api/account/email/confirm`).
+
+      The answer is `202` whether or not the new address already has an
+      account; if it has one, no link is sent and the change cannot complete.
+
+      - `409 password_required`: a Google-only account cannot change its
+        address (decision 2); add a password first.
+      - `422 validation_failed` `['newEmail']`: it is already the account's address.
+    security:
+      - accountBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/account.yaml#/schemas/EmailChangeRequest }
+    responses:
+      '202':
+        description: Asked.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/ResetAccepted }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '403':
+        $ref: ../components/account.yaml#/responses/WrongPassword
+      '409':
+        description: A Google-only account.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: password_required }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+emailConfirm:
+  post:
+    operationId: confirmAccountEmailChange
+    tags: [Account auth]
+    summary: Confirm a change of my email address
+    description: |
+      Posted by the page the link opens (opening it changes nothing). Needs no
+      session -- the link opens in a new tab -- but the token AND the
+      account's password: the token proves the new inbox, the password the
+      person. Either wrong, or the link lapsed, replaced or used, is one
+      answer, `400 invalid_confirmation`; a wrong password counts toward the
+      lockout.
+
+      On success the account's address is the new one, verified now; bookings
+      already linked stay linked, and the unclaimed bookings made under the
+      new address are linked too (decision 3). The old address is told, with
+      the new one masked. Google sign-in keeps working. The answer is a
+      login's. `409 email_taken`: another account took the address since the
+      request; the pending change is withdrawn.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/account.yaml#/schemas/EmailChangeConfirm }
+    responses:
+      '200':
+        description: Changed and signed in.
+        content:
+          application/json:
+            schema: { $ref: ../components/auth.yaml#/schemas/LoginResponse }
+      '400':
+        description: A malformed body (`invalid_request`), or a refused confirmation.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            examples:
+              invalid_request: { value: { error: invalid_request } }
+              invalid_confirmation: { value: { error: invalid_confirmation } }
+      '409':
+        description: The address now belongs to another account.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            example: { error: email_taken }
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+export:
+  get:
+    operationId: exportAccount
+    tags: [Account]
+    summary: Export my data
+    description: |
+      Everything the account holds as one JSON document, sent as an
+      attachment (`Content-Disposition: attachment; filename="bookly-account-YYYY-MM-DD.json"`):
+      the account, its contact records, its bookings and their payments
+      (R8.3, T8.4). Rate-limited.
+    security:
+      - accountBearer: []
+    responses:
+      '200':
+        description: The export.
+        headers:
+          Content-Disposition:
+            schema: { type: string }
+        content:
+          application/json:
+            schema: { $ref: ../components/account.yaml#/schemas/AccountExport }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
+
+delete:
+  post:
+    operationId: deleteAccount
+    tags: [Account]
+    summary: Delete my account
+    description: |
+      Confirmed with the password, or, for a Google-only account, by typing
+      its address. The account is anonymised: its address becomes a dead one,
+      its name, phone and both credentials are erased, and every token stops
+      working. The bookings stay for the photographers' records (Rwanda law
+      058/2021), linked to no account; upcoming ones carry on through the
+      links already emailed to them (decision 4). A later Google sign-in makes
+      a new account, and so does a later signup with the address, which links
+      the unclaimed bookings once verified, like any signup.
+
+      The account's own mail (verification, reset and security emails) is
+      erased from the outbox, and one `account_security_alert`
+      (`account_deleted`) is sent to the erased address; that row erases the
+      address itself once it has been delivered or given up on. Booking
+      emails are left as they are.
+
+      - `403 invalid_password` / `password_locked`: an account with a password.
+      - `403 invalid_confirmation`: a Google-only account whose typed address was missing or not its own.
+    security:
+      - accountBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: ../components/account.yaml#/schemas/DeleteAccountRequest }
+    responses:
+      '204':
+        description: Deleted. Discard the token.
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '403':
+        description: The confirmation was wrong.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+            examples:
+              invalid_password: { value: { error: invalid_password } }
+              password_locked: { value: { error: password_locked } }
+              invalid_confirmation: { value: { error: invalid_confirmation } }
+      '429':
+        $ref: ../components/common.yaml#/responses/RateLimited
