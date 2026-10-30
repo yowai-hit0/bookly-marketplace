@@ -2612,10 +2612,11 @@ describe('a late success for an attempt whose provider call failed on our side',
   });
 
   it('classifies exactly our own provider-call failures as revivable', () => {
-    for (const reason of ['superseded_by_cash', 'provider_timeout', 'provider_unavailable: MTN MoMo answered 503', 'provider_unavailable: Error']) {
+    // card_session_expired: a card session we closed with nothing paid (payments/reconcile.ts, 2026-10-30).
+    for (const reason of ['superseded_by_cash', 'provider_timeout', 'card_session_expired', 'provider_unavailable: MTN MoMo answered 503', 'provider_unavailable: Error']) {
       expect([reason, locallyFailed(reason)]).toEqual([reason, true]);
     }
-    for (const reason of [null, 'http_400', 'http_409', 'redirect_required', 'method_unavailable', 'phone_not_rwandan_mobile', 'PAYER_LIMIT_REACHED', 'failed', 'provider_unavailable', 'provider_timeout ']) {
+    for (const reason of [null, 'http_400', 'http_409', 'redirect_required', 'method_unavailable', 'phone_not_rwandan_mobile', 'PAYER_LIMIT_REACHED', 'failed', 'provider_unavailable', 'provider_timeout ', 'card_attempt_failed', 'card_session_expired ']) {
       expect([reason, locallyFailed(reason)]).toEqual([reason, false]);
     }
   });

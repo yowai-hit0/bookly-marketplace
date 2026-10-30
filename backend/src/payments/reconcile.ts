@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { type ScheduledTask, schedule } from 'node-cron';
-import type { PaymentProvider, PaymentProviderId } from './provider.js';
+import { CARD_SESSION_EXPIRED } from './flutterwave-checkout.js';
+import type { PaymentProvider, PaymentProviderId, ProviderEvent } from './provider.js';
 import { type WebhookDeps, recordEvent } from './webhooks.js';
 
 /**
@@ -15,6 +16,16 @@ import { type WebhookDeps, recordEvent } from './webhooks.js';
  * outcome would, so whichever arrives second is stored as a duplicate and
  * changes nothing. A payment still pending records nothing: a row a minute per
  * waiting payment would bury the ones that matter.
+ *
+ * A card (Flutterwave v3 Inline, 2026-10-30) has two more rules. A declined try
+ * is not the payment's end (`attemptOnly`): the payer may try another card in
+ * the same modal, so it records nothing either. And a card payment nobody paid
+ * would otherwise wait forever, since no verdict ever comes for a modal someone
+ * closed: once its checkout session is over (`sessionClosesAfterSeconds`) and
+ * the lookup finds no transaction, or only declined ones, it is closed `failed`
+ * with `card_session_expired`, a reason of ours that a late success still
+ * revives (payments/webhooks.ts `locallyFailed`). A lookup that fails, or finds
+ * the transaction pending, closes nothing.
  */
 
 export const RECONCILE_SCHEDULE = '* * * * *';
@@ -34,13 +45,20 @@ export type ReconcileDeps = WebhookDeps & { provider: PaymentProvider; minAgeSec
 export async function reconcilePendingPayments(deps: ReconcileDeps): Promise<number> {
   const { prisma, provider } = deps;
   const log = deps.log ?? defaultLog;
-  const waiting = await dueForLookup(prisma, provider.id, deps.minAgeSeconds ?? RECONCILE_MIN_AGE_SECONDS);
+  const waiting = await dueForLookup(prisma, provider, deps.minAgeSeconds ?? RECONCILE_MIN_AGE_SECONDS);
 
   let settled = 0;
-  for (const { our_ref: ourRef } of waiting) {
+  for (const { our_ref: ourRef, session_closed: sessionClosed } of waiting) {
     try {
       const found = await provider.lookupStatus(ourRef, AbortSignal.timeout(LOOKUP_TIMEOUT_MS));
-      if (found === null || found.event.reportedStatus === null || found.event.reportedStatus === 'pending') continue;
+      if (!settles(found?.event ?? null)) {
+        if (sessionClosed && (found === null || found.event.attemptOnly === true) && (await closeUnpaidSession(prisma, provider.id, ourRef))) {
+          log({ level: 'info', event: 'card_session_expired', provider: provider.id, ourRef });
+          settled += 1;
+        }
+        continue;
+      }
+      if (found === null) continue;
       const outcome = await recordEvent(deps, provider.id, {
         signatureValid: true,
         event: found.event,
@@ -56,11 +74,33 @@ export async function reconcilePendingPayments(deps: ReconcileDeps): Promise<num
   return settled;
 }
 
-function dueForLookup(prisma: PrismaClient, providerId: string, minAgeSeconds: number): Promise<{ our_ref: string }[]> {
-  return prisma.$queryRaw<{ our_ref: string }[]>`
-    SELECT our_ref::text AS our_ref
+/** Whether a lookup's answer is a verdict worth recording: a success, or a failure that ends the payment. */
+export function settles(event: ProviderEvent | null): boolean {
+  if (event === null || event.reportedStatus === null || event.reportedStatus === 'pending') return false;
+  return !(event.reportedStatus === 'failed' && event.attemptOnly === true);
+}
+
+/** A waiting card payment whose session is over, closed by us; guarded, so a success that beat it stands. */
+async function closeUnpaidSession(prisma: PrismaClient, providerId: string, ourRef: string): Promise<boolean> {
+  const closed = await prisma.payment.updateMany({
+    where: { ourRef, provider: providerId, status: 'pending' },
+    data: { status: 'failed', failureReason: CARD_SESSION_EXPIRED },
+  });
+  return closed.count === 1;
+}
+
+function dueForLookup(
+  prisma: PrismaClient,
+  provider: PaymentProvider,
+  minAgeSeconds: number,
+): Promise<{ our_ref: string; session_closed: boolean }[]> {
+  // No browser session: never closed by age (null compares as not closed).
+  const closesAfter = provider.sessionClosesAfterSeconds ?? null;
+  return prisma.$queryRaw<{ our_ref: string; session_closed: boolean }[]>`
+    SELECT our_ref::text AS our_ref,
+           COALESCE(initiated_at <= now() - make_interval(secs => ${closesAfter}::double precision), false) AS session_closed
       FROM payment
-     WHERE provider = ${providerId}
+     WHERE provider = ${provider.id}
        AND status = 'pending'
        AND initiated_at <= now() - make_interval(secs => ${minAgeSeconds}::double precision)
        AND initiated_at > now() - make_interval(mins => ${RECONCILE_MAX_AGE_MINUTES}::integer)

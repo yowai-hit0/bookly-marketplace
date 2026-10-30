@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from '../env.js';
 import { FlutterwaveProvider } from './flutterwave.js';
+import { FlutterwaveCheckoutProvider } from './flutterwave-checkout.js';
 import { MtnMomoProvider } from './mtn-momo.js';
 import { createPaymentProviders } from './providers.js';
 import {
@@ -20,7 +21,9 @@ import {
  * What is proven:
  *  - MTN MoMo goes to MTN direct by default and to Flutterwave with
  *    `MOMO_MTN_PROVIDER=flutterwave`; Airtel Money always goes to Flutterwave;
- *    card is never offered.
+ *    card always goes to Flutterwave v3 Inline (`flutterwave_checkout`), offered
+ *    only with its three keys, constructed (for its webhook and reconciler)
+ *    whenever they are set, card enabled or not (2026-10-30).
  *  - A method is offered only when its routed provider is configured (all three
  *    MTN credentials, both Flutterwave client credentials), so no credentials
  *    at all is nothing on offer; `PAYMENT_METHODS_ENABLED` narrows the list and
@@ -47,6 +50,13 @@ const FLUTTERWAVE = {
   FLUTTERWAVE_WEBHOOK_HASH: 'fw-hash',
   FLUTTERWAVE_BASE_URL: 'https://flutterwave.test',
   FLUTTERWAVE_IDP_URL: 'https://idp.flutterwave.test/token',
+};
+/** Placeholder sandbox-shaped keys, never real ones. */
+const CARDS = {
+  FLUTTERWAVE_V3_SECRET_KEY: 'FLWSECK_TEST-placeholder-secret-X',
+  FLUTTERWAVE_V3_PUBLIC_KEY: 'FLWPUBK_TEST-placeholder-public-X',
+  FLUTTERWAVE_V3_WEBHOOK_HASH: 'placeholder-hash',
+  FLUTTERWAVE_V3_BASE_URL: 'https://flutterwave-v3.test',
 };
 const OUR_REF = '3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8';
 
@@ -141,12 +151,30 @@ describe('where each method goes (R3.1)', () => {
     }
   });
 
-  it('never offers card, in any configuration', () => {
+  it('never offers card without the v3 keys, whatever else is configured', () => {
     for (const env of [{}, { ...MTN }, { ...FLUTTERWAVE }, { ...MTN, ...FLUTTERWAVE }, { ...FLUTTERWAVE, MOMO_MTN_PROVIDER: 'flutterwave' }]) {
       const { routing } = providers(env);
       expect(routing.methods).not.toContain('card');
       expect(routing.providerFor('card')).toBeUndefined();
     }
+  });
+
+  it('offers card, last, through Flutterwave v3 Inline once its keys are set', () => {
+    expect(routes({ ...MTN, ...FLUTTERWAVE, ...CARDS })).toStrictEqual({
+      methods: ['momo_mtn', 'momo_airtel', 'card'],
+      momo_mtn: 'mtn_momo_direct',
+      momo_airtel: 'flutterwave',
+      card: 'flutterwave_checkout',
+    });
+    const { routing, all } = providers({ ...CARDS });
+    expect(routing.methods).toEqual(['card']);
+    expect(routing.providerFor('card')).toBeInstanceOf(FlutterwaveCheckoutProvider);
+    expect(routing.providerFor('card')).toBe(all.flutterwave_checkout);
+  });
+
+  it('lets PAYMENT_METHODS_ENABLED keep card off, or offer it alone', () => {
+    expect(routes({ ...MTN, ...CARDS, PAYMENT_METHODS_ENABLED: 'momo_mtn' }).methods).toEqual(['momo_mtn']);
+    expect(routes({ ...MTN, ...CARDS, PAYMENT_METHODS_ENABLED: 'card' }).methods).toEqual(['card']);
   });
 
   it('answers no provider for a string that is no offered method', () => {
@@ -246,6 +274,11 @@ describe('providers kept for their in-flight payments (spec §6.18)', () => {
   it('constructs no Flutterwave that neither collects a method nor is configured', () => {
     expect(Object.keys(providers({ ...MTN, PAYMENT_METHODS_ENABLED: 'momo_mtn' }).all)).toEqual(['mtn_momo_direct']);
   });
+
+  it('keeps the card provider while its keys are set, card enabled or not, and has none without them', () => {
+    expect(providers({ ...MTN, ...CARDS, PAYMENT_METHODS_ENABLED: 'momo_mtn' }).all.flutterwave_checkout).toBeInstanceOf(FlutterwaveCheckoutProvider);
+    expect(providers({ ...MTN }).all.flutterwave_checkout).toBeUndefined();
+  });
 });
 
 describe('reconcilers (R3.5)', () => {
@@ -269,6 +302,15 @@ describe('reconcilers (R3.5)', () => {
 
   it('keeps reconciling a configured Flutterwave that no method goes to', () => {
     expect(plans({ ...MTN, ...FLUTTERWAVE, PAYMENT_METHODS_ENABLED: 'momo_mtn' }).map((plan) => plan.id)).toEqual(['mtn_momo_direct', 'flutterwave']);
+  });
+
+  it('runs one on the minute for cards, enabled or not, while the keys are set', () => {
+    expect(plans({ ...MTN, ...CARDS, PAYMENT_METHODS_ENABLED: 'momo_mtn' })).toContainEqual({
+      id: 'flutterwave_checkout',
+      schedule: RECONCILE_SCHEDULE,
+      minAgeSeconds: RECONCILE_MIN_AGE_SECONDS,
+    });
+    expect(plans({ ...MTN }).map((plan) => plan.id)).not.toContain('flutterwave_checkout');
   });
 
   it('runs none for an unconfigured provider: there is nothing to ask with', () => {
@@ -337,6 +379,48 @@ describe('MTN direct', () => {
     expect(mtnOf().currency).toBe('EUR');
     expect(mtnOf({ MTN_MOMO_TARGET_ENVIRONMENT: 'mtnrwanda' }).currency).toBe('RWF');
     expect(mtnOf({ MTN_MOMO_CURRENCY: 'XAF' }).currency).toBe('XAF');
+  });
+});
+
+// --- Flutterwave v3 Inline (cards) -------------------------------------------------------------
+
+describe('Flutterwave v3 Inline (cards, 2026-10-30)', () => {
+  it('collects card and nothing else, in RWF', () => {
+    const cards = providers(CARDS).all.flutterwave_checkout;
+    expect([...(cards?.methods ?? [])]).toEqual(['card']);
+    expect(cards?.currency).toBe('RWF');
+    expect(cards?.configured).toBe(true);
+  });
+
+  it('builds its return URL on WEB_ORIGIN and hands the browser the public key only', () => {
+    const cards = providers(CARDS).routing.providerFor('card');
+    const config = cards?.browserCheckout?.({
+      ourRef: OUR_REF,
+      amountRwf: 20_000,
+      sessionSeconds: 900,
+      payer: { email: 'a@example.com', name: 'A', phone: null },
+      title: 'Bookly booking fee BKY-2610-7K3QX',
+      returnPath: `/payments/${OUR_REF}`,
+    });
+    expect(config?.redirect_url).toBe(`${BASE.WEB_ORIGIN}/payments/${OUR_REF}`);
+    expect(config?.public_key).toBe(CARDS.FLUTTERWAVE_V3_PUBLIC_KEY);
+    expect(JSON.stringify(config)).not.toContain(CARDS.FLUTTERWAVE_V3_SECRET_KEY);
+    expect(JSON.stringify(config)).not.toContain(CARDS.FLUTTERWAVE_V3_WEBHOOK_HASH);
+  });
+
+  it('looks up at the configured v3 base URL with the secret key as its bearer', async () => {
+    const sent: { url: string; headers: Headers }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        sent.push({ url: input, headers: new Headers(init?.headers) });
+        return new Response(JSON.stringify({ status: 'error', message: 'No transaction was found for this id', data: null }), { status: 400 });
+      }),
+    );
+    const cards = providers(CARDS).all.flutterwave_checkout;
+    expect(await cards?.lookupStatus(OUR_REF, new AbortController().signal)).toBeNull();
+    expect(sent.map((request) => request.url)).toEqual([`https://flutterwave-v3.test/v3/transactions/verify_by_reference?tx_ref=${OUR_REF}`]);
+    expect(sent[0]?.headers.get('authorization')).toBe(`Bearer ${CARDS.FLUTTERWAVE_V3_SECRET_KEY}`);
   });
 });
 

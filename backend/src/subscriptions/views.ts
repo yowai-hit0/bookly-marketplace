@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { CARD_REUSE_MIN_SECONDS, CARD_SESSION_SECONDS } from '../payments/flutterwave-checkout.js';
 import { PAYMENT_ATTEMPT_WINDOW_SECONDS } from '../payments/initiate.js';
 import { isBookable } from '../photographers/bookable.js';
 import { getPlatformSettings } from '../settings/index.js';
@@ -58,7 +59,7 @@ export type StudioSubscriptionView = {
   } | null;
   /** The plan's prices, whole RWF, from `platform_setting` (R5.1). */
   prices: { monthly: number; yearly: number };
-  /** The methods on offer (payments/routing.ts, R3.1): MoMo only while cards are deferred. */
+  /** The methods on offer (payments/routing.ts, R3.1): `momo_mtn`, `momo_airtel`, `card`, as configured. */
   methods: readonly string[];
   graceDays: number;
 };
@@ -134,7 +135,9 @@ export async function studioSubscription(
 /**
  * The newest payment still in progress -- `initiated` or `pending`, inside the
  * attempt window on the database clock -- exactly what blocks a new one
- * (subscriptions/payments.ts).
+ * (subscriptions/payments.ts). A card payment whose checkout session may still
+ * be reopened counts too (payments/initiate.ts `reopensCardSession`): the page
+ * offers to continue it, and paying the same plan by card answers that one.
  */
 async function paymentInProgress(prisma: PrismaClient, subscriptionId: string): Promise<SubscriptionPaymentView | null> {
   const waiting = await prisma.$queryRaw<{ id: string }[]>`
@@ -142,7 +145,9 @@ async function paymentInProgress(prisma: PrismaClient, subscriptionId: string): 
       FROM payment
      WHERE subscription_id = ${subscriptionId}::uuid
        AND status IN ('initiated', 'pending')
-       AND initiated_at > now() - make_interval(secs => ${PAYMENT_ATTEMPT_WINDOW_SECONDS}::double precision)
+       AND (initiated_at > now() - make_interval(secs => ${PAYMENT_ATTEMPT_WINDOW_SECONDS}::double precision)
+            OR (provider = 'flutterwave_checkout' AND method = 'card'
+                AND initiated_at > now() - make_interval(secs => ${CARD_SESSION_SECONDS - CARD_REUSE_MIN_SECONDS}::double precision)))
      ORDER BY initiated_at DESC
      LIMIT 1`;
   const id = waiting[0]?.id;

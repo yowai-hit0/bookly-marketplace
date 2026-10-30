@@ -74,11 +74,11 @@ function start(photographerId: string, options: { planInterval?: 'monthly' | 'ye
 /** A subscription payment written directly, in whatever state a test needs. */
 async function insertSubscriptionPayment(
   subscriptionId: string,
-  { plan = 'monthly', amount = 10_000, status = 'pending', failureReason = null as string | null, ageSeconds = 0 } = {},
+  { plan = 'monthly', amount = 10_000, status = 'pending', failureReason = null as string | null, ageSeconds = 0, provider = 'mtn_momo_direct', method = 'momo_mtn' } = {},
 ): Promise<{ id: string; ourRef: string }> {
   const rows = await prisma.$queryRaw<{ id: string; our_ref: string }[]>`
     INSERT INTO payment (subscription_id, kind, provider, method, amount_rwf, plan_interval, status, failure_reason, initiated_at)
-    VALUES (${subscriptionId}::uuid, 'subscription', 'mtn_momo_direct', 'momo_mtn', ${amount}, ${plan}, ${status}, ${failureReason},
+    VALUES (${subscriptionId}::uuid, 'subscription', ${provider}, ${method}, ${amount}, ${plan}, ${status}, ${failureReason},
             now() - make_interval(secs => ${ageSeconds}::double precision))
     RETURNING id::text AS id, our_ref::text AS our_ref`;
   const row = rows[0];
@@ -184,12 +184,22 @@ describe('startSubscriptionPayment', () => {
     const pending = await insertSubscriptionPayment(subscriptionId, { status: 'pending' });
     const provider = stubProvider();
 
-    await expect(start(photographerId, { provider, planInterval: 'yearly' })).resolves.toEqual({ status: 'in_progress', ourRef: pending.ourRef });
+    await expect(start(photographerId, { provider, planInterval: 'yearly' })).resolves.toEqual({ status: 'in_progress', ourRef: pending.ourRef, method: 'momo_mtn' });
     await prisma.payment.update({ where: { id: pending.id }, data: { status: 'initiated' } });
-    await expect(start(photographerId, { provider })).resolves.toEqual({ status: 'in_progress', ourRef: pending.ourRef });
+    await expect(start(photographerId, { provider })).resolves.toEqual({ status: 'in_progress', ourRef: pending.ourRef, method: 'momo_mtn' });
     expect(provider.initiated).toEqual([]);
     await expect(prisma.payment.count()).resolves.toBe(1);
   });
+
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)(
+    'names the waiting payment’s %s method in the in_progress answer',
+    async (method, waitingProvider) => {
+      const { photographerId, subscriptionId } = await approvedAtDayZero();
+      const pending = await insertSubscriptionPayment(subscriptionId, { status: 'pending', provider: waitingProvider, method });
+
+      await expect(start(photographerId, { provider: stubProvider() })).resolves.toEqual({ status: 'in_progress', ourRef: pending.ourRef, method });
+    },
+  );
 
   it('lets a new payment open once the waiting one is past the attempt window, or settled', async () => {
     const { photographerId, subscriptionId } = await approvedAtDayZero();
@@ -219,7 +229,7 @@ describe('startSubscriptionPayment', () => {
     const started = results.filter((result) => result.status === 'started');
     expect(started).toHaveLength(1);
     const ourRef = started[0]?.status === 'started' ? started[0].ourRef : '';
-    expect(results.filter((result) => result.status === 'in_progress')).toEqual(Array.from({ length: 5 }, () => ({ status: 'in_progress', ourRef })));
+    expect(results.filter((result) => result.status === 'in_progress')).toEqual(Array.from({ length: 5 }, () => ({ status: 'in_progress', ourRef, method: 'momo_mtn' })));
     await expect(prisma.payment.count()).resolves.toBe(1);
     expect(provider.initiated).toHaveLength(1);
   });

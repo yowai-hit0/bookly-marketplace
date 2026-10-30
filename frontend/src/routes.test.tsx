@@ -357,3 +357,38 @@ describe('the old /admin addresses', () => {
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
   })
 })
+
+describe('the card return pages (Flutterwave v3 Inline, "Cards as built")', () => {
+  const OUR_REF = '3f0c6a52-8d1e-4b7a-9c35-0e4d2a61b7f8'
+
+  it('declares /payments/:ourRef in the client shell, token-free, and the studio subscription payment page behind the studio guard', () => {
+    const shell = routes.find((route) => route.path === undefined)
+    const inShell = (shell?.children ?? []).map((child) => child.path)
+    expect(inShell).toContain('/payments/:ourRef')
+    expect(inShell.filter((path) => path?.startsWith('/payments')).every((path) => !path?.includes('token'))).toBe(true)
+
+    const studio = routes.find((route) => route.path === '/studio')
+    expect((studio?.children ?? []).map((child) => child.path)).toContain('subscription/payments/:ourRef')
+    expect(inShell).not.toContain('/studio/subscription/payments/:ourRef')
+  })
+
+  it('serves the guest card return page from /payments/:ourRef, polling that payment', async () => {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        calls.push(String(input))
+        return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 })
+      }),
+    )
+    renderAt(`/payments/${OUR_REF}`)
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'This payment link is not valid' })).toBeInTheDocument()
+    expect(calls).toContain(`/api/payments/${OUR_REF}`)
+  })
+
+  it('has nothing below the card return page: /payments/:ourRef/extra is a 404', () => {
+    renderAt(`/payments/${OUR_REF}/extra`)
+    expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+  })
+})

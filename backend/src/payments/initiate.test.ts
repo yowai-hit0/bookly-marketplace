@@ -534,7 +534,7 @@ describe('an attempt still waiting on the payer', () => {
     const waiting = await insertPayment(prisma, booking.id, { status, ageSeconds: PAYMENT_ATTEMPT_WINDOW_SECONDS - 10 });
     const provider = stubProvider();
 
-    await expect(start(provider, booking.reference)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef });
+    await expect(start(provider, booking.reference)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef, method: null });
     expect(provider.initiated).toEqual([]);
     expect(await payments()).toHaveLength(1);
   });
@@ -544,8 +544,19 @@ describe('an attempt still waiting on the payer', () => {
     await insertPayment(prisma, booking.id, { status: 'pending', ageSeconds: 120 });
     const newest = await insertPayment(prisma, booking.id, { status: 'pending', ageSeconds: 5 });
 
-    await expect(start(stubProvider(), booking.reference)).resolves.toStrictEqual({ status: 'in_progress', ourRef: newest.ourRef });
+    await expect(start(stubProvider(), booking.reference)).resolves.toStrictEqual({ status: 'in_progress', ourRef: newest.ourRef, method: null });
   });
+
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)(
+    'names the waiting booking-fee attempt’s %s method, so the payer is told how it waits',
+    async (method, provider) => {
+      const booking = await insertBooking(prisma, world);
+      const waiting = await insertPayment(prisma, booking.id, { status: 'pending', provider, method, ageSeconds: 10 });
+
+      // A MoMo tap meets the waiting attempt, whichever way that was started.
+      await expect(start(stubProvider(), booking.reference)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef, method });
+    },
+  );
 
   it('does not block once it is older than the window', async () => {
     const booking = await insertBooking(prisma, world);
@@ -786,7 +797,7 @@ describe('a session-fee attempt still waiting on the payer', () => {
     const waiting = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, ageSeconds: 30 });
     const provider = stubProvider();
 
-    await expect(startSession(provider, booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef });
+    await expect(startSession(provider, booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef, method: null });
     expect(provider.initiated).toEqual([]);
     expect((await payments()).filter((row) => row.kind === 'session_fee')).toHaveLength(1);
   });
@@ -802,8 +813,22 @@ describe('a session-fee attempt still waiting on the payer', () => {
       ageSeconds: 5,
     });
 
-    await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef });
+    await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef, method: null });
   });
+
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)(
+    'names the waiting session-fee attempt’s %s method',
+    async (method, provider) => {
+      const booking = await owingBooking();
+      const waiting = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, provider, method, ageSeconds: 10 });
+
+      await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({
+        status: 'in_progress',
+        ourRef: waiting.ourRef,
+        method,
+      });
+    },
+  );
 
   it('pays an older initiated row instead, because that is the photographer’s request (Task 20)', async () => {
     // Nothing is calling a provider about a row this old. It is the request
@@ -832,7 +857,7 @@ describe('a session-fee attempt still waiting on the payer', () => {
       ageSeconds: PAYMENT_ATTEMPT_WINDOW_SECONDS - 10,
     });
 
-    await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef });
+    await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: waiting.ourRef, method: null });
   });
 
   /**
@@ -867,7 +892,7 @@ describe('a session-fee attempt still waiting on the payer', () => {
     await insertPayment(prisma, booking.id, { status: 'failed', kind: 'session_fee', amountRwf: 30_000, ageSeconds: 500 });
     const newest = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, ageSeconds: 10 });
 
-    await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: newest.ourRef });
+    await expect(startSession(stubProvider(), booking)).resolves.toStrictEqual({ status: 'in_progress', ourRef: newest.ourRef, method: null });
   });
 
   it('is not blocked by another booking attempt, or by a waiting booking fee', async () => {
@@ -1052,7 +1077,7 @@ describe('a request made from the admin screen, then paid by the client', () => 
 
     const result = await startSession(provider, booking);
 
-    expect(result).toStrictEqual({ status: 'in_progress', ourRef: tapped.ourRef });
+    expect(result).toStrictEqual({ status: 'in_progress', ourRef: tapped.ourRef, method: null });
     expect(provider.initiated).toEqual([]);
     expect((await payments()).filter((row) => row.kind === 'session_fee')).toHaveLength(1);
   });
@@ -1173,7 +1198,7 @@ describe('a request made from the admin screen, then paid by the client', () => 
     );
     release({ outcome: 'accepted', providerRef: null });
 
-    expect(second).toStrictEqual({ status: 'in_progress', ourRef: requested?.our_ref });
+    expect(second).toStrictEqual({ status: 'in_progress', ourRef: requested?.our_ref, method: 'momo_mtn' });
     expect(flutterwave.initiated).toEqual([]);
     expect(await first).toStrictEqual({ status: 'started', ourRef: requested?.our_ref });
     expect((await payments()).filter((row) => row.kind === 'session_fee')).toStrictEqual([
@@ -1189,7 +1214,7 @@ describe('a request made from the admin screen, then paid by the client', () => 
     await raw.query(`UPDATE payment SET method = 'momo_mtn', updated_at = now() WHERE id = $1`, [requested?.id]);
     const provider = stubProvider();
 
-    expect(await startSession(provider, booking)).toStrictEqual({ status: 'in_progress', ourRef: requested?.our_ref });
+    expect(await startSession(provider, booking)).toStrictEqual({ status: 'in_progress', ourRef: requested?.our_ref, method: 'momo_mtn' });
     expect(provider.initiated).toEqual([]);
   });
 

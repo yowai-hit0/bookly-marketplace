@@ -1,9 +1,11 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import type { Checkout } from '@/catalogue/payments'
+import { FLUTTERWAVE_INLINE_SRC, resetFlutterwaveInlineForTests } from '@/lib/flutterwave-inline'
+import { cardConfig, fakeFlutterwave, removeFakeFlutterwave } from '@/test/card-fixtures'
 import { routes } from '@/routes'
 
 /**
@@ -394,7 +396,7 @@ describe('paying', () => {
 
   it('follows the attempt already waiting when the API says one is in progress', async () => {
     const waiting = '9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d'
-    stubApi({ pay: () => json({ error: 'payment_in_progress', payment: { ourRef: waiting } }, 409) })
+    stubApi({ pay: () => json({ error: 'payment_in_progress', payment: { ourRef: waiting, method: 'momo_mtn' } }, 409) })
     const router = await renderLoaded()
 
     await user().type(phoneField(), '0788123456')
@@ -402,6 +404,8 @@ describe('paying', () => {
 
     await screen.findByRole('heading', { name: 'Approve the payment on your phone' })
     expect(router.state.location.pathname).toBe(`${PATH}/payments/${waiting}`)
+    // A phone prompt is not marked as a card.
+    expect(sessionStorage.getItem(`bookly.cardPayment.${waiting}`)).toBeNull()
   })
 
   it.each([
@@ -465,9 +469,8 @@ describe('paying', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The payment did not start.')
   })
 
-  // Fails today: with card chosen the phone field is not rendered, but the page still sends
-  // `phone: ''` -- which the API's schema refuses for every method -- and on a 422 naming `phone`
-  // it only sets a mark on a field that does not exist. The payer sees nothing happen.
+  // A card sends no phone since 2026-10-30, but a 422 naming `phone` must still be said: with card
+  // chosen there is no phone field to mark, and the payer must not see nothing happen.
   it('tells a card payer something when the API refuses a field the page is not showing', async () => {
     stubApi({
       methods: () => json({ methods: ['momo_mtn', 'momo_airtel', 'card'] }),
@@ -603,5 +606,199 @@ describe('the address', () => {
     stubApi()
     renderAt(`${PATH}/payments/${OUR_REF}/extra`)
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
+  })
+})
+
+// --- Cards (Flutterwave v3 Inline, "Cards as built") ---------------------------------------------
+
+describe('paying by card', () => {
+  const CARD_METHODS = () => json({ methods: ['momo_mtn', 'momo_airtel', 'card'] })
+  const CARD = cardConfig(OUR_REF)
+  const cardAnswer = (status = 201) => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: CARD }, status)
+  const scriptTags = () => document.querySelectorAll(`script[src="${FLUTTERWAVE_INLINE_SRC}"]`)
+
+  beforeEach(() => {
+    resetFlutterwaveInlineForTests()
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    removeFakeFlutterwave()
+    for (const script of scriptTags()) script.remove()
+  })
+
+  /** On the pay page, card chosen. */
+  async function chooseCard() {
+    const router = renderAt()
+    await screen.findByRole('heading', { level: 1, name: 'Pay the booking fee' })
+    await user().click(screen.getByRole('radio', { name: 'Card' }))
+    return router
+  }
+
+  it('asks no number and says the card is entered in a secure Flutterwave window, with no fee line', async () => {
+    stubApi({ methods: CARD_METHODS })
+    await chooseCard()
+
+    expect(screen.queryByRole('textbox', { name: 'Mobile Money number' })).not.toBeInTheDocument()
+    const hint = screen.getByText('You will enter your card details in a secure Flutterwave window.')
+    expect(screen.getByRole('radio', { name: 'Card' })).toHaveAttribute('aria-describedby', hint.id)
+    expect(document.body.textContent).not.toMatch(/card fee|surcharge|processing fee/i)
+    expect(payButton()).toHaveTextContent('Pay 19,500 RWF')
+  })
+
+  it.each([201, 200])('opens the modal with the API config unchanged on a %i, sending only the method', async (status) => {
+    const flutterwave = fakeFlutterwave()
+    const { payBodies } = stubApi({ methods: CARD_METHODS, pay: () => cardAnswer(status) })
+    const router = await chooseCard()
+    await user().click(payButton())
+
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+    expect(flutterwave.opened[0]?.config).toStrictEqual(CARD)
+    expect(payBodies).toStrictEqual([{ method: 'card' }])
+    // The modal is up: still on the pay page, nothing claims success.
+    expect(router.state.location.pathname).toBe(PATH)
+    const busy = screen.getByRole('button', { name: 'Opening the card window…' })
+    expect(busy).toHaveAttribute('aria-disabled', 'true')
+    expect(busy).toHaveAttribute('type', 'submit')
+    expect(document.body.textContent).not.toMatch(/confirmed/i)
+  })
+
+  it('on the callback closes the modal and moves to the progress page with the transaction id, still pending', async () => {
+    const flutterwave = fakeFlutterwave()
+    const { calls } = stubApi({ methods: CARD_METHODS, pay: () => cardAnswer() })
+    const router = await chooseCard()
+    await user().click(payButton())
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+
+    act(() => {
+      flutterwave.pay(4_100_000_123)
+    })
+
+    expect(flutterwave.close).toHaveBeenCalledTimes(1)
+    await screen.findByRole('heading', { level: 1, name: 'Confirming your card payment' })
+    expect(router.state.location.pathname).toBe(`${PATH}/payments/${OUR_REF}`)
+    expect(router.state.location.state).toStrictEqual({ card: true, transactionId: '4100000123' })
+    expect(calls).toContain(`GET /api/payments/${OUR_REF}?transactionId=4100000123`)
+    expect(screen.queryByText(/your booking is confirmed/i)).not.toBeInTheDocument()
+  })
+
+  it('on onclose stays on the pay page, gives the button back and says nothing was charged', async () => {
+    const flutterwave = fakeFlutterwave()
+    const { payBodies } = stubApi({ methods: CARD_METHODS, pay: () => cardAnswer() })
+    const router = await chooseCard()
+    await user().click(payButton())
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+
+    act(() => {
+      flutterwave.dismiss()
+    })
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('The card window was closed. If you did not finish paying, nothing was charged')
+    expect(notice).toHaveTextContent('If you did finish, we may still be confirming it')
+    expect(router.state.location.pathname).toBe(PATH)
+    expect(payButton()).not.toHaveAttribute('aria-disabled', 'true')
+    expect(payButton()).toHaveFocus()
+
+    // Trying again asks the API again (which answers the same checkout) and reopens the modal.
+    await user().click(payButton())
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(2))
+    expect(payBodies).toHaveLength(2)
+    expect(screen.queryByText(/The card window was closed/)).not.toBeInTheDocument()
+  })
+
+  it('says card payment could not load when the script fails, and a retry appends a fresh script', async () => {
+    const { payBodies } = stubApi({ methods: CARD_METHODS, pay: () => cardAnswer() })
+    await chooseCard()
+    await user().click(payButton())
+
+    await waitFor(() => expect(scriptTags()).toHaveLength(1))
+    act(() => {
+      scriptTags()[0]?.dispatchEvent(new Event('error'))
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Card payment couldn't load. Check your connection and try again, or pay with mobile money.",
+    )
+    expect(payButton()).not.toHaveAttribute('aria-disabled', 'true')
+    expect(payButton()).toHaveFocus()
+
+    await user().click(payButton())
+    await waitFor(() => expect(payBodies).toHaveLength(2))
+    await waitFor(() => expect(scriptTags()).toHaveLength(1))
+  })
+
+  it('treats a card answer without a usable config as a payment that did not start, opening nothing', async () => {
+    const flutterwave = fakeFlutterwave()
+    stubApi({ methods: CARD_METHODS, pay: () => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: { ...CARD, currency: 'USD' } }, 201) })
+    await chooseCard()
+    await user().click(payButton())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The payment did not start.')
+    expect(flutterwave.opened).toHaveLength(0)
+  })
+
+  it('follows the waiting payment on a card 409 payment_in_progress, by the existing rules', async () => {
+    const flutterwave = fakeFlutterwave()
+    stubApi({ methods: CARD_METHODS, pay: () => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, 409) })
+    const router = await chooseCard()
+    await user().click(payButton())
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/payments/${OUR_REF}`))
+    expect(flutterwave.opened).toHaveLength(0)
+    // No method named: read as a phone prompt, as before.
+    expect(sessionStorage.getItem(`bookly.cardPayment.${OUR_REF}`)).toBeNull()
+  })
+
+  it('marks the waiting payment as a card, for its progress page, when the 409 names a card', async () => {
+    const flutterwave = fakeFlutterwave()
+    stubApi({ methods: CARD_METHODS, pay: () => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, 409) })
+    await chooseCard()
+    await user().click(screen.getByRole('radio', { name: 'MTN MoMo' }))
+    await user().type(phoneField(), '0788123456')
+    await user().click(payButton())
+
+    await screen.findByRole('heading', { name: 'Confirming your card payment' })
+    expect(sessionStorage.getItem(`bookly.cardPayment.${OUR_REF}`)).toBe('1')
+    expect(flutterwave.opened).toHaveLength(0)
+  })
+
+  it('offers to reopen a card checkout still open, which POSTs card again and reopens the same config', async () => {
+    const flutterwave = fakeFlutterwave()
+    const { payBodies } = stubApi({
+      methods: CARD_METHODS,
+      checkout: () => json({ checkout: { ...CHECKOUT, waitingPayment: { ourRef: OUR_REF, method: 'card' } } }),
+      pay: () => cardAnswer(200),
+    })
+    await renderLoaded()
+
+    expect(screen.getByText('A card payment you started is still open.')).toBeInTheDocument()
+    expect(screen.queryByText('A payment request is already waiting on your phone.')).not.toBeInTheDocument()
+    await user().click(screen.getByRole('button', { name: 'Reopen the card window' }))
+
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+    expect(flutterwave.opened[0]?.config).toStrictEqual(CARD)
+    expect(payBodies).toStrictEqual([{ method: 'card' }])
+  })
+
+  it('reads a waiting payment with no method as a phone prompt, as before cards', async () => {
+    stubApi({ methods: CARD_METHODS, checkout: () => json({ checkout: { ...CHECKOUT, waitingPayment: { ourRef: OUR_REF } } }) })
+    await renderLoaded()
+
+    expect(screen.getByText('A payment request is already waiting on your phone.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reopen the card window' })).not.toBeInTheDocument()
+  })
+
+  it('closes an open modal when the payer leaves the page', async () => {
+    const flutterwave = fakeFlutterwave()
+    stubApi({ methods: CARD_METHODS, pay: () => cardAnswer() })
+    const router = await chooseCard()
+    await user().click(payButton())
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+
+    await act(async () => {
+      await router.navigate('/photographers')
+    })
+    expect(flutterwave.close).toHaveBeenCalledTimes(1)
   })
 })

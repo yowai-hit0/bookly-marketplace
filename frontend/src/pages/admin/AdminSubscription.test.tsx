@@ -1,10 +1,13 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RouterProvider, createMemoryRouter } from 'react-router'
 import '@/i18n'
 import type { SubscriptionPage } from '@/admin/subscription'
 import { SubscriptionRefreshContext } from '@/admin/subscription-refresh'
 import { readSession, saveSession } from '@/auth/session'
+import { FLUTTERWAVE_INLINE_SRC, resetFlutterwaveInlineForTests } from '@/lib/flutterwave-inline'
 import { formatDateTime } from '@/lib/format'
+import { cardConfig, fakeFlutterwave, removeFakeFlutterwave } from '@/test/card-fixtures'
 import {
   OUR_REF,
   paidPeriod,
@@ -14,7 +17,7 @@ import {
   subscriptionPayment,
   trialPeriod,
 } from '@/test/subscription-fixtures'
-import { AdminSubscription, POLL_GIVE_UP_MS, POLL_INTERVAL_MS } from './AdminSubscription'
+import { AdminSubscription, AdminSubscriptionPayment, POLL_GIVE_UP_MS, POLL_INTERVAL_MS } from './AdminSubscription'
 
 /**
  * `/studio/subscription` (marketplace spec Phase 5: R5.2, R5.3, R5.5), with
@@ -493,7 +496,7 @@ describe('a payment already in progress', () => {
 
   it('named by a 409 payment_in_progress, is followed by its own reference, its amount from the first answer', async () => {
     const calls = await loaded({
-      pay: () => answer({ error: 'payment_in_progress', payment: { ourRef: OTHER_REF } }, 409),
+      pay: () => answer({ error: 'payment_in_progress', payment: { ourRef: OTHER_REF, method: 'momo_mtn' } }, 409),
       polls: [answer(paymentProgress({ ourRef: OTHER_REF, amountRwf: 100_000 }))],
     })
     await pay()
@@ -702,5 +705,249 @@ describe('the history', () => {
     await loaded({ pages: [subscriptionPage({ subscription: studioSubscription({ currentPeriod: null, periods: [] }) })] })
 
     expect(screen.getByText('No periods yet.')).toBeInTheDocument()
+  })
+})
+
+// --- Cards (Flutterwave v3 Inline, "Cards as built") ---------------------------------------------
+
+describe('paying the subscription by card', () => {
+  const CARD_PAGE = subscriptionPage({ methods: ['momo_mtn', 'momo_airtel', 'card'] })
+  const CARD = cardConfig(OUR_REF, { amount: 10_000, redirect_url: `https://bookly.example/studio/subscription/payments/${OUR_REF}` })
+  const cardAnswer = (status = 201) =>
+    answer({ payment: { ourRef: OUR_REF, status: 'pending', planInterval: 'monthly', amountRwf: 10_000 }, card: CARD }, status)
+
+  beforeEach(() => {
+    resetFlutterwaveInlineForTests()
+  })
+
+  afterEach(() => {
+    removeFakeFlutterwave()
+    for (const script of document.querySelectorAll(`script[src="${FLUTTERWAVE_INLINE_SRC}"]`)) script.remove()
+  })
+
+  async function chooseCard(script: Script) {
+    const calls = await loaded({ pages: [CARD_PAGE], ...script })
+    fireEvent.click(screen.getByRole('radio', { name: 'Card' }))
+    return calls
+  }
+
+  it('offers card last, asks no number, and says where the card is entered', async () => {
+    await loaded({ pages: [CARD_PAGE] })
+
+    const group = screen.getByRole('group', { name: 'How would you like to pay?' })
+    expect(within(group).getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual(['MTN MoMo', 'Airtel Money', 'Card'])
+    fireEvent.click(screen.getByRole('radio', { name: 'Card' }))
+
+    expect(screen.queryByLabelText('Mobile Money number')).not.toBeInTheDocument()
+    const hint = screen.getByText('You will enter your card details in a secure Flutterwave window.')
+    expect(screen.getByRole('radio', { name: 'Card' })).toHaveAttribute('aria-describedby', hint.id)
+    expect(screen.getByText(/Pay for a month or a year online\./)).toBeInTheDocument()
+  })
+
+  it.each([201, 200])('posts the plan and card alone, and opens the modal with the config unchanged on a %i', async (status) => {
+    const flutterwave = fakeFlutterwave()
+    const calls = await chooseCard({ pay: () => cardAnswer(status) })
+    fireEvent.click(screen.getByRole('radio', { name: /Yearly/ }))
+    fireEvent.click(payButton())
+    await settle()
+
+    expect(posts(calls).map((call) => call.body)).toStrictEqual([{ planInterval: 'yearly', method: 'card' }])
+    expect(flutterwave.opened).toHaveLength(1)
+    expect(flutterwave.opened[0]?.config).toStrictEqual(CARD)
+    expect(screen.getByRole('button', { name: 'Opening the card window…' })).toHaveAttribute('aria-disabled', 'true')
+    expect(polled(calls)).toHaveLength(0)
+  })
+
+  it('on the callback follows the payment in place, passing the transaction id, and says received only when the API does', async () => {
+    const flutterwave = fakeFlutterwave()
+    const calls = await chooseCard({
+      pay: () => cardAnswer(),
+      polls: [
+        answer(paymentProgress({ method: 'card' })),
+        answer(paymentProgress({ method: 'card', status: 'succeeded', settledAt: '2026-10-25T08:01:00.000Z' }, { status: 'active', currentPeriodEndsAt: NEW_END })),
+      ],
+    })
+    fireEvent.click(payButton())
+    await settle()
+
+    act(() => {
+      flutterwave.pay(4_100_000_123)
+    })
+    await settle()
+
+    expect(flutterwave.close).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Confirming your card payment')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('We are confirming your payment of 10,000 RWF with Flutterwave.')
+    expect(screen.queryByText('Payment received')).not.toBeInTheDocument()
+    expect(polled(calls)).toHaveLength(0)
+    expect(calls.filter((call) => call.url === `${PAY_URL}/${OUR_REF}?transactionId=4100000123`)).toHaveLength(1)
+
+    await advance(POLL_INTERVAL_MS)
+    expect(screen.getByText('Payment received')).toBeInTheDocument()
+    expect(screen.getByText(`Thank you. You're paid until ${formatDateTime(NEW_END)}. A receipt is on its way by email.`)).toBeInTheDocument()
+  })
+
+  it('on onclose stays on the form, gives the button back and says nothing was charged', async () => {
+    const flutterwave = fakeFlutterwave()
+    const calls = await chooseCard({ pay: () => cardAnswer() })
+    fireEvent.click(payButton())
+    await settle()
+
+    act(() => {
+      flutterwave.dismiss()
+    })
+    await settle()
+
+    expect(screen.getByRole('status')).toHaveTextContent('The card window was closed. If you did not finish paying, nothing was charged')
+    expect(payButton()).not.toHaveAttribute('aria-disabled', 'true')
+    expect(payButton()).toHaveFocus()
+    expect(polled(calls)).toHaveLength(0)
+    expect(document.querySelector('[data-following]')).toBeNull()
+  })
+
+  it('says card payment could not load when the script fails', async () => {
+    await chooseCard({ pay: () => cardAnswer() })
+    fireEvent.click(payButton())
+    await settle()
+
+    act(() => {
+      document.querySelector(`script[src="${FLUTTERWAVE_INLINE_SRC}"]`)?.dispatchEvent(new Event('error'))
+    })
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent("Card payment couldn't load. Check your connection and try again, or pay with mobile money.")
+    expect(payButton()).not.toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('treats a card answer without a usable config as a payment that did not start', async () => {
+    const flutterwave = fakeFlutterwave()
+    await chooseCard({ pay: () => answer({ payment: { ourRef: OUR_REF, status: 'pending', planInterval: 'monthly', amountRwf: 10_000 }, card: { ...CARD, tx_ref: OTHER_REF } }, 201) })
+    // A config for another payment is refused: the modal must charge this one or none.
+    fireEvent.click(payButton())
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The payment did not start. Check your connection and try again.')
+    expect(flutterwave.opened).toHaveLength(0)
+  })
+
+  it('offers a card checkout still open again, for its own plan, instead of following it', async () => {
+    const flutterwave = fakeFlutterwave()
+    const waiting = subscriptionPayment({ method: 'card', planInterval: 'yearly', amountRwf: 100_000 })
+    const calls = await loaded({
+      pages: [subscriptionPage({ methods: ['momo_mtn', 'card'], subscription: studioSubscription({ paymentInProgress: waiting }) })],
+      pay: () => cardAnswer(200),
+    })
+
+    expect(document.querySelector('[data-following]')).toBeNull()
+    expect(polled(calls)).toHaveLength(0)
+    expect(screen.getByText('A card payment of 100,000 RWF you started is still open.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen the card window' }))
+    await settle()
+    expect(posts(calls).map((call) => call.body)).toStrictEqual([{ planInterval: 'yearly', method: 'card' }])
+    expect(flutterwave.opened).toHaveLength(1)
+  })
+
+  it('still follows a MoMo payment waiting on load, as before cards', async () => {
+    const calls = await loaded({
+      pages: [subscriptionPage({ methods: ['momo_mtn', 'card'], subscription: studioSubscription({ paymentInProgress: subscriptionPayment() }) })],
+    })
+
+    expect(document.querySelector('[data-following]')).not.toBeNull()
+    expect(screen.getByText('Approve the payment on your phone')).toBeInTheDocument()
+    expect(polled(calls).length).toBeGreaterThan(0)
+  })
+
+  it('follows a payment a card 409 names, and switches to card wording when the poll says it is a card', async () => {
+    const calls = await chooseCard({
+      pay: () => answer({ error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, 409),
+      polls: [answer(paymentProgress({ method: 'card' }))],
+    })
+    fireEvent.click(payButton())
+    await settle()
+
+    expect(polled(calls).length).toBeGreaterThan(0)
+    expect(screen.getByText('Confirming your card payment')).toBeInTheDocument()
+    expect(screen.getByText(/still waiting for approval, so this page follows it/)).toBeInTheDocument()
+  })
+
+  it('follows a payment a 409 names as a card in card wording at once, before the poll says so', async () => {
+    const calls = await chooseCard({
+      pay: () => answer({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, 409),
+      polls: [answer(paymentProgress({ method: null }))],
+    })
+    fireEvent.click(payButton())
+    await settle()
+
+    expect(polled(calls).length).toBeGreaterThan(0)
+    expect(screen.getByText('Confirming your card payment')).toBeInTheDocument()
+    expect(screen.queryByText('Approve the payment on your phone')).not.toBeInTheDocument()
+  })
+
+  it('goes back to payment from a card wait, stops polling, and reads the page again', async () => {
+    const flutterwave = fakeFlutterwave()
+    const calls = await chooseCard({ pay: () => cardAnswer(), polls: [answer(paymentProgress({ method: 'card' }))] })
+    fireEvent.click(payButton())
+    await settle()
+    act(() => {
+      flutterwave.pay(5)
+    })
+    await settle()
+    const loadsBefore = pageLoads(calls).length
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to payment' }))
+    await settle()
+    const pollsAtBack = calls.filter((call) => call.url.startsWith(`${PAY_URL}/`)).length
+    await advance(POLL_INTERVAL_MS * 3)
+
+    expect(document.querySelector('[data-following]')).toBeNull()
+    expect(payButton()).toBeInTheDocument()
+    expect(calls.filter((call) => call.url.startsWith(`${PAY_URL}/`))).toHaveLength(pollsAtBack)
+    expect(pageLoads(calls).length).toBeGreaterThan(loadsBefore)
+  })
+})
+
+describe('/studio/subscription/payments/:ourRef, where Flutterwave returns the photographer', () => {
+  function renderReturn(path: string) {
+    const router = createMemoryRouter([{ path: '/studio/subscription/payments/:ourRef', element: <AdminSubscriptionPayment /> }], {
+      initialEntries: [path],
+    })
+    render(
+      <SubscriptionRefreshContext.Provider value={() => {}}>
+        <RouterProvider router={router} />
+      </SubscriptionRefreshContext.Provider>,
+    )
+    return router
+  }
+
+  it('follows that payment with the transaction id, strips the query, and stays waiting under a forged status', async () => {
+    const calls = stubApi({ pages: [subscriptionPage({ methods: ['momo_mtn', 'card'] })], polls: [answer(paymentProgress({ method: 'card' }))] })
+    const router = renderReturn(`/studio/subscription/payments/${OUR_REF}?status=successful&tx_ref=${OUR_REF}&transaction_id=4100000123`)
+    await settle()
+    await advance(POLL_INTERVAL_MS * 3)
+
+    expect(calls.filter((call) => call.url === `${PAY_URL}/${OUR_REF}?transactionId=4100000123`).length).toBeGreaterThan(1)
+    expect(router.state.location.search).toBe('')
+    expect(router.state.location.pathname).toBe(`/studio/subscription/payments/${OUR_REF}`)
+    expect(screen.getByText('Confirming your card payment')).toBeInTheDocument()
+    expect(screen.queryByText('Payment received')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to payment' })).toBeInTheDocument()
+  })
+
+  it('sends no transaction id that is not digits', async () => {
+    const calls = stubApi({ pages: [subscriptionPage()], polls: [answer(paymentProgress({ method: 'card' }))] })
+    renderReturn(`/studio/subscription/payments/${OUR_REF}?status=successful&transaction_id=12ab`)
+    await settle()
+
+    expect(polled(calls).length).toBeGreaterThan(0)
+    expect(calls.some((call) => call.url.includes('transactionId'))).toBe(false)
+  })
+
+  it('says a payment that is not his could not be found', async () => {
+    stubApi({ pages: [subscriptionPage()], polls: [answer({ error: 'not_found' }, 404)] })
+    renderReturn(`/studio/subscription/payments/${OTHER_REF}`)
+    await settle()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('We could not find that payment.')
   })
 })

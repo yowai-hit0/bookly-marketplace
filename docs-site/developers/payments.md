@@ -1,8 +1,9 @@
 # Payments
 
-No card number, CVV or Mobile Money PIN ever reaches the application — payment
-completes on the provider's hosted flow, keeping the project in PCI DSS SAQ-A
-scope. The application's job is to start an attempt, record what the provider
+No card number, CVV or Mobile Money PIN ever reaches the application — Mobile
+Money is approved on the payer's phone, and a card is typed into Flutterwave's
+own Inline window (a frame served from Flutterwave's origin), never into a page
+of ours. The application's job is to start an attempt, record what the provider
 says, and apply the provider's webhook safely.
 
 ## Providers
@@ -16,7 +17,10 @@ branch in business logic:
 - `momo_mtn` goes where `MOMO_MTN_PROVIDER` says: `mtn_momo_direct` (the
   default) or `flutterwave`.
 - `momo_airtel` always goes to `flutterwave`.
-- `card` is deferred with the hosted checkout and is never offered.
+- `card` always goes to `flutterwave_checkout`: Flutterwave **v3 Inline**, the
+  Flutterwave modal on our own pay page (user decisions 2026-10-30). It is
+  offered, last, whenever the three `FLUTTERWAVE_V3_*` keys are set. See
+  [Cards](#cards) below.
 - `PAYMENT_METHODS_ENABLED` (optional, e.g. `momo_mtn,momo_airtel`) narrows the
   list. A method is offered only when its provider is configured, so
   `GET /api/payment-methods` answers `{ methods }` with exactly what can be
@@ -34,6 +38,42 @@ Both providers stay mounted after a cutover (`payments/providers.ts`), so
 in-flight MTN payments still settle and switching `MOMO_MTN_PROVIDER` back is a
 one-variable rollback. The retired `PAYMENT_PROVIDER` is refused at startup
 unless it says `mtn_momo_direct`, the new default.
+
+## Cards
+
+Cards pay the booking fee, the session fee (guest checkout, guest booking page,
+account dashboard) and the photographer's subscription. The platform absorbs
+the card fee: the payer pays the listed amount, and the pay page shows no fee
+line. Card refunds are made by hand in the Flutterwave dashboard and recorded
+on `/platform/refunds`, as for MoMo.
+
+- **Starting.** A pay route asked for `{ method: 'card' }` (no phone) creates the
+  `payment` row and calls nothing. It answers `201 { payment, card }`, where
+  `card` is the Inline config built on the server: public key, `tx_ref` (our
+  `our_ref`), the row's amount, `RWF`, `payment_options: card`, the payer, a
+  `redirect_url` on `WEB_ORIGIN` and the session length. While the card
+  checkout is still open, a second card tap answers `200` with the **same**
+  payment and config.
+- **The browser** (`frontend/src/lib/flutterwave-inline.ts`) loads
+  `https://checkout.flutterwave.com/v3.js` on demand, once, and calls
+  `FlutterwaveCheckout({ ...card, callback, onclose })` with the config
+  unchanged. Closing the modal unpaid leaves the payer on the pay page ("nothing
+  was charged"). On completion, Flutterwave moves the tab to `redirect_url`
+  with `?status=&tx_ref=&transaction_id=` (the redirect wins over the
+  `callback`); a `callback` goes to the same page.
+- **Return pages.** `/checkout/:reference/:token/payments/:ourRef`, the
+  token-free `/payments/:ourRef` for a guest session fee (the booking's access
+  token is never put in a URL Flutterwave stores; the tab keeps it in
+  `sessionStorage` under the `ourRef` to link back),
+  `/account/bookings/:reference/payments/:ourRef` and
+  `/studio/subscription/payments/:ourRef`. Each reads `transaction_id` once
+  (digits only), strips the query, and polls its status route with
+  `?transactionId=`. `status=successful` is never read: only the poll's answer
+  counts.
+- **Settling.** A verified webhook (re-verified through Flutterwave's API), the
+  poll's throttled check, or the reconciler; the amount and currency must match
+  exactly. The CSP allows the script (`script-src`, by path) and Flutterwave's
+  two checkout origins (`frame-src`) and nothing more.
 
 ## Starting an attempt
 

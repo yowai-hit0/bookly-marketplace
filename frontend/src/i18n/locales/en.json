@@ -843,6 +843,7 @@
     "subscription": {
       "title": "Subscription",
       "intro": "Your subscription keeps your profile listed and open for bookings. Pay for a month or a year by Mobile Money.",
+      "introOnline": "Your subscription keeps your profile listed and open for bookings. Pay for a month or a year online.",
       "loading": "Loading your subscription…",
       "loadFailed": "Could not load your subscription. Check your connection and try again.",
       "retry": "Try again",
@@ -874,7 +875,8 @@
         "startsNow": "The new period starts as soon as the payment arrives.",
         "submit": "Pay {{amount}}",
         "submitting": "Starting the payment…",
-        "noMethods": "Online payment isn't available right now, so the subscription can't be paid here. Try again later."
+        "noMethods": "Online payment isn't available right now, so the subscription can't be paid here. Try again later.",
+        "cardOpen": "A card payment of {{amount}} you started is still open."
       },
       "errors": {
         "invalid_request": "The payment did not start: the request could not be read. Reload the page and try again.",
@@ -899,7 +901,9 @@
         "failedTitle": "The payment did not go through",
         "failedDeclined": "The payment was declined, or was not approved in time. Nothing was charged.",
         "failedUnavailable": "We could not reach Mobile Money to start the payment. Nothing was charged.",
-        "missing": "We could not find that payment. Check your subscription below, and pay again if it is not covered."
+        "missing": "We could not find that payment. Check your subscription below, and pay again if it is not covered.",
+        "cardWaitingTitle": "Confirming your card payment",
+        "cardWaitingBody": "We are confirming your payment of {{amount}} with Flutterwave. This page updates by itself."
       },
       "history": {
         "title": "History",
@@ -1123,6 +1127,19 @@
       "text": "A payment request is already waiting on your phone.",
       "link": "Follow that payment"
     },
+    "card": {
+      "hint": "You will enter your card details in a secure Flutterwave window.",
+      "opening": "Opening the card window…",
+      "closed": "The card window was closed. If you did not finish paying, nothing was charged: you can try again or choose another way to pay. If you did finish, we may still be confirming it, so wait a minute before paying again.",
+      "loadFailed": "Card payment couldn't load. Check your connection and try again, or pay with mobile money.",
+      "waitingText": "A card payment you started is still open.",
+      "reopen": "Reopen the card window",
+      "reopening": "Reopening…"
+    },
+    "cardReturn": {
+      "back": "Back to your booking",
+      "reopenFromEmail": "To get back to your booking, open it from the link in your booking email."
+    },
     "errors": {
       "rejected": "Mobile Money did not accept the request. Check that the number has a Mobile Money account, then try again.",
       "unavailable": "We could not reach Mobile Money just now. Please try again in a moment.",
@@ -1165,7 +1182,11 @@
       "duplicateBody": "This second payment of {{amount}} was not needed. The photographer has been told and will refund it.",
       "couldNotCheck": "We could not check on your payment. If you approved it, your confirmation email will arrive once it settles.",
       "refundOtherTitle": "This payment is due a refund",
-      "refundOtherBody": "The photographer has been told and will refund your {{amount}}."
+      "refundOtherBody": "The photographer has been told and will refund your {{amount}}.",
+      "cardPendingTitle": "Confirming your card payment",
+      "cardPendingBody": "We are confirming your payment of {{amount}} with Flutterwave. This page updates by itself.",
+      "cardPendingClosed": "If you closed the card window without paying, nothing was charged.",
+      "backToPayment": "Back to payment"
     }
   },
   "booking": {

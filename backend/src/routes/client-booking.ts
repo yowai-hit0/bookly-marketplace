@@ -5,10 +5,10 @@ import { findBookingByToken } from '../booking/access.js';
 import { cancelByClient } from '../booking/cancel.js';
 import { requestEmailChange } from '../booking/email-change.js';
 import { type ClientBookingView, clientBookingView } from '../booking/client-view.js';
-import { normalizePhone } from '../booking/phone.js';
+import { cardConfig, cardReturnPaths, cardTitles } from '../payments/card-checkout.js';
 import { startSessionFeePayment } from '../payments/initiate.js';
-import type { PaymentMethod } from '../payments/provider.js';
 import type { PaymentRouting } from '../payments/routing.js';
+import { paymentBodyParser } from './payment-body.js';
 import { parseOrReject } from './validation.js';
 
 /**
@@ -33,13 +33,17 @@ import { parseOrReject } from './validation.js';
  *        422 validation_failed { fields }
  *        429 too_many_requests           three requests a day per booking
  *
- *   POST /api/booking/:token/payments   { method, phone }
+ *   POST /api/booking/:token/payments   { method, phone }  (no phone for card)
  *        The provider is the one the method routes to (R3.1). Payable whatever
  *        the photographer's status since: the booking already stands, and
  *        existing bookings carry on (R5.5, T9.2).
  *        201 { payment: { ourRef, status: 'pending' } }
+ *        201 { payment, card }   method card: the Flutterwave Inline config. Its
+ *            return URL is the token-free `/payments/:ourRef`, never this page's
+ *            (payments/card-checkout.ts)
+ *        200 { payment, card }   this fee's card checkout is still open: the same one
  *        404 not_found
- *        409 nothing_to_pay | payment_in_progress { payment: { ourRef } }
+ *        409 nothing_to_pay | payment_in_progress { payment: { ourRef, method } }
  *        422 validation_failed { fields }
  *        502 payment_not_started { reason, payment }
  *
@@ -58,7 +62,6 @@ export type ClientBookingDeps = {
   payments?: { routing: PaymentRouting; providerTimeoutMs?: number };
 };
 
-const PHONE_MAX_LENGTH = 40;
 const EMAIL_MAX_LENGTH = 254;
 const emailFormat = z.email();
 const emailBody = z.strictObject({
@@ -136,16 +139,7 @@ export function clientBookingRouter(deps: ClientBookingDeps): Router {
 
   const payments = deps.payments;
   if (payments !== undefined) {
-    const paymentBody = z.object({
-      method: z
-        .string()
-        .refine((method) => payments.routing.providerFor(method) !== undefined, 'Method not available'),
-      phone: z
-        .string()
-        .max(PHONE_MAX_LENGTH)
-        .refine((value) => normalizePhone(value) !== null, 'Invalid phone number')
-        .transform((value) => normalizePhone(value) ?? value),
-    });
+    const parseBody = paymentBodyParser(payments.routing, {});
 
     router.post('/:token/payments', async (req, res) => {
       const booking = await findBookingByToken(prisma, req.params.token);
@@ -153,7 +147,7 @@ export function clientBookingRouter(deps: ClientBookingDeps): Router {
         notFound(res);
         return;
       }
-      const body = parseOrReject(paymentBody, req.body, res);
+      const body = parseBody(req.body, res);
       if (body === undefined) return;
       const provider = payments.routing.providerFor(body.method);
       if (provider === undefined) throw new Error('A validated method has no provider');
@@ -167,17 +161,27 @@ export function clientBookingRouter(deps: ClientBookingDeps): Router {
         {
           bookingId: booking.id,
           reference: booking.reference,
-          method: body.method as PaymentMethod,
+          method: body.method,
           payerPhone: body.phone,
         },
       );
+      const title = cardTitles.sessionFee(booking.reference);
 
       switch (result.status) {
         case 'started':
-          res.status(201).json({ payment: { ourRef: result.ourRef, status: 'pending' } });
+          res.status(201).json({
+            payment: { ourRef: result.ourRef, status: 'pending' },
+            ...(result.card === undefined ? {} : { card: cardConfig(provider, result.ourRef, result.card, title, cardReturnPaths.guestSessionFee(result.ourRef)) }),
+          });
+          return;
+        case 'card_in_progress':
+          res.status(200).json({
+            payment: { ourRef: result.ourRef, status: 'pending' },
+            card: cardConfig(provider, result.ourRef, result.card, title, cardReturnPaths.guestSessionFee(result.ourRef)),
+          });
           return;
         case 'in_progress':
-          res.status(409).json({ error: 'payment_in_progress', payment: { ourRef: result.ourRef } });
+          res.status(409).json({ error: 'payment_in_progress', payment: { ourRef: result.ourRef, method: result.method } });
           return;
         case 'provider_failed':
           res.status(502).json({

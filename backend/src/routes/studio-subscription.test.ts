@@ -196,12 +196,27 @@ describe('POST /api/studio/subscription/payments', () => {
     const started = first.status === 201 ? first : second;
     const refused = first.status === 201 ? second : first;
     await expectMatchesSpec(refused, 'startSubscriptionPayment', 409);
-    expect(refused.body).toEqual({ error: 'payment_in_progress', payment: { ourRef: started.body.payment.ourRef } });
+    expect(refused.body).toEqual({ error: 'payment_in_progress', payment: { ourRef: started.body.payment.ourRef, method: 'momo_mtn' } });
     await expect(prisma.payment.count({ where: { kind: 'subscription' } })).resolves.toBe(1);
     expect(provider.initiated).toHaveLength(1);
     // The page shows it as in progress.
     expect((await page()).body.subscription.paymentInProgress).toMatchObject({ ourRef: started.body.payment.ourRef, status: 'pending', amountRwf: 10_000 });
   });
+
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)(
+    'names the waiting payment’s %s method in the 409 payment_in_progress',
+    async (method, waitingProvider) => {
+      const waiting = await prisma.payment.create({
+        data: { kind: 'subscription', subscriptionId: await subscriptionId(), provider: waitingProvider, method, amountRwf: 10_000, planInterval: 'monthly', status: 'pending' },
+      });
+
+      const res = await pay({ ...BODY, planInterval: 'yearly' });
+
+      expect(res.status).toBe(409);
+      await expectMatchesSpec(res, 'startSubscriptionPayment', 409);
+      expect(res.body).toEqual({ error: 'payment_in_progress', payment: { ourRef: waiting.ourRef, method } });
+    },
+  );
 
   it.each([
     ['suspended', { status: 'suspended', suspendedAt: NOW }],

@@ -275,8 +275,16 @@ describe('the session fee block', () => {
 
     expect((await viewOf(booking.id)).sessionFee).toStrictEqual({
       outstandingRwf: 30_000,
-      waitingPayment: { ourRef: waiting.ourRef },
+      waitingPayment: { ourRef: waiting.ourRef, method: null },
     });
+  });
+
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)('names the waiting attempt’s %s method', async (method, provider) => {
+    const booking = await insertBooking(prisma, world, { status: 'confirmed' });
+    await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
+    const waiting = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, provider, method });
+
+    expect((await viewOf(booking.id)).sessionFee).toStrictEqual({ outstandingRwf: 30_000, waitingPayment: { ourRef: waiting.ourRef, method } });
   });
 
   it.each(['failed', 'refund_due', 'refunded'])('names no waiting attempt when the only session fee is %s', async (status) => {

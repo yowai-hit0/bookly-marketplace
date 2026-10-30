@@ -273,6 +273,22 @@ describe('GET /api/account/bookings (B1, R8.1)', () => {
 // --- B2: one booking, cancelling it, paying its session fee -----------------------------
 
 describe('GET /api/account/bookings/:reference (B2)', () => {
+  it.each([['card', 'flutterwave_checkout'], ['momo_mtn', 'mtn_momo_direct']] as const)(
+    'names a waiting session fee’s %s method, on the account page and the guest page alike',
+    async (method, provider) => {
+      const booking = await insertBooking(prisma, b, { status: 'confirmed', startsAt: at(2 * DAY_MS) });
+      await insertPayment(prisma, booking.id, { status: 'succeeded', amountRwf: 20_000 });
+      const waiting = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, ageSeconds: 30, provider, method });
+      const accessToken = await grantAccessToken(prisma, booking.id);
+
+      const mine = await get(`/api/account/bookings/${booking.reference}`);
+      const guest = await request(app()).get(`/api/booking/${accessToken}`);
+
+      expect(mine.body.booking.sessionFee.waitingPayment).toStrictEqual({ ourRef: waiting.ourRef, method });
+      expect(guest.body.booking.sessionFee.waitingPayment).toStrictEqual({ ourRef: waiting.ourRef, method });
+    },
+  );
+
   it('answers exactly the guest page’s view, with the photographer’s contact details beside it', async () => {
     await prisma.photographer.update({
       where: { id: b.photographerId },
@@ -432,8 +448,16 @@ describe('POST /api/account/bookings/:reference/payments (B2)', () => {
     const first = await post(`/api/account/bookings/${booking.reference}/payments`, body);
     const second = await post(`/api/account/bookings/${booking.reference}/payments`, body);
 
-    expect([second.status, second.body]).toEqual([409, { error: 'payment_in_progress', payment: { ourRef: first.body.payment.ourRef } }]);
+    expect([second.status, second.body]).toEqual([409, { error: 'payment_in_progress', payment: { ourRef: first.body.payment.ourRef, method: 'momo_mtn' } }]);
     expect(provider.initiated).toHaveLength(1);
+  });
+
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)('names the waiting attempt’s %s method in the 409 payment_in_progress', async (method, provider) => {
+    const booking = await insertBooking(prisma, a, { status: 'confirmed', startsAt: at(2 * DAY_MS) });
+    const waiting = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, ageSeconds: 30, provider, method });
+    const res = await post(`/api/account/bookings/${booking.reference}/payments`, body);
+
+    expect([res.status, res.body]).toEqual([409, { error: 'payment_in_progress', payment: { ourRef: waiting.ourRef, method } }]);
   });
 
   it('answers 409 nothing_to_pay with the booking page for a booking that owes nothing', async () => {

@@ -39,6 +39,7 @@
       "providers": {
         "mtn_momo_direct": "MTN MoMo",
         "flutterwave": "Flutterwave",
+        "flutterwave_checkout": "Card (Flutterwave)",
         "cash": "Cash"
       },
       "notGiven": "Not given"

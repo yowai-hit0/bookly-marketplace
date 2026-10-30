@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchAccountMe, forgetAccountMe } from '@/auth/account'
 import { ApiError, UnauthenticatedError } from '@/auth/api'
 import { readSession, saveSession } from '@/auth/session'
+import { cardConfig } from '@/test/card-fixtures'
 import { json, stubApi } from '@/test/fetch'
 import {
   CLIENT_BOOKING,
@@ -184,7 +185,11 @@ describe('bookings', () => {
     expect(api.sent[0]?.headers.get('Content-Type')).toBe('application/json')
 
     reply = json({ error: 'payment_in_progress', payment: { ourRef: 'other' } }, 409)
-    expect(await startAccountSessionFeePayment(REFERENCE, request)).toEqual({ status: 'in_progress', ourRef: 'other' })
+    expect(await startAccountSessionFeePayment(REFERENCE, request)).toEqual({ status: 'in_progress', ourRef: 'other', method: null })
+    reply = json({ error: 'payment_in_progress', payment: { ourRef: 'other', method: 'card' } }, 409)
+    expect(await startAccountSessionFeePayment(REFERENCE, request)).toEqual({ status: 'in_progress', ourRef: 'other', method: 'card' })
+    reply = json({ error: 'payment_in_progress', payment: { ourRef: 'other', method: 'momo_mtn' } }, 409)
+    expect(await startAccountSessionFeePayment(REFERENCE, request)).toEqual({ status: 'in_progress', ourRef: 'other', method: 'momo_mtn' })
     reply = json({ error: 'nothing_to_pay', ...detail() }, 409)
     expect(await startAccountSessionFeePayment(REFERENCE, request)).toEqual({ status: 'closed' })
     reply = json({ error: 'validation_failed', fields: ['phone'] }, 422)
@@ -365,5 +370,27 @@ describe('export and deletion', () => {
 
     reply = json({ error: 'invalid_confirmation' }, 403)
     await expect(deleteAccount({ confirmEmail: 'x@example.com' })).rejects.toMatchObject({ status: 403, message: 'invalid_confirmation' })
+  })
+})
+
+describe('startAccountSessionFeePayment by card (Flutterwave v3 Inline)', () => {
+  it('POSTs the method alone and answers a 201 or 200 config as a card payment; a bad config is failed', async () => {
+    signIn()
+    const card = cardConfig(OUR_REF)
+    let reply: Response = json({ payment: { ourRef: OUR_REF, status: 'pending' }, card }, 201)
+    const api = stubApi(() => reply)
+    const request = { method: 'card' as const, phone: '0788123456' }
+
+    expect(await startAccountSessionFeePayment(REFERENCE, request)).toStrictEqual({ status: 'card', ourRef: OUR_REF, card })
+    expect(api.sent[0]?.body).toStrictEqual({ method: 'card' })
+
+    reply = json({ payment: { ourRef: OUR_REF, status: 'pending' }, card }, 200)
+    expect(await startAccountSessionFeePayment(REFERENCE, request)).toStrictEqual({ status: 'card', ourRef: OUR_REF, card })
+
+    reply = json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: { ...card, currency: 'NGN' } }, 201)
+    expect(await startAccountSessionFeePayment(REFERENCE, request)).toStrictEqual({ status: 'failed' })
+
+    reply = json({ error: 'payment_in_progress', payment: { ourRef: 'other' } }, 409)
+    expect(await startAccountSessionFeePayment(REFERENCE, request)).toStrictEqual({ status: 'in_progress', ourRef: 'other', method: null })
   })
 })

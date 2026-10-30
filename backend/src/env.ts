@@ -59,9 +59,9 @@ const schema = z.object({
    *  Airtel Money always goes through Flutterwave. Deploy configuration, never a
    *  database row (data-model_v2.md §5.2). */
   MOMO_MTN_PROVIDER: z.enum(MOMO_MTN_PROVIDERS).default('mtn_momo_direct'),
-  /** Narrows what is offered (R3.1): a comma list from `momo_mtn,momo_airtel`.
-   *  Unset, every method whose provider is configured is offered. `card` is
-   *  reserved for the hosted checkout, deferred with it (R3.2), and refused. */
+  /** Narrows what is offered (R3.1): a comma list from `momo_mtn,momo_airtel,card`.
+   *  Unset, every method whose provider is configured is offered. `card` may be
+   *  listed only with the three Flutterwave v3 keys set (2026-10-30). */
   PAYMENT_METHODS_ENABLED: z.string().transform(parseMethodList).optional(),
   /** MTN MoMo Collections (plan.md Task 16). Sandbox by default; production
    *  access depends on R-3. Without the three credentials, payment attempts are
@@ -85,6 +85,14 @@ const schema = z.object({
    *  then settle only through the status lookup. */
   FLUTTERWAVE_WEBHOOK_HASH: z.string().min(1).optional(),
   FLUTTERWAVE_CURRENCY: z.string().regex(/^[A-Z]{3}$/).default('RWF'),
+  /** Cards, through Flutterwave v3 Inline (user decisions, 2026-10-30): the
+   *  dashboard's API keys (Settings > API keys) and its webhook "Secret hash"
+   *  (Settings > Webhooks), all three or none. The public key is the only one
+   *  the browser ever sees. Test or live is decided by the keys themselves. */
+  FLUTTERWAVE_V3_SECRET_KEY: z.string().min(1).optional(),
+  FLUTTERWAVE_V3_PUBLIC_KEY: z.string().min(1).optional(),
+  FLUTTERWAVE_V3_WEBHOOK_HASH: z.string().min(1).optional(),
+  FLUTTERWAVE_V3_BASE_URL: z.url().default('https://api.flutterwave.com'),
   /** HS256 key that signs admin bearer tokens (plan.md Task 7). jose enforces no
    *  minimum key length, so this floor is the only one. Rotating it invalidates
    *  every issued token -- the only "revoke everything" there is. */
@@ -120,7 +128,7 @@ const schema = z.object({
   message: 'API_ORIGIN is required in production: payment providers call back on it',
   path: ['API_ORIGIN'],
 }).superRefine((env, ctx) => {
-  for (const issue of paymentIssues(env)) ctx.addIssue({ code: 'custom', message: issue.message, path: [issue.path] });
+  for (const issue of [...cardIssues(env), ...paymentIssues(env)]) ctx.addIssue({ code: 'custom', message: issue.message, path: [issue.path] });
 });
 export type Env = z.infer<typeof schema>;
 
@@ -128,14 +136,12 @@ export type Env = z.infer<typeof schema>;
 function parseMethodList(value: string, ctx: z.RefinementCtx): OfferableMethod[] {
   const items = value.split(',').map((item) => item.trim()).filter((item) => item !== '');
   if (items.length === 0) {
-    ctx.addIssue({ code: 'custom', message: 'lists no method: name at least one of momo_mtn, momo_airtel, or leave it unset to offer every configured one' });
+    ctx.addIssue({ code: 'custom', message: 'lists no method: name at least one of momo_mtn, momo_airtel, card, or leave it unset to offer every configured one' });
     return z.NEVER;
   }
   for (const item of items) {
-    if (item === 'card') {
-      ctx.addIssue({ code: 'custom', message: 'card is reserved for the hosted card checkout, which is deferred (marketplace-spec.md R3.2): it cannot be enabled yet' });
-    } else if (!(OFFERABLE_METHODS as readonly string[]).includes(item)) {
-      ctx.addIssue({ code: 'custom', message: `unknown method "${item.slice(0, 40)}": use momo_mtn, momo_airtel` });
+    if (!(OFFERABLE_METHODS as readonly string[]).includes(item)) {
+      ctx.addIssue({ code: 'custom', message: `unknown method "${item.slice(0, 40)}": use momo_mtn, momo_airtel, card` });
     }
   }
   return OFFERABLE_METHODS.filter((method) => items.includes(method));
@@ -152,14 +158,60 @@ type PaymentEnv = Pick<
   | 'FLUTTERWAVE_CLIENT_ID'
   | 'FLUTTERWAVE_CLIENT_SECRET'
   | 'FLUTTERWAVE_WEBHOOK_HASH'
+  | 'FLUTTERWAVE_V3_SECRET_KEY'
+  | 'FLUTTERWAVE_V3_PUBLIC_KEY'
+  | 'FLUTTERWAVE_V3_WEBHOOK_HASH'
 >;
 
 const MTN_CREDENTIALS = ['MTN_MOMO_SUBSCRIPTION_KEY', 'MTN_MOMO_API_USER', 'MTN_MOMO_API_KEY'] as const;
 const FLUTTERWAVE_CREDENTIALS = ['FLUTTERWAVE_CLIENT_ID', 'FLUTTERWAVE_CLIENT_SECRET'] as const;
+/** The webhook hash is one of the three: without it no card payment's webhook could be verified. */
+const FLUTTERWAVE_V3_CREDENTIALS = ['FLUTTERWAVE_V3_SECRET_KEY', 'FLUTTERWAVE_V3_PUBLIC_KEY', 'FLUTTERWAVE_V3_WEBHOOK_HASH'] as const;
 
-/** What a provider needs before it can be offered; the same test `MtnMomoProvider` and `FlutterwaveProvider` apply. */
+/**
+ * What a provider needs before it can be offered; the same test `MtnMomoProvider`,
+ * `FlutterwaveProvider` and `FlutterwaveCheckoutProvider` apply.
+ */
 function credentialsOf(providerId: PaymentProviderId): readonly (keyof PaymentEnv)[] {
-  return providerId === 'mtn_momo_direct' ? MTN_CREDENTIALS : FLUTTERWAVE_CREDENTIALS;
+  if (providerId === 'mtn_momo_direct') return MTN_CREDENTIALS;
+  return providerId === 'flutterwave_checkout' ? FLUTTERWAVE_V3_CREDENTIALS : FLUTTERWAVE_CREDENTIALS;
+}
+
+/**
+ * The card keys, in EVERY environment (2026-10-30), like Google's pair: half of
+ * them is a typo that would silently drop the method, and `card` listed in
+ * `PAYMENT_METHODS_ENABLED` without them asks for something that cannot be
+ * collected. The two API keys are also checked for what they are: the public
+ * key goes to the browser, so a secret key pasted there would publish it, and
+ * a test key beside a live one fails every payment. No value is ever echoed.
+ */
+function cardIssues(env: PaymentEnv): { message: string; path: string }[] {
+  const issues: { message: string; path: string }[] = [];
+  const keys = FLUTTERWAVE_V3_CREDENTIALS;
+  const missing = keys.filter((key) => env[key] === undefined);
+  if (missing.length > 0 && missing.length < keys.length) {
+    issues.push({ message: `set ${listed(keys)} together, or none: ${listed(missing)} missing`, path: missing[0] ?? 'FLUTTERWAVE_V3_SECRET_KEY' });
+  }
+  if (missing.length === keys.length && env.PAYMENT_METHODS_ENABLED?.includes('card') === true) {
+    issues.push({ message: `card is listed, but ${listed(keys)} are not set: card cannot be collected`, path: 'PAYMENT_METHODS_ENABLED' });
+  }
+  const secret = env.FLUTTERWAVE_V3_SECRET_KEY;
+  const publicKey = env.FLUTTERWAVE_V3_PUBLIC_KEY;
+  if (secret !== undefined && !secret.startsWith('FLWSECK')) {
+    issues.push({ message: 'must be a Flutterwave v3 secret key (FLWSECK...)', path: 'FLUTTERWAVE_V3_SECRET_KEY' });
+  }
+  if (publicKey !== undefined && !publicKey.startsWith('FLWPUBK')) {
+    issues.push({ message: 'must be a Flutterwave v3 public key (FLWPUBK...): it is sent to every payer browser', path: 'FLUTTERWAVE_V3_PUBLIC_KEY' });
+  }
+  if (secret !== undefined && publicKey !== undefined && isTestKey(secret) !== isTestKey(publicKey)) {
+    issues.push({ message: 'FLUTTERWAVE_V3_SECRET_KEY and FLUTTERWAVE_V3_PUBLIC_KEY must both be test keys or both live keys', path: 'FLUTTERWAVE_V3_PUBLIC_KEY' });
+  }
+  return issues;
+}
+
+/** Flutterwave's sandbox keys read `FLWSECK_TEST-...` and `FLWPUBK_TEST-...`. */
+function isTestKey(key: string): boolean {
+  return /^FLW(SEC|PUB)K_TEST/.test(key);
 }
 
 function configured(env: PaymentEnv, providerId: PaymentProviderId): boolean {
@@ -196,6 +248,7 @@ function paymentIssues(env: PaymentEnv): { message: string; path: string }[] {
   if (env.NODE_ENV !== 'production') return [];
   const issues: { message: string; path: string }[] = [];
 
+  // The card keys are checked in every environment (`cardIssues`).
   for (const providerId of ['mtn_momo_direct', 'flutterwave'] as const) {
     const keys = credentialsOf(providerId);
     const missing = keys.filter((key) => env[key] === undefined);
@@ -209,6 +262,9 @@ function paymentIssues(env: PaymentEnv): { message: string; path: string }[] {
   for (const method of wanted) {
     const providerId = routedProviderId(method, env.MOMO_MTN_PROVIDER);
     if (configured(env, providerId)) continue;
+    // A listed card without its keys is `cardIssues`'s, in every environment;
+    // unlisted, cards being unconfigured is no reason on its own to refuse a start.
+    if (method === 'card') continue;
     const keys = credentialsOf(providerId);
     const why = env.PAYMENT_METHODS_ENABLED === undefined ? 'no payment method can be offered: ' : '';
     issues.push({

@@ -1,4 +1,5 @@
 import { kigaliDateOf } from '../availability/engine.js';
+import { type PaymentMethod, knownPaymentMethod } from '../payments/provider.js';
 import { type AccessedBooking, type CancellationPolicy, cancellationPolicyOf } from './access.js';
 import { maskEmail, pendingMaskedEmailOf } from './email-change.js';
 import { type ClientNotice, clientNotices } from './notices.js';
@@ -71,7 +72,7 @@ export type ClientBookingView = {
   cancellationReason: string | null;
   cancelledAt: string | null;
   /** Present once there is money to take and a booking to take it for. */
-  sessionFee: { outstandingRwf: number; waitingPayment: { ourRef: string } | null } | null;
+  sessionFee: { outstandingRwf: number; waitingPayment: { ourRef: string; method: PaymentMethod | null } | null } | null;
   /** Present once the photographer has sent the photos (spec §3.9, §6.20). */
   delivery: { url: string | null; expiresOn: string | null; expired: boolean; note: string | null } | null;
   /** What has happened since, newest first (2026-09-25; `notices.ts`). */
@@ -122,7 +123,7 @@ export function clientBookingView(booking: AccessedBooking, now: Date): ClientBo
     cancelledAt: booking.cancelledAt?.toISOString() ?? null,
     sessionFee:
       PAYABLE_STATUSES.includes(booking.status) && totals.outstandingRwf > 0
-        ? { outstandingRwf: totals.outstandingRwf, waitingPayment: waiting === undefined ? null : { ourRef: waiting.ourRef } }
+        ? { outstandingRwf: totals.outstandingRwf, waitingPayment: waiting === undefined ? null : { ourRef: waiting.ourRef, method: knownPaymentMethod(waiting.method) } }
         : null,
     delivery: deliveryOf(booking, now),
     notices: clientNotices({

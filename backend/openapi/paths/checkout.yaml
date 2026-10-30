@@ -7,10 +7,11 @@ paymentMethods:
       The methods the pay pages may offer, in display order, and nothing else
       (marketplace-spec.md R3.1). Each method is routed to its own provider:
       MTN MoMo to MTN direct or Flutterwave (`MOMO_MTN_PROVIDER`), Airtel Money
-      always to Flutterwave. `PAYMENT_METHODS_ENABLED` may narrow the list, and
-      a method whose provider is not configured is never listed, so the list
-      may be empty. `card` is deferred and never listed. No provider is named:
-      which one collects a method is not the payer's concern.
+      always to Flutterwave, card to Flutterwave v3 Inline (listed last, only
+      with its keys). `PAYMENT_METHODS_ENABLED` may narrow the list, and a
+      method whose provider is not configured is never listed, so the list may
+      be empty. No provider is named: which one collects a method is not the
+      payer's concern.
       `Cache-Control: no-store`. Anonymous.
     security: []
     responses:
@@ -27,7 +28,7 @@ paymentMethods:
                   type: array
                   uniqueItems: true
                   items: { $ref: ../components/common.yaml#/schemas/PaymentMethod }
-                  examples: [[momo_mtn, momo_airtel], [momo_mtn], [momo_airtel], []]
+                  examples: [[momo_mtn, momo_airtel, card], [momo_mtn, momo_airtel], [card], []]
 
 checkout:
   get:
@@ -58,6 +59,12 @@ checkoutPayments:
       provider the chosen method routes to (R3.1). The amount is the booking's
       frozen booking fee: an amount, provider or reference in the body is
       ignored. `Cache-Control: no-store`.
+
+      `method: card` needs no phone and calls no provider: the answer carries
+      the Flutterwave Inline config (`card`) for the page to open. While that
+      card checkout is still open, paying by card again answers `200` with the
+      SAME payment and config; another method meets `payment_in_progress` for
+      the first three minutes, as any attempt does.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/Reference
@@ -69,10 +76,17 @@ checkoutPayments:
           schema: { $ref: ../components/common.yaml#/schemas/PayRequest }
     responses:
       '201':
-        description: The attempt was accepted; poll its `ourRef`.
+        description: The attempt was accepted; poll its `ourRef`. For a card, open `card`.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/PaymentStarted }
+      '200':
+        description: This fee's card checkout is still open; reopen it.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/CardPaymentOpen }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
       '404':
         $ref: ../components/common.yaml#/responses/NotFound
       '409':
@@ -92,9 +106,9 @@ checkoutPayments:
               hold_expired: { value: { error: hold_expired } }
               nothing_to_pay: { value: { error: nothing_to_pay } }
               photographer_unavailable: { value: { error: photographer_unavailable } }
-              in_progress: { value: { error: payment_in_progress, payment: { ourRef: 00000000-0000-4000-8000-000000000000 } } }
+              in_progress: { value: { error: payment_in_progress, payment: { ourRef: 00000000-0000-4000-8000-000000000000, method: momo_mtn } } }
       '422':
-        description: A method not on offer (not enabled, its provider not configured, or `card`), or an unusable phone number.
+        description: A method not on offer (not enabled, or its provider not configured), or an unusable phone number.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/ValidationError }
@@ -117,9 +131,15 @@ paymentStatus:
       was handed; shows no contact details. `Cache-Control: no-store`. A
       subscription payment's reference is a 404 here: the studio polls it at
       `/api/studio/subscription/payments/{ourRef}`.
+
+      For a card payment still pending, the poll first asks Flutterwave itself
+      (at most once per payment every 5 seconds, whoever polls), so the answer
+      after the modal can already be the result. Nothing in the query is ever a
+      result: `status=successful` is ignored (T3.2).
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/OurRef
+      - $ref: ../components/common.yaml#/parameters/TransactionId
     responses:
       '200':
         description: The payment and the booking it is for.

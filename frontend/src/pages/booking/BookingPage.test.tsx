@@ -1,9 +1,11 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import type { ClientBooking } from '@/catalogue/booking-access'
+import { FLUTTERWAVE_INLINE_SRC, resetFlutterwaveInlineForTests } from '@/lib/flutterwave-inline'
+import { cardConfig, fakeFlutterwave, removeFakeFlutterwave } from '@/test/card-fixtures'
 import { routes } from '@/routes'
 
 /**
@@ -679,7 +681,7 @@ describe('the session fee (plan.md Task 18)', () => {
 
   it('follows the attempt already waiting when the API says one is in progress', async () => {
     const waiting = '9a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d'
-    stubApi({ pay: () => json({ error: 'payment_in_progress', payment: { ourRef: waiting } }, 409) })
+    stubApi({ pay: () => json({ error: 'payment_in_progress', payment: { ourRef: waiting, method: 'momo_mtn' } }, 409) })
     const router = await renderLoaded()
 
     await user().type(phoneField(), '0788123456')
@@ -687,6 +689,8 @@ describe('the session fee (plan.md Task 18)', () => {
 
     await screen.findByRole('heading', { name: 'Approve the payment on your phone' })
     expect(router.state.location.pathname).toBe(`${PATH}/payments/${waiting}`)
+    // A phone prompt is not marked as a card.
+    expect(sessionStorage.getItem(`bookly.cardPayment.${waiting}`)).toBeNull()
   })
 
   it.each(['', '   ', 'abc', '12345'])('marks and focuses an unreadable number "%s" without a request', async (typed) => {
@@ -1281,5 +1285,139 @@ describe('the cancellation terms and deadline (R1.8)', () => {
 
     expect(await screen.findByText(/^Cancelling closed on /, {}, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Cancel this booking' })).not.toBeInTheDocument()
+  })
+})
+
+// --- The session fee by card (Flutterwave v3 Inline, "Cards as built") ----------------------------
+
+describe('paying the session fee by card', () => {
+  const CARD_METHODS = () => json({ methods: ['momo_mtn', 'momo_airtel', 'card'] })
+  const CARD = cardConfig(OUR_REF, { amount: 30_000, redirect_url: `https://bookly.example/payments/${OUR_REF}` })
+  const cardAnswer = (status = 201) => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: CARD }, status)
+
+  beforeEach(() => {
+    resetFlutterwaveInlineForTests()
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    removeFakeFlutterwave()
+    for (const script of document.querySelectorAll(`script[src="${FLUTTERWAVE_INLINE_SRC}"]`)) script.remove()
+    sessionStorage.clear()
+  })
+
+  async function chooseCard() {
+    const router = await renderLoaded()
+    await user().click(screen.getByRole('radio', { name: 'Card' }))
+    return router
+  }
+
+  it('asks no number, keeps the token for the card return page before the modal opens, and opens it unchanged', async () => {
+    let tokenWhenOpened: string | null = null
+    const flutterwave = fakeFlutterwave()
+    flutterwave.checkout.mockImplementation(((config: Record<string, unknown>) => {
+      tokenWhenOpened = sessionStorage.getItem(`bookly.cardBookingToken.${OUR_REF}`)
+      const { callback, onclose, ...rest } = config as Record<string, unknown> & { callback: () => void; onclose: () => void }
+      flutterwave.opened.push({ config: rest, callback, onclose })
+      return { close: flutterwave.close }
+    }) as never)
+    const { payBodies } = stubApi({ methods: CARD_METHODS, pay: () => cardAnswer() })
+    await chooseCard()
+
+    expect(screen.queryByRole('textbox', { name: 'Mobile Money number' })).not.toBeInTheDocument()
+    expect(screen.getByText('You will enter your card details in a secure Flutterwave window.')).toBeInTheDocument()
+    await user().click(payButton())
+
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+    expect(flutterwave.opened[0]?.config).toStrictEqual(CARD)
+    expect(payBodies).toStrictEqual([{ method: 'card' }])
+    expect(tokenWhenOpened).toBe(TOKEN)
+    expect(sessionStorage.getItem(`bookly.cardPayment.${OUR_REF}`)).toBe('1')
+    // The token goes nowhere near Flutterwave: not in the config it was handed.
+    expect(JSON.stringify(flutterwave.opened[0]?.config)).not.toContain(TOKEN)
+  })
+
+  it('marks the waiting payment as a card, with the token for its return page, when the 409 names a card', async () => {
+    const flutterwave = fakeFlutterwave()
+    stubApi({ methods: CARD_METHODS, pay: () => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, 409) })
+    const router = await renderLoaded()
+    await user().type(phoneField(), '0788123456')
+    await user().click(payButton())
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/payments/${OUR_REF}`))
+    expect(sessionStorage.getItem(`bookly.cardPayment.${OUR_REF}`)).toBe('1')
+    expect(sessionStorage.getItem(`bookly.cardBookingToken.${OUR_REF}`)).toBe(TOKEN)
+    expect(flutterwave.opened).toHaveLength(0)
+  })
+
+  it('on the callback moves to the booking progress page with the transaction id', async () => {
+    const flutterwave = fakeFlutterwave()
+    const { calls } = stubApi({ methods: CARD_METHODS, pay: () => cardAnswer(200) })
+    const router = await chooseCard()
+    await user().click(payButton())
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+
+    act(() => {
+      flutterwave.pay('987654')
+    })
+
+    await screen.findByRole('heading', { level: 1, name: 'Confirming your card payment' })
+    expect(router.state.location.pathname).toBe(`${PATH}/payments/${OUR_REF}`)
+    expect(calls).toContain(`GET /api/payments/${OUR_REF}?transactionId=987654`)
+    expect(screen.getByRole('link', { name: 'Back to payment' })).toHaveAttribute('href', PATH)
+  })
+
+  it('on onclose stays on the booking, gives the button back and says nothing was charged', async () => {
+    const flutterwave = fakeFlutterwave()
+    stubApi({ methods: CARD_METHODS, pay: () => cardAnswer() })
+    const router = await chooseCard()
+    await user().click(payButton())
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+
+    act(() => {
+      flutterwave.dismiss()
+    })
+
+    expect(await screen.findByRole('status')).toHaveTextContent('The card window was closed.')
+    expect(router.state.location.pathname).toBe(PATH)
+    expect(payButton()).not.toHaveAttribute('aria-disabled', 'true')
+    expect(payButton()).toHaveFocus()
+  })
+
+  it('says card payment could not load when the script fails', async () => {
+    stubApi({ methods: CARD_METHODS, pay: () => cardAnswer() })
+    await chooseCard()
+    await user().click(payButton())
+
+    await waitFor(() => expect(document.querySelector(`script[src="${FLUTTERWAVE_INLINE_SRC}"]`)).not.toBeNull())
+    act(() => {
+      document.querySelector(`script[src="${FLUTTERWAVE_INLINE_SRC}"]`)?.dispatchEvent(new Event('error'))
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Card payment couldn't load.")
+  })
+
+  it('still reads a waiting session fee with no method as a phone prompt', async () => {
+    stubApi({
+      methods: CARD_METHODS,
+      booking: () => json({ booking: { ...BOOKING, sessionFee: { outstandingRwf: 30_000, waitingPayment: { ourRef: OUR_REF } } } }),
+    })
+    await renderLoaded()
+
+    expect(screen.getByText(/A payment request is already waiting on your phone\./)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reopen the card window' })).not.toBeInTheDocument()
+  })
+
+  it('offers to reopen a waiting card checkout, should the API name its method', async () => {
+    const flutterwave = fakeFlutterwave()
+    stubApi({
+      methods: CARD_METHODS,
+      booking: () => json({ booking: { ...BOOKING, sessionFee: { outstandingRwf: 30_000, waitingPayment: { ourRef: OUR_REF, method: 'card' } } } }),
+      pay: () => cardAnswer(200),
+    })
+    await renderLoaded()
+
+    await user().click(screen.getByRole('button', { name: 'Reopen the card window' }))
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
   })
 })

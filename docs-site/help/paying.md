@@ -15,15 +15,23 @@ The booking fee is **non-refundable if you cancel** — so choose your date with
 that in mind. (If the *photographer* ever has to cancel, you get the booking fee
 back in full.)
 
-## 2. Paying by Mobile Money
+## 2. Paying by Mobile Money or card
 
-Payment is by **Mobile Money** (MTN MoMo today; Airtel Money and cards may be
-added later). You enter the phone number to charge, and a prompt appears on that
-phone to approve the payment.
+You can pay by **Mobile Money** (MTN MoMo or Airtel Money) or by **card**,
+whichever the pay page offers.
+
+- **Mobile Money:** you enter the phone number to charge, and a prompt appears
+  on that phone to approve the payment.
+- **Card:** you enter your card details in a secure **Flutterwave** window that
+  opens over the page. You pay exactly the amount shown; there is no card fee.
+  If you close the window without paying, nothing is charged, and you can try
+  again or choose Mobile Money instead. If your bank asks you to confirm the
+  payment (3-D Secure), you come back to a page that shows your payment.
 
 ::: tip Your card and PIN never reach us
-You approve the payment on your own phone, with your provider. We never see or
-store your card number, CVV or Mobile Money PIN.
+You approve a Mobile Money payment on your own phone, with your provider, and
+you type a card into Flutterwave's own window. We never see or store your card
+number, CVV or Mobile Money PIN.
 :::
 
 After you approve, a page shows your booking as **pending** and waits for your
@@ -59,8 +67,8 @@ up, and you'll always see the current amount on your booking page.
 
 You can pay the session fee two ways:
 
-- **Online**, from your booking page, by Mobile Money — the same prompt-on-your-
-  phone flow as the booking fee.
+- **Online**, from your booking page, by Mobile Money or card — the same way
+  as the booking fee.
 - **In cash**, handed to the photographer, who records it against your booking.
 
 You'll get a receipt by email either way, and your booking page always shows
@@ -77,7 +85,8 @@ and records it against your booking.
 
 The photographer issues refunds to you directly (by Mobile Money or bank) and
 records them on your booking, so your booking page reflects what was returned.
-Refunds are never charged to a card on file — there is no card on file.
+Refunds are never charged to a card on file — there is no card on file. Money
+you paid online by card is refunded by Bookly through Flutterwave.
 
 ---
 

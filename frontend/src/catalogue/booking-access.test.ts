@@ -11,6 +11,7 @@ import {
   startSessionFeePayment,
 } from './booking-access'
 import { PaymentApiError } from './payments'
+import { cardConfig } from '@/test/card-fixtures'
 
 /**
  * The client-booking API client (plan.md Task 18; spec §3.9, §6.10).
@@ -293,10 +294,22 @@ describe('startSessionFeePayment', () => {
     await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'not_found' })
   })
 
-  it('reads 409 payment_in_progress as the attempt already waiting', async () => {
+  it('reads 409 payment_in_progress as the attempt already waiting, a missing method as a phone prompt', async () => {
     stubFetch(() => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, 409))
 
-    await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'in_progress', ourRef: OUR_REF })
+    await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'in_progress', ourRef: OUR_REF, method: null })
+  })
+
+  it.each([
+    ['card', 'card'],
+    ['momo_mtn', 'momo_mtn'],
+    ['momo_airtel', 'momo_airtel'],
+    ['a method it does not know', null],
+    [null, null],
+  ])('reads the method %s of a 409 payment_in_progress as %s', async (sent, read) => {
+    stubFetch(() => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: sent } }, 409))
+
+    await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'in_progress', ourRef: OUR_REF, method: read })
   })
 
   it.each([
@@ -413,5 +426,33 @@ describe('confirmEmailChange (2026-09-25)', () => {
 
   it('builds the page path the email links to', () => {
     expect(emailConfirmPath('a/b')).toBe('/email-confirm/a%2Fb')
+  })
+})
+
+describe('startSessionFeePayment by card (Flutterwave v3 Inline)', () => {
+  const request = { method: 'card', phone: '078 812 3456' } as const
+
+  it('POSTs the method alone, no phone', async () => {
+    const mock = stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: cardConfig(OUR_REF) }, 201))
+    await startSessionFeePayment(TOKEN, request)
+    expect(JSON.parse(String(sentRequest(mock).init.body))).toStrictEqual({ method: 'card' })
+  })
+
+  it.each([201, 200])('answers a %i with the config as a card payment to open, unchanged', async (status) => {
+    const card = cardConfig(OUR_REF)
+    stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card }, status))
+    await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'card', ourRef: OUR_REF, card })
+  })
+
+  it('is failed for a card 201 without a usable config', async () => {
+    stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: cardConfig(OUR_REF, { tx_ref: 'other' }) }, 201))
+    await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'failed' })
+    stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' } }, 201))
+    await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'failed' })
+  })
+
+  it('reads a card 409 payment_in_progress as the attempt already waiting', async () => {
+    stubFetch(() => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, 409))
+    await expect(startSessionFeePayment(TOKEN, request)).resolves.toStrictEqual({ status: 'in_progress', ourRef: OUR_REF, method: null })
   })
 })

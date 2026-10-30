@@ -9,7 +9,7 @@ import {
   cancelResultOf,
   sessionFeeResultOf,
 } from '@/catalogue/booking-access'
-import type { PaymentMethod, StartPaymentResult } from '@/catalogue/payments'
+import { type PayRequest, type StartPaymentResult, payBody } from '@/catalogue/payments'
 import { type AccountUser, primeAccountMe } from '@/auth/account'
 
 /**
@@ -198,17 +198,14 @@ export async function cancelAccountBooking(reference: string): Promise<AccountCa
   return cancelResultOf(status, body)
 }
 
-/** The session fee, as the guest page pays it; the outcomes are the same. */
-export async function startAccountSessionFeePayment(
-  reference: string,
-  request: { method: PaymentMethod; phone: string },
-): Promise<StartPaymentResult> {
+/** The session fee, as the guest page pays it; the outcomes are the same, a card's Inline config included. */
+export async function startAccountSessionFeePayment(reference: string, request: PayRequest): Promise<StartPaymentResult> {
   const { status, body } = await send(`/account/bookings/${encodeURIComponent(reference)}/payments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
+    body: JSON.stringify(payBody(request)),
   })
-  return sessionFeeResultOf(status, body)
+  return sessionFeeResultOf(status, body, request.method)
 }
 
 // --- Payments and receipts (R8.2) ----------------------------------------------------

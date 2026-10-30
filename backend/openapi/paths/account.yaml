@@ -400,7 +400,10 @@ bookingPayments:
       The guest page's session-fee payment, with the same safety: the amount
       is computed on the server, one attempt at a time, and the provider is the
       one the method routes to (R3.1). Only mounted when payments are
-      configured. Shares the guest payment's rate limit.
+      configured. Shares the guest payment's rate limit. `method: card` answers
+      the Flutterwave Inline config, returning to
+      `/account/bookings/{reference}/payments/{ourRef}`; again while it is open,
+      `200` with the same one.
     security:
       - accountBearer: []
     parameters:
@@ -412,10 +415,17 @@ bookingPayments:
           schema: { $ref: ../components/common.yaml#/schemas/PayRequest }
     responses:
       '201':
-        description: The phone is being prompted. Poll `GET /api/payments/{ourRef}`.
+        description: The phone is being prompted (for a card, open `card`). Poll `GET /api/payments/{ourRef}`.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/PaymentStarted }
+      '200':
+        description: This fee's card checkout is still open; reopen it.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/CardPaymentOpen }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
       '401':
         $ref: ../components/common.yaml#/responses/Unauthorized
       '404':

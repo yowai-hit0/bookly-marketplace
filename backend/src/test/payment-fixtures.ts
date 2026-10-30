@@ -3,8 +3,10 @@ import { generateAccessToken } from '../booking/access-token.js';
 import { MtnMomoProvider } from '../payments/mtn-momo.js';
 import { type PaymentRouting, routePayments } from '../payments/routing.js';
 import type {
+  BrowserCheckoutRequest,
   InitiatePaymentRequest,
   InitiatePaymentResult,
+  InlineCardConfig,
   PaymentMethod,
   PaymentProvider,
   PaymentProviderId,
@@ -364,6 +366,8 @@ export type PaymentSeed = {
   ageSeconds?: number;
   /** The overpaid part of an online session fee (Phase 4 overpayment decision; CHECK payment_overpaid_range). */
   overpaidRwf?: number;
+  /** The method on the row; unset, a settled payment is `momo_mtn` and a waiting one has none. */
+  method?: PaymentMethod | null;
 };
 
 export type SeededPayment = { id: string; ourRef: string };
@@ -386,7 +390,7 @@ export async function insertPayment(prisma: PrismaClient, bookingId: string, see
     VALUES (${bookingId}::uuid, ${seed.kind ?? 'booking_fee'}, ${seed.provider ?? 'mtn_momo_direct'}, ${seed.amountRwf ?? 20_000}, ${seed.overpaidRwf ?? 0},
             ${status}, ${seed.providerRef ?? null}, ${seed.failureReason ?? null},
             COALESCE(${initiatedAt}::timestamptz, now() - make_interval(secs => ${seed.ageSeconds ?? 0}::double precision)),
-            ${settled ? SETTLED_AT : null}::timestamptz, ${settled && seed.provider !== 'cash' ? 'momo_mtn' : null})
+            ${settled ? SETTLED_AT : null}::timestamptz, ${seed.method !== undefined ? seed.method : settled && seed.provider !== 'cash' ? 'momo_mtn' : null})
     RETURNING id::text AS id, our_ref::text AS our_ref`;
   const row = rows[0];
   if (row === undefined) throw new Error('The payment insert returned no row');
@@ -411,6 +415,8 @@ export type StubBehaviour = {
   lookupStatus?: (ourRef: string, signal: AbortSignal) => Promise<{ event: ProviderEvent; payload: unknown } | null>;
   verifyWebhook?: (delivery: WebhookDelivery) => boolean;
   parseWebhook?: (delivery: WebhookDelivery) => ProviderEvent | null;
+  /** A browser checkout (cards): without one, `routePayments` never offers `card` through the stub. */
+  browserCheckout?: (request: BrowserCheckoutRequest) => InlineCardConfig;
 };
 
 /** A provider that records what it is asked and answers what the test scripts: by default, accepted. */
@@ -441,6 +447,7 @@ export function stubProvider(behaviour: StubBehaviour = {}): StubProvider {
     parseWebhook(delivery) {
       return behaviour.parseWebhook ? behaviour.parseWebhook(delivery) : null;
     },
+    ...(behaviour.browserCheckout === undefined ? {} : { browserCheckout: behaviour.browserCheckout }),
   };
 }
 

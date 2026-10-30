@@ -9,7 +9,8 @@ import { PAYMENT_METHODS, type PaymentMethod, type PaymentProvider, type Payment
  *
  *   momo_mtn     MOMO_MTN_PROVIDER: mtn_momo_direct (the default) or flutterwave
  *   momo_airtel  always flutterwave: MTN direct collects MTN MoMo and nothing else
- *   card         deferred with the hosted checkout (R3.2, deferred 2026-10-17)
+ *   card         always flutterwave_checkout: Flutterwave v3 Inline, offered once
+ *                its three keys are set (user decisions, 2026-10-30)
  *
  * `PAYMENT_METHODS_ENABLED` may narrow the list. A method is offered only when
  * the provider it routes to is configured: an unconfigured provider is never
@@ -18,8 +19,8 @@ import { PAYMENT_METHODS, type PaymentMethod, type PaymentProvider, type Payment
  * it, so they can never disagree about where a method goes.
  */
 
-/** The methods a deployment can offer today, in the order the pay page lists them. `card` is not among them. */
-export const OFFERABLE_METHODS = ['momo_mtn', 'momo_airtel'] as const satisfies readonly PaymentMethod[];
+/** The methods a deployment can offer, in the order the pay page lists them. */
+export const OFFERABLE_METHODS = ['momo_mtn', 'momo_airtel', 'card'] as const satisfies readonly PaymentMethod[];
 export type OfferableMethod = (typeof OFFERABLE_METHODS)[number];
 
 /** `MOMO_MTN_PROVIDER`: who collects MTN MoMo. */
@@ -28,6 +29,7 @@ export type MomoMtnProvider = (typeof MOMO_MTN_PROVIDERS)[number];
 
 /** The provider a method goes to (R3.1). */
 export function routedProviderId(method: OfferableMethod, momoMtnProvider: MomoMtnProvider): PaymentProviderId {
+  if (method === 'card') return 'flutterwave_checkout';
   return method === 'momo_mtn' ? momoMtnProvider : 'flutterwave';
 }
 
@@ -42,15 +44,17 @@ export type PaymentRouting = {
 /**
  * The routing for a set of routes, keeping only what can really be collected:
  * a route whose provider is unconfigured, or does not collect that method, is
- * dropped, and so is `card` until it has a provider of its own. Methods keep the
- * vocabulary's order (`momo_mtn`, `momo_airtel`) whatever order they are given in.
+ * dropped, and so is `card` to a provider with no browser checkout to open (a
+ * card is only ever paid in the payer's browser: Flutterwave v3 Inline).
+ * Methods keep the vocabulary's order (`momo_mtn`, `momo_airtel`, `card`)
+ * whatever order they are given in.
  */
 export function routePayments(routes: Partial<Record<PaymentMethod, PaymentProvider>>): PaymentRouting {
   const offered = new Map<PaymentMethod, PaymentProvider>();
   for (const method of PAYMENT_METHODS) {
     const provider = routes[method];
     if (provider === undefined || !provider.configured || !provider.methods.includes(method)) continue;
-    if (!(OFFERABLE_METHODS as readonly PaymentMethod[]).includes(method)) continue;
+    if (method === 'card' && provider.browserCheckout === undefined) continue;
     offered.set(method, provider);
   }
   const methods = Object.freeze([...offered.keys()]);

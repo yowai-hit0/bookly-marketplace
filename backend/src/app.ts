@@ -6,6 +6,7 @@ import type { GoogleIdentityProvider } from './auth/google.js';
 import { AUTH_AREAS } from './auth/roles.js';
 import { areaIpKey, createLimiters, emailKey, type RateLimitOverrides, rateLimit } from './http/rate-limit.js';
 import { securityHeaders } from './http/security-headers.js';
+import type { PaymentCheck } from './payments/card-check.js';
 import { type PaymentRouting, requestProvider } from './payments/routing.js';
 import { accountRouter } from './routes/account.js';
 import { healthRouter } from './routes/health.js';
@@ -46,8 +47,10 @@ export type AppOptions = {
     /** Mounts the checkout (`/api/payment-methods`, `/api/checkout/*`,
      *  `/api/payments/*`) and puts a checkout token on each created booking
      *  (plan.md Task 16). `routing` is which methods are offered and who
-     *  collects each (marketplace-spec.md R3.1); `secret` is `SESSION_SECRET`. */
-    payments?: { routing: PaymentRouting; secret: string; providerTimeoutMs?: number };
+     *  collects each (marketplace-spec.md R3.1); `secret` is `SESSION_SECRET`.
+     *  `checkPayment` lets the payment status polls (the public one and the
+     *  studio's) verify a pending card payment with Flutterwave (C5). */
+    payments?: { routing: PaymentRouting; secret: string; providerTimeoutMs?: number; checkPayment?: PaymentCheck };
     /** "Email me my links" (`/api/booking-links`): its limiter and hooks, for tests. */
     bookingLinks?: Pick<BookingLinksDeps, 'limiter' | 'onWork' | 'log'>;
   };
@@ -164,6 +167,7 @@ export function createApp(options: AppOptions = {}): Express {
     const routing = options.publicApi?.payments?.routing;
     const providerId = routing === undefined ? undefined : requestProvider(routing)?.id;
     const timeoutMs = options.publicApi?.payments?.providerTimeoutMs;
+    const checkPayment = options.publicApi?.payments?.checkPayment;
     app.use(
       '/api/studio',
       studioRouter({
@@ -172,6 +176,7 @@ export function createApp(options: AppOptions = {}): Express {
         // The photographer pays for the subscription through the same routing as clients (R5.2).
         ...(routing === undefined ? {} : { paymentRouting: routing }),
         ...(timeoutMs === undefined ? {} : { providerTimeoutMs: timeoutMs }),
+        ...(checkPayment === undefined ? {} : { checkPayment }),
       }),
     );
     app.use('/api/platform', platformRouter(options.auth));

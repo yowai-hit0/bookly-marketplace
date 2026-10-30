@@ -22,12 +22,45 @@ const all = config.headers?.find((rule) => rule.source === '/(.*)')?.headers ?? 
 const header = (key: string) => all.find((h) => h.key.toLowerCase() === key.toLowerCase())?.value;
 
 describe('vercel.json security headers', () => {
-  it('sends a CSP whose script-src allows only same-origin files', () => {
-    const csp = header('Content-Security-Policy') ?? '';
-    const scriptSrc = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith('script-src'));
-    expect(scriptSrc).toBe("script-src 'self'");
-    expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).toContain("object-src 'none'");
+  const directive = (name: string) =>
+    (header('Content-Security-Policy') ?? '')
+      .split(';')
+      .map((d) => d.trim())
+      .find((d) => d.split(' ')[0] === name);
+
+  /*
+   * Card payments (user decision 2026-10-30, marketplace-spec.md "Cards as
+   * built"): the payer pays in Flutterwave's v3 Inline modal on our own pay
+   * page, so the page loads Flutterwave's script and that script opens
+   * Flutterwave's frame. Exactly what v3.js needs is allowed, and nothing more
+   * (frontend/src/lib/flutterwave-inline.ts, read from the live v3.js):
+   *  - script: the one file, by path, `https://checkout.flutterwave.com/v3.js`.
+   *    Still no inline or eval'd script.
+   *  - frames: `https://checkout-v3.flutterwave.com` (preloaded, and its
+   *    default) and `https://checkout.flutterwave.com` (for a key not
+   *    "upgraded"); before cards `frame-src` fell back to `default-src 'self'`,
+   *    so `'self'` stays.
+   *  - its fetches (`api.ravepay.co`, `flw-events-ge.myflutterwave.com`) are
+   *    already inside `connect-src 'self' https:`.
+   */
+  it('sends a CSP whose script-src allows same-origin files and Flutterwave Inline alone', () => {
+    expect(directive('script-src')).toBe("script-src 'self' https://checkout.flutterwave.com/v3.js");
+    expect(directive('script-src')).not.toMatch(/'unsafe-inline'|'unsafe-eval'|\*/);
+  });
+
+  it("frames only our own pages and Flutterwave's two checkout origins, and is framed by no one", () => {
+    expect(directive('frame-src')).toBe("frame-src 'self' https://checkout.flutterwave.com https://checkout-v3.flutterwave.com");
+    expect(directive('frame-ancestors')).toBe("frame-ancestors 'none'");
+    expect(directive('object-src')).toBe("object-src 'none'");
+  });
+
+  it('keeps every other directive as it was before cards', () => {
+    expect(header('Content-Security-Policy')).toBe(
+      "default-src 'self'; script-src 'self' https://checkout.flutterwave.com/v3.js; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; frame-src 'self' https://checkout.flutterwave.com https://checkout-v3.flutterwave.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    );
+    expect(header('X-Frame-Options')).toBe('DENY');
+    // A card-only modal is a form in Flutterwave's frame; it needs no Payment Request API.
+    expect(header('Permissions-Policy')).toBe('camera=(), microphone=(), geolocation=(), payment=()');
   });
 
   it('sends nosniff and a no-referrer policy, so token-bearing paths never leak in Referer', () => {
@@ -68,7 +101,7 @@ describe('robots.txt', () => {
   });
 
   it('keeps the token-bearing and signed-in pages out of crawls', () => {
-    for (const path of ['/checkout/', '/booking/', '/email-confirm/', '/account', '/studio', '/platform']) {
+    for (const path of ['/checkout/', '/booking/', '/payments/', '/email-confirm/', '/account', '/studio', '/platform']) {
       expect(robots).toContain(`Disallow: ${path}`);
     }
     expect(robots).not.toMatch(/^Disallow: \/$/m);

@@ -75,7 +75,7 @@ type CachedToken = { value: string; refreshAt: number };
 
 export class FlutterwaveProvider implements PaymentProvider {
   readonly id = 'flutterwave' as const;
-  /** Mobile money only; cards are deferred (marketplace-spec.md R3.2, deferred 2026-10-17). */
+  /** Mobile money only; cards go to Flutterwave v3 Inline (`flutterwave_checkout`, payments/flutterwave-checkout.ts). */
   readonly methods = ['momo_mtn', 'momo_airtel'] as const;
   readonly configured: boolean;
   readonly currency: string;

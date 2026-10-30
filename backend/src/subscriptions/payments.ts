@@ -1,8 +1,9 @@
 import type { Prisma } from '@prisma/client';
 import { enqueue } from '../outbox/enqueue.js';
 import { photographerRecipient } from '../outbox/recipients.js';
-import { PAYMENT_ATTEMPT_WINDOW_SECONDS, type StartPaymentDeps, attemptPayment } from '../payments/initiate.js';
-import type { PaymentMethod } from '../payments/provider.js';
+import { CARD_SESSION_SECONDS } from '../payments/flutterwave-checkout.js';
+import { PAYMENT_ATTEMPT_WINDOW_SECONDS, type StartPaymentDeps, attemptPayment, reopensCardSession } from '../payments/initiate.js';
+import { type CardSession, type CheckoutPayer, type PaymentMethod, knownPaymentMethod } from '../payments/provider.js';
 import { getPlatformSettings } from '../settings/index.js';
 import { type PlanInterval, addPlanInterval, planPrice } from './plan.js';
 
@@ -15,7 +16,7 @@ import { type PlanInterval, addPlanInterval, planPrice } from './plan.js';
  * subscription for its subject, the plan frozen in `plan_interval` -- then the
  * provider the photographer's method routes to (payments/routing.ts, R3.1) is
  * called outside any transaction, and the webhook or the reconciler settles it
- * (payments/webhooks.ts). MoMo only: cards are deferred (Phase 3).
+ * (payments/webhooks.ts). MoMo or card (Flutterwave v3 Inline, 2026-10-30).
  *
  *   - The AMOUNT is the platform's price for the chosen interval, read inside the
  *     transaction (`platform_setting`); nothing in the request names an amount
@@ -28,6 +29,12 @@ import { type PlanInterval, addPlanInterval, planPrice } from './plan.js';
  *     still adds its period (below).
  *   - ANY subscription status may pay, `expired` included: paying is the way back.
  *     A photographer who is not approved -- pending, or suspended -- may not.
+ *   - A CARD attempt is the booking fee's (payments/initiate.ts): no provider
+ *     call, a `CardSession` in the answer (the payer is the photographer's login
+ *     address, display name and contact phone), and a second card tap for the
+ *     SAME plan while its checkout session is open answers the same row
+ *     (`card_in_progress`). Another plan, or another method, meets the window
+ *     rule above.
  *
  * Settling (`addPaidPeriod`, called by the webhook path under its locks): a paid
  * period starting at `greatest(now, current_period_ends_at)` and lasting one
@@ -48,23 +55,25 @@ export type StartSubscriptionPaymentRequest = {
   photographerId: string;
   planInterval: PlanInterval;
   method: PaymentMethod;
-  /** Normalised by `normalizePhone`. */
+  /** Normalised by `normalizePhone`; empty for a card. */
   payerPhone: string;
 };
 
 export type StartSubscriptionPaymentResult =
-  | { status: 'started'; ourRef: string; amountRwf: number; planInterval: PlanInterval }
+  | { status: 'started'; ourRef: string; amountRwf: number; planInterval: PlanInterval; card?: CardSession }
+  /** The same plan's card checkout, still open: the same row again (cards). */
+  | { status: 'card_in_progress'; ourRef: string; amountRwf: number; planInterval: PlanInterval; card: CardSession }
   /** Pending (not yet approved) or suspended: a subscription is only for an approved studio. */
   | { status: 'photographer_not_approved' }
   /** Approved, but no subscription: an invariant the approval and the backfill keep; answered, not thrown. */
   | { status: 'no_subscription' }
   /** Another payment of this subscription is still waiting on the payer. */
-  | { status: 'in_progress'; ourRef: string }
+  | { status: 'in_progress'; ourRef: string; method: PaymentMethod | null }
   | { status: 'provider_failed'; ourRef: string; outcome: 'rejected' | 'unavailable'; amountRwf: number; planInterval: PlanInterval };
 
 type Opened =
-  | { status: 'opened'; paymentId: string; ourRef: string; amountRwf: number; handle: string }
-  | Extract<StartSubscriptionPaymentResult, { status: 'photographer_not_approved' | 'no_subscription' | 'in_progress' }>;
+  | { status: 'opened'; paymentId: string; ourRef: string; amountRwf: number; handle: string; card?: CardSession }
+  | Extract<StartSubscriptionPaymentResult, { status: 'photographer_not_approved' | 'no_subscription' | 'in_progress' | 'card_in_progress' }>;
 
 export async function startSubscriptionPayment(
   deps: StartPaymentDeps,
@@ -76,10 +85,15 @@ export async function startSubscriptionPayment(
     // Read, not locked: as at the booking fee's initiation, the provider is
     // called after this transaction anyway, so no lock could keep a suspension
     // from landing before the prompt. An attempt started before one still settles.
-    const photographers = await tx.$queryRaw<{ status: string; handle: string }[]>`
-      SELECT status, handle FROM photographer WHERE id = ${request.photographerId}::uuid`;
+    const photographers = await tx.$queryRaw<{ status: string; handle: string; display_name: string; contact_phone: string | null; email: string }[]>`
+      SELECT ph.status, ph.handle, ph.display_name, ph.contact_phone, u.email
+        FROM photographer ph
+        JOIN app_user u ON u.id = ph.user_id
+       WHERE ph.id = ${request.photographerId}::uuid`;
     const photographer = photographers[0];
     if (photographer === undefined || photographer.status !== 'approved') return { status: 'photographer_not_approved' };
+    // Flutterwave's receipt goes to the login address: the photographer's own, not the public contact one.
+    const payer: CheckoutPayer = { email: photographer.email, name: photographer.display_name, phone: photographer.contact_phone };
 
     // THE lock: two initiations for one subscription queue here, and the second
     // sees the first's committed row below (T5.3). The lock order of the
@@ -90,15 +104,29 @@ export async function startSubscriptionPayment(
     if (subscription === undefined) return { status: 'no_subscription' };
 
     // Measured on the database clock, like the booking fee's window.
-    const waiting = await tx.$queryRaw<{ our_ref: string }[]>`
-      SELECT our_ref::text AS our_ref
+    const waiting = await tx.$queryRaw<
+      { our_ref: string; status: string; provider: string; method: string | null; amount_rwf: number; plan_interval: string; recent: boolean; session_seconds_left: number }[]
+    >`
+      SELECT our_ref::text AS our_ref, status, provider, method, amount_rwf, plan_interval,
+             initiated_at > now() - make_interval(secs => ${PAYMENT_ATTEMPT_WINDOW_SECONDS}::double precision) AS recent,
+             floor(${CARD_SESSION_SECONDS}::double precision - extract(epoch FROM now() - initiated_at))::int AS session_seconds_left
         FROM payment
        WHERE subscription_id = ${subscription.id}::uuid
          AND status IN ('initiated', 'pending')
-         AND initiated_at > now() - make_interval(secs => ${PAYMENT_ATTEMPT_WINDOW_SECONDS}::double precision)
+         AND initiated_at > now() - make_interval(secs => ${Math.max(PAYMENT_ATTEMPT_WINDOW_SECONDS, CARD_SESSION_SECONDS)}::double precision)
        ORDER BY initiated_at DESC
        LIMIT 1`;
-    if (waiting[0] !== undefined) return { status: 'in_progress', ourRef: waiting[0].our_ref };
+    const latest = waiting[0];
+    if (latest !== undefined && latest.plan_interval === request.planInterval && reopensCardSession(latest, request.method, provider)) {
+      return {
+        status: 'card_in_progress',
+        ourRef: latest.our_ref,
+        amountRwf: latest.amount_rwf,
+        planInterval: request.planInterval,
+        card: { amountRwf: latest.amount_rwf, sessionSeconds: latest.session_seconds_left, payer },
+      };
+    }
+    if (latest?.recent === true) return { status: 'in_progress', ourRef: latest.our_ref, method: knownPaymentMethod(latest.method) };
 
     // The server's price, read here: whatever the request carried is never read (T5.3).
     const amountRwf = planPrice(await getPlatformSettings(tx), request.planInterval);
@@ -108,7 +136,8 @@ export async function startSubscriptionPayment(
       RETURNING id::text AS id, our_ref::text AS our_ref, amount_rwf`;
     const payment = inserted[0];
     if (payment === undefined) throw new Error('The payment insert returned no row');
-    return { status: 'opened', paymentId: payment.id, ourRef: payment.our_ref, amountRwf: payment.amount_rwf, handle: photographer.handle };
+    const card: CardSession | undefined = request.method === 'card' ? { amountRwf: payment.amount_rwf, sessionSeconds: CARD_SESSION_SECONDS, payer } : undefined;
+    return { status: 'opened', paymentId: payment.id, ourRef: payment.our_ref, amountRwf: payment.amount_rwf, handle: photographer.handle, ...(card === undefined ? {} : { card }) };
   });
 
   if (opened.status !== 'opened') return opened;
@@ -119,7 +148,8 @@ export async function startSubscriptionPayment(
     kind: 'subscription',
   });
   const plan = { amountRwf: opened.amountRwf, planInterval: request.planInterval };
-  return attempted.status === 'started' ? { ...attempted, ...plan } : { ...attempted, ...plan };
+  if (attempted.status === 'started') return { ...attempted, ...plan, ...(opened.card === undefined ? {} : { card: opened.card }) };
+  return { ...attempted, ...plan };
 }
 
 /** A subscription payment the webhook path has matched, locked and is about to settle. */

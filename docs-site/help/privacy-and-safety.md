@@ -2,9 +2,10 @@
 
 ## Your payment is handled by your provider, not by us
 
-When you pay, you approve the charge on your own phone through your Mobile Money
-provider. **Your card number, CVV and Mobile Money PIN never reach this site and
-are never stored here.** We only ever learn that a payment succeeded, failed, or
+When you pay by Mobile Money, you approve the charge on your own phone through
+your provider. When you pay by card, you type your card details into
+Flutterwave's own secure window. **Your card number, CVV and Mobile Money PIN
+never reach this site and are never stored here.** We only ever learn that a payment succeeded, failed, or
 is still pending — never your payment credentials.
 
 The whole site is served over HTTPS, so traffic between your device and us is

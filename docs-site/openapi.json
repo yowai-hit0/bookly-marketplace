@@ -804,7 +804,7 @@
           "Checkout & payments"
         ],
         "summary": "The payment methods on offer",
-        "description": "The methods the pay pages may offer, in display order, and nothing else\n(marketplace-spec.md R3.1). Each method is routed to its own provider:\nMTN MoMo to MTN direct or Flutterwave (`MOMO_MTN_PROVIDER`), Airtel Money\nalways to Flutterwave. `PAYMENT_METHODS_ENABLED` may narrow the list, and\na method whose provider is not configured is never listed, so the list\nmay be empty. `card` is deferred and never listed. No provider is named:\nwhich one collects a method is not the payer's concern.\n`Cache-Control: no-store`. Anonymous.\n",
+        "description": "The methods the pay pages may offer, in display order, and nothing else\n(marketplace-spec.md R3.1). Each method is routed to its own provider:\nMTN MoMo to MTN direct or Flutterwave (`MOMO_MTN_PROVIDER`), Airtel Money\nalways to Flutterwave, card to Flutterwave v3 Inline (listed last, only\nwith its keys). `PAYMENT_METHODS_ENABLED` may narrow the list, and a\nmethod whose provider is not configured is never listed, so the list may\nbe empty. No provider is named: which one collects a method is not the\npayer's concern.\n`Cache-Control: no-store`. Anonymous.\n",
         "security": [],
         "responses": {
           "200": {
@@ -827,13 +827,15 @@
                       "examples": [
                         [
                           "momo_mtn",
+                          "momo_airtel",
+                          "card"
+                        ],
+                        [
+                          "momo_mtn",
                           "momo_airtel"
                         ],
                         [
-                          "momo_mtn"
-                        ],
-                        [
-                          "momo_airtel"
+                          "card"
                         ],
                         []
                       ]
@@ -887,7 +889,7 @@
           "Checkout & payments"
         ],
         "summary": "Pay the booking fee",
-        "description": "Starts a booking-fee payment; the payer's phone is prompted through the\nprovider the chosen method routes to (R3.1). The amount is the booking's\nfrozen booking fee: an amount, provider or reference in the body is\nignored. `Cache-Control: no-store`.\n",
+        "description": "Starts a booking-fee payment; the payer's phone is prompted through the\nprovider the chosen method routes to (R3.1). The amount is the booking's\nfrozen booking fee: an amount, provider or reference in the body is\nignored. `Cache-Control: no-store`.\n\n`method: card` needs no phone and calls no provider: the answer carries\nthe Flutterwave Inline config (`card`) for the page to open. While that\ncard checkout is still open, paying by card again answers `200` with the\nSAME payment and config; another method meets `payment_in_progress` for\nthe first three minutes, as any attempt does.\n",
         "security": [],
         "parameters": [
           {
@@ -908,8 +910,18 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "This fee's card checkout is still open; reopen it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardPaymentOpen"
+                }
+              }
+            }
+          },
           "201": {
-            "description": "The attempt was accepted; poll its `ourRef`.",
+            "description": "The attempt was accepted; poll its `ourRef`. For a card, open `card`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -917,6 +929,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -960,7 +975,8 @@
                     "value": {
                       "error": "payment_in_progress",
                       "payment": {
-                        "ourRef": "00000000-0000-4000-8000-000000000000"
+                        "ourRef": "00000000-0000-4000-8000-000000000000",
+                        "method": "momo_mtn"
                       }
                     }
                   }
@@ -969,7 +985,7 @@
             }
           },
           "422": {
-            "description": "A method not on offer (not enabled, its provider not configured, or `card`), or an unusable phone number.",
+            "description": "A method not on offer (not enabled, or its provider not configured), or an unusable phone number.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1001,11 +1017,14 @@
           "Checkout & payments"
         ],
         "summary": "Where a payment stands",
-        "description": "The confirmation page polls this while a Mobile Money payment settles —\noften 30 seconds or more. Addressed by the random `our_ref` the pay page\nwas handed; shows no contact details. `Cache-Control: no-store`. A\nsubscription payment's reference is a 404 here: the studio polls it at\n`/api/studio/subscription/payments/{ourRef}`.\n",
+        "description": "The confirmation page polls this while a Mobile Money payment settles —\noften 30 seconds or more. Addressed by the random `our_ref` the pay page\nwas handed; shows no contact details. `Cache-Control: no-store`. A\nsubscription payment's reference is a 404 here: the studio polls it at\n`/api/studio/subscription/payments/{ourRef}`.\n\nFor a card payment still pending, the poll first asks Flutterwave itself\n(at most once per payment every 5 seconds, whoever polls), so the answer\nafter the modal can already be the result. Nothing in the query is ever a\nresult: `status=successful` is ignored (T3.2).\n",
         "security": [],
         "parameters": [
           {
             "$ref": "#/components/parameters/OurRef"
+          },
+          {
+            "$ref": "#/components/parameters/TransactionId"
           }
         ],
         "responses": {
@@ -1213,7 +1232,7 @@
           "Client booking"
         ],
         "summary": "Pay my session fee",
-        "description": "Starts a session-fee payment for what the booking owes, through the\nprovider the chosen method routes to (R3.1). Only mounted when payments\nare. The amount is computed server-side from the booking, never sent by\nthe client. Still payable when the photographer has been suspended since\nthe booking: existing bookings carry on (R5.5, T9.2).\n",
+        "description": "Starts a session-fee payment for what the booking owes, through the\nprovider the chosen method routes to (R3.1). Only mounted when payments\nare. The amount is computed server-side from the booking, never sent by\nthe client. Still payable when the photographer has been suspended since\nthe booking: existing bookings carry on (R5.5, T9.2).\n\n`method: card` answers the Flutterwave Inline config (`card`), whose\nreturn page is the token-free `/payments/{ourRef}`: the booking's access\ntoken never goes into a URL Flutterwave stores. Paying by card again\nwhile that checkout is open answers `200` with the same one.\n",
         "security": [],
         "parameters": [
           {
@@ -1231,8 +1250,18 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "This fee's card checkout is still open; reopen it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardPaymentOpen"
+                }
+              }
+            }
+          },
           "201": {
-            "description": "The attempt was accepted; poll its `ourRef`.",
+            "description": "The attempt was accepted; poll its `ourRef`. For a card, open `card`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1240,6 +1269,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -1269,7 +1301,8 @@
                     "value": {
                       "error": "payment_in_progress",
                       "payment": {
-                        "ourRef": "00000000-0000-4000-8000-000000000000"
+                        "ourRef": "00000000-0000-4000-8000-000000000000",
+                        "method": "momo_mtn"
                       }
                     }
                   }
@@ -3650,7 +3683,7 @@
           "Studio subscription"
         ],
         "summary": "Pay for a month or a year",
-        "description": "Prompts the phone by Mobile Money for the platform's price of the chosen\nplan. The amount is the server's: any amount in the body is ignored (T5.3).\nWhen the payment succeeds (webhook or status lookup), a period of the plan\nis added on top of the time already covered -- starting at the later of now\nand the current period's end -- and a receipt is emailed (R5.3). Every\nsuccess adds its period, and none is ever refunded.\n\nAny subscription status may pay, `expired` included. Refused with `409`:\n`photographer_not_approved` (pending or suspended), `no_subscription`, and\n`payment_in_progress` while another payment of the subscription still waits\non the payer (only one at a time). Rate-limited per address.\n",
+        "description": "Prompts the phone by Mobile Money, or answers the Flutterwave Inline\nconfig for a card (`card`, returning to `/studio/subscription/payments/{ourRef}`),\nfor the platform's price of the chosen plan. The amount is the server's:\nany amount in the body is ignored (T5.3). Paying the SAME plan by card\nagain while its checkout is open answers `200` with the same one.\nWhen the payment succeeds (webhook or status lookup), a period of the plan\nis added on top of the time already covered -- starting at the later of now\nand the current period's end -- and a receipt is emailed (R5.3). Every\nsuccess adds its period, and none is ever refunded.\n\nAny subscription status may pay, `expired` included. Refused with `409`:\n`photographer_not_approved` (pending or suspended), `no_subscription`, and\n`payment_in_progress` while another payment of the subscription still waits\non the payer (only one at a time). Rate-limited per address.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -3662,8 +3695,18 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "This plan's card checkout is still open; reopen it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionCardPaymentOpen"
+                }
+              }
+            }
+          },
           "201": {
-            "description": "The phone is prompted. Poll the payment's `ourRef`.",
+            "description": "The phone is prompted (for a card, open `card`). Poll the payment's `ourRef`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3734,10 +3777,13 @@
           "Studio subscription"
         ],
         "summary": "Where a subscription payment stands",
-        "description": "For the page to poll after a prompt: the payment, and the subscription as it\nnow stands. Another photographer's payment, a booking's payment and an\nunknown reference are all a 404.\n",
+        "description": "For the page to poll after a prompt: the payment, and the subscription as it\nnow stands. Another photographer's payment, a booking's payment and an\nunknown reference are all a 404. A pending card payment of the\nphotographer's own is first verified with Flutterwave, throttled per\npayment, as on `GET /api/payments/{ourRef}`.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/OurRef"
+          },
+          {
+            "$ref": "#/components/parameters/TransactionId"
           }
         ],
         "responses": {
@@ -6224,7 +6270,7 @@
           "Account"
         ],
         "summary": "Pay the session fee of one of my bookings",
-        "description": "The guest page's session-fee payment, with the same safety: the amount\nis computed on the server, one attempt at a time, and the provider is the\none the method routes to (R3.1). Only mounted when payments are\nconfigured. Shares the guest payment's rate limit.\n",
+        "description": "The guest page's session-fee payment, with the same safety: the amount\nis computed on the server, one attempt at a time, and the provider is the\none the method routes to (R3.1). Only mounted when payments are\nconfigured. Shares the guest payment's rate limit. `method: card` answers\nthe Flutterwave Inline config, returning to\n`/account/bookings/{reference}/payments/{ourRef}`; again while it is open,\n`200` with the same one.\n",
         "security": [
           {
             "accountBearer": []
@@ -6246,8 +6292,18 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "This fee's card checkout is still open; reopen it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardPaymentOpen"
+                }
+              }
+            }
+          },
           "201": {
-            "description": "The phone is being prompted. Poll `GET /api/payments/{ourRef}`.",
+            "description": "The phone is being prompted (for a card, open `card`). Poll `GET /api/payments/{ourRef}`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6255,6 +6311,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6940,6 +6999,83 @@
                   },
                   "data": {
                     "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/received"
+          },
+          "401": {
+            "$ref": "#/components/responses/invalidSignature"
+          },
+          "500": {
+            "$ref": "#/components/responses/failed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/flutterwave-checkout": {
+      "post": {
+        "operationId": "flutterwaveCheckoutWebhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Flutterwave v3 webhook (cards)",
+        "description": "Card payments through Flutterwave v3 Inline (2026-10-30). Verified by the\n`verif-hash` header, the dashboard's secret hash itself, compared in\nconstant time; missing or wrong, the delivery is stored unverified,\napplied to nothing, and answered 401.\n\nThe hash is a static shared secret, not an HMAC of the body, so a\nverified delivery is only a CLAIM: it is stored, never applied, and the\ntransaction it names is asked of Flutterwave's API\n(`GET /v3/transactions/{id}/verify`). Only that answer is applied, through\nthe same store-first, deduplicated, forward-only path, settling a payment\nonly when its status is `successful` and its `tx_ref`, `amount` and\n`currency` (RWF) match exactly. A claimed declined try or pending report\nis not asked about: it would apply nothing (a declined card leaves the\npayment open for the next one in the same modal). The API unreachable is\na 500, so Flutterwave retries.\n",
+        "security": [],
+        "parameters": [
+          {
+            "name": "verif-hash",
+            "in": "header",
+            "required": true,
+            "description": "The dashboard's secret hash (`FLUTTERWAVE_V3_WEBHOOK_HASH`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "A Flutterwave v3 charge event.",
+                "properties": {
+                  "event": {
+                    "type": "string",
+                    "examples": [
+                      "charge.completed"
+                    ]
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "integer"
+                      },
+                      "tx_ref": {
+                        "type": "string"
+                      },
+                      "amount": {
+                        "type": "number"
+                      },
+                      "currency": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string",
+                        "examples": [
+                          "successful",
+                          "failed",
+                          "pending"
+                        ]
+                      }
+                    }
                   }
                 }
               }
@@ -7920,7 +8056,7 @@
       },
       "PaymentMethod": {
         "type": "string",
-        "description": "`card` is reserved for the hosted card checkout, deferred (marketplace-spec.md\nR3.2, 2026-10-17): it is never offered and a payment request naming it is a 422.\n",
+        "description": "`card` is paid in Flutterwave's v3 Inline modal on our own page (user\ndecisions, 2026-10-30), offered only when its keys are configured; a\nmethod not on offer is a 422 at every pay route.\n",
         "enum": [
           "momo_mtn",
           "momo_airtel",
@@ -8009,7 +8145,7 @@
                 "description": "`payable` while the hold is live and the fee unpaid; `paid` once a\nbooking fee has succeeded; `expired` when the hold lapsed unpaid;\n`closed` for anything else (cancelled, or nothing to pay).\n"
               },
               "waitingPayment": {
-                "description": "An attempt still waiting on the payer, if any; poll `GET /api/payments/{ourRef}`.",
+                "description": "An attempt still waiting on the payer, if any; poll `GET /api/payments/{ourRef}`.\n`method: card` is a card checkout the page may reopen by paying with `card` again.\n",
                 "oneOf": [
                   {
                     "type": "null"
@@ -8017,12 +8153,23 @@
                   {
                     "type": "object",
                     "required": [
-                      "ourRef"
+                      "ourRef",
+                      "method"
                     ],
                     "additionalProperties": false,
                     "properties": {
                       "ourRef": {
                         "$ref": "#/components/schemas/Uuid"
+                      },
+                      "method": {
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "$ref": "#/components/schemas/PaymentMethod"
+                          }
+                        ]
                       }
                     }
                   }
@@ -8037,9 +8184,9 @@
       },
       "PayRequest": {
         "type": "object",
+        "description": "`phone` is required for MoMo (missing: 400) and not read for `card`. Any\nother key (an amount, a status, a provider) is ignored.\n",
         "required": [
-          "method",
-          "phone"
+          "method"
         ],
         "properties": {
           "method": {
@@ -8053,15 +8200,140 @@
           "phone": {
             "type": "string",
             "maxLength": 40,
-            "description": "The number to prompt. Rwandan numbers may be local (`0788…`) or international (`+250788…`); an unusable number is a 422.",
+            "description": "The MoMo number to prompt. Rwandan numbers may be local (`0788…`) or international (`+250788…`); an unusable number is a 422. Not read for `card`.",
             "examples": [
               "+250788123456"
             ]
           }
         }
       },
+      "InlineCardConfig": {
+        "type": "object",
+        "description": "The argument to Flutterwave v3 Inline's `FlutterwaveCheckout({...})`,\nbuilt entirely on the server: pass it as it is, adding only the page's own\n`callback` and `onclose`. Nothing in it may come from the page. The\nredirect after the modal (3-D Secure included) appends `tx_ref`,\n`transaction_id` and `status`; none of it is a result -- poll the status\nroute, passing `transactionId` (cards as built, marketplace-spec.md).\n",
+        "required": [
+          "public_key",
+          "tx_ref",
+          "amount",
+          "currency",
+          "payment_options",
+          "redirect_url",
+          "customer",
+          "customizations",
+          "configurations"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "public_key": {
+            "type": "string",
+            "description": "The Flutterwave v3 public key (`FLWPUBK…`). Never the secret key.",
+            "examples": [
+              "FLWPUBK_TEST-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-X"
+            ]
+          },
+          "tx_ref": {
+            "description": "Our `ourRef`. Flutterwave verifies and reports by it.",
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "amount": {
+            "description": "Whole RWF, the payment row's frozen amount.",
+            "$ref": "#/components/schemas/Rwf"
+          },
+          "currency": {
+            "const": "RWF"
+          },
+          "payment_options": {
+            "const": "card"
+          },
+          "redirect_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "A page on WEB_ORIGIN, built on the server: `/checkout/{reference}/{token}/payments/{ourRef}`\n(booking fee), `/payments/{ourRef}` (session fee, guest page; never the\nbooking's token), `/account/bookings/{reference}/payments/{ourRef}`\n(session fee, account) or `/studio/subscription/payments/{ourRef}`.\n"
+          },
+          "customer": {
+            "type": "object",
+            "required": [
+              "email",
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "phone_number": {
+                "type": "string",
+                "description": "Absent when there is no phone on record."
+              }
+            }
+          },
+          "customizations": {
+            "type": "object",
+            "required": [
+              "title"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "examples": [
+                  "Bookly booking fee BKY-2610-7K3QX"
+                ]
+              }
+            }
+          },
+          "configurations": {
+            "type": "object",
+            "required": [
+              "session_duration"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "session_duration": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1440,
+                "description": "Minutes the modal may stay open; never past the payment's own session (15 minutes from its start) nor, for a booking fee, the hold."
+              }
+            }
+          }
+        }
+      },
+      "CardPaymentOpen": {
+        "type": "object",
+        "description": "A card payment of this fee whose checkout session is still open: the SAME\npayment and `tx_ref`, answered again instead of starting a second one. Its\n`session_duration` is what is left of the first session.\n",
+        "required": [
+          "payment",
+          "card"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payment": {
+            "type": "object",
+            "required": [
+              "ourRef",
+              "status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "ourRef": {
+                "$ref": "#/components/schemas/Uuid"
+              },
+              "status": {
+                "const": "pending"
+              }
+            }
+          },
+          "card": {
+            "$ref": "#/components/schemas/InlineCardConfig"
+          }
+        }
+      },
       "PaymentStarted": {
         "type": "object",
+        "description": "The attempt, and for `method: card` the Flutterwave Inline config to open\n(`card`, absent for MoMo).\n",
         "required": [
           "payment"
         ],
@@ -8082,12 +8354,15 @@
                 "const": "pending"
               }
             }
+          },
+          "card": {
+            "$ref": "#/components/schemas/InlineCardConfig"
           }
         }
       },
       "PaymentInProgress": {
         "type": "object",
-        "description": "An earlier attempt is still waiting on the payer's phone. Poll its `ourRef` instead.",
+        "description": "An earlier attempt is still waiting on the payer. Poll its `ourRef`\ninstead. `method` says how it was started: `card` is a checkout the\npage may reopen by paying with `card` again; a MoMo method is a prompt on\nthe payer's phone; null where the attempt names no method.\n",
         "required": [
           "error",
           "payment"
@@ -8099,11 +8374,22 @@
           "payment": {
             "type": "object",
             "required": [
-              "ourRef"
+              "ourRef",
+              "method"
             ],
             "properties": {
               "ourRef": {
                 "$ref": "#/components/schemas/Uuid"
+              },
+              "method": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PaymentMethod"
+                  }
+                ]
               }
             }
           }
@@ -8545,12 +8831,23 @@
                       {
                         "type": "object",
                         "required": [
-                          "ourRef"
+                          "ourRef",
+                          "method"
                         ],
                         "additionalProperties": false,
                         "properties": {
                           "ourRef": {
                             "$ref": "#/components/schemas/Uuid"
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "null"
+                              },
+                              {
+                                "$ref": "#/components/schemas/PaymentMethod"
+                              }
+                            ]
                           }
                         }
                       }
@@ -11416,7 +11713,7 @@
           },
           "methods": {
             "type": "array",
-            "description": "The methods on offer, MoMo only while cards are deferred. Empty when no payment provider is configured.",
+            "description": "The methods on offer (`momo_mtn`, `momo_airtel`, `card`, as configured). Empty when no payment provider is configured.",
             "items": {
               "$ref": "#/components/schemas/PaymentMethod"
             }
@@ -11432,8 +11729,7 @@
         "description": "The plan and how to pay. The amount is never the request's: any other key\n(an `amountRwf`, a `status`) is ignored, and the platform's price for the\nplan is charged (T5.3).\n",
         "required": [
           "planInterval",
-          "method",
-          "phone"
+          "method"
         ],
         "properties": {
           "planInterval": {
@@ -11450,10 +11746,51 @@
           "phone": {
             "type": "string",
             "maxLength": 40,
-            "description": "The MoMo number to prompt, local (`0788…`) or international (`+250788…`). An unusable number is a 422.",
+            "description": "The MoMo number to prompt, local (`0788…`) or international (`+250788…`). Required for MoMo (missing is a 400), not read for `card`. An unusable number is a 422.",
             "examples": [
               "+250788123456"
             ]
+          }
+        }
+      },
+      "SubscriptionPaymentStartedPayment": {
+        "type": "object",
+        "required": [
+          "ourRef",
+          "status",
+          "planInterval",
+          "amountRwf"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ourRef": {
+            "$ref": "#/components/schemas/Uuid"
+          },
+          "status": {
+            "const": "pending"
+          },
+          "planInterval": {
+            "$ref": "#/components/schemas/PlanInterval"
+          },
+          "amountRwf": {
+            "$ref": "#/components/schemas/Rwf"
+          }
+        }
+      },
+      "SubscriptionCardPaymentOpen": {
+        "type": "object",
+        "description": "The same plan's card checkout, still open: the same payment and `tx_ref` again.",
+        "required": [
+          "payment",
+          "card"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "payment": {
+            "$ref": "#/components/schemas/SubscriptionPaymentStartedPayment"
+          },
+          "card": {
+            "$ref": "#/components/schemas/InlineCardConfig"
           }
         }
       },
@@ -11465,28 +11802,10 @@
         "additionalProperties": false,
         "properties": {
           "payment": {
-            "type": "object",
-            "required": [
-              "ourRef",
-              "status",
-              "planInterval",
-              "amountRwf"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "ourRef": {
-                "$ref": "#/components/schemas/Uuid"
-              },
-              "status": {
-                "const": "pending"
-              },
-              "planInterval": {
-                "$ref": "#/components/schemas/PlanInterval"
-              },
-              "amountRwf": {
-                "$ref": "#/components/schemas/Rwf"
-              }
-            }
+            "$ref": "#/components/schemas/SubscriptionPaymentStartedPayment"
+          },
+          "card": {
+            "$ref": "#/components/schemas/InlineCardConfig"
           }
         }
       },
@@ -15076,6 +15395,18 @@
         "description": "Our id for one payment attempt, returned when it was started.",
         "schema": {
           "$ref": "#/components/schemas/Uuid"
+        }
+      },
+      "TransactionId": {
+        "name": "transactionId",
+        "in": "query",
+        "required": false,
+        "description": "For a card payment: the `transaction_id` Flutterwave gave the page (the\nmodal's callback, or the redirect's query). Only says WHICH transaction to\nverify; the server asks Flutterwave itself, and an id that is not this\npayment's settles nothing. Anything but digits is ignored.\n",
+        "schema": {
+          "type": "string",
+          "examples": [
+            "285959875"
+          ]
         }
       },
       "RowId": {

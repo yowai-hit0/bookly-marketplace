@@ -113,7 +113,7 @@ schemas:
           yearly: { $ref: 'common.yaml#/schemas/Rwf' }
       methods:
         type: array
-        description: The methods on offer, MoMo only while cards are deferred. Empty when no payment provider is configured.
+        description: The methods on offer (`momo_mtn`, `momo_airtel`, `card`, as configured). Empty when no payment provider is configured.
         items: { $ref: 'common.yaml#/schemas/PaymentMethod' }
       graceDays:
         type: integer
@@ -125,7 +125,7 @@ schemas:
       The plan and how to pay. The amount is never the request's: any other key
       (an `amountRwf`, a `status`) is ignored, and the platform's price for the
       plan is charged (T5.3).
-    required: [planInterval, method, phone]
+    required: [planInterval, method]
     properties:
       planInterval: { $ref: 'common.yaml#/schemas/PlanInterval' }
       method:
@@ -135,7 +135,7 @@ schemas:
       phone:
         type: string
         maxLength: 40
-        description: The MoMo number to prompt, local (`0788…`) or international (`+250788…`). An unusable number is a 422.
+        description: The MoMo number to prompt, local (`0788…`) or international (`+250788…`). Required for MoMo (missing is a 400), not read for `card`. An unusable number is a 422.
         examples: ['+250788123456']
 
   SubscriptionPaymentStarted:
@@ -143,15 +143,27 @@ schemas:
     required: [payment]
     additionalProperties: false
     properties:
-      payment:
-        type: object
-        required: [ourRef, status, planInterval, amountRwf]
-        additionalProperties: false
-        properties:
-          ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
-          status: { const: pending }
-          planInterval: { $ref: 'common.yaml#/schemas/PlanInterval' }
-          amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      payment: { $ref: '#/schemas/SubscriptionPaymentStartedPayment' }
+      card: { $ref: 'common.yaml#/schemas/InlineCardConfig' }
+
+  SubscriptionCardPaymentOpen:
+    type: object
+    description: "The same plan's card checkout, still open: the same payment and `tx_ref` again."
+    required: [payment, card]
+    additionalProperties: false
+    properties:
+      payment: { $ref: '#/schemas/SubscriptionPaymentStartedPayment' }
+      card: { $ref: 'common.yaml#/schemas/InlineCardConfig' }
+
+  SubscriptionPaymentStartedPayment:
+    type: object
+    required: [ourRef, status, planInterval, amountRwf]
+    additionalProperties: false
+    properties:
+      ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+      status: { const: pending }
+      planInterval: { $ref: 'common.yaml#/schemas/PlanInterval' }
+      amountRwf: { $ref: 'common.yaml#/schemas/Rwf' }
 
   SubscriptionPaymentStatus:
     type: object

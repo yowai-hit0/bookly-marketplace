@@ -17,7 +17,7 @@ import { AdminPortfolio } from '@/pages/admin/AdminPortfolio'
 import { AdminProfile } from '@/pages/admin/AdminProfile'
 import { AdminSettings } from '@/pages/admin/AdminSettings'
 import { AdminSetup } from '@/pages/admin/AdminSetup'
-import { AdminSubscription } from '@/pages/admin/AdminSubscription'
+import { AdminSubscription, AdminSubscriptionPayment } from '@/pages/admin/AdminSubscription'
 import { AccountBookingPage, AccountPaymentProgressPage } from '@/pages/account/AccountBookingPage'
 import { AccountDashboard } from '@/pages/account/AccountDashboard'
 import { AccountDeletedPage } from '@/pages/account/AccountDeletedPage'
@@ -34,6 +34,7 @@ import { VerifyPage } from '@/pages/auth/VerifyPage'
 import { BookingPage } from '@/pages/booking/BookingPage'
 import { EmailConfirmPage } from '@/pages/booking/EmailConfirmPage'
 import { MyBookingPage } from '@/pages/booking/MyBookingPage'
+import { CardReturnPage } from '@/pages/checkout/CardReturnPage'
 import { CheckoutPage } from '@/pages/checkout/CheckoutPage'
 import { PaymentProgressPage } from '@/pages/checkout/PaymentProgressPage'
 import { PhotographerList } from '@/pages/photographers/PhotographerList'
@@ -84,6 +85,9 @@ export const routes: RouteObject[] = [
       { path: '/email-confirm/:token', element: <EmailConfirmPage /> },
       { path: '/booking/:token', element: <BookingPage /> },
       { path: '/booking/:token/payments/:ourRef', element: <PaymentProgressPage /> },
+      // Where Flutterwave returns a guest who paid a session fee by card (Cards as built):
+      // token-free, because Flutterwave stores the return URL and the token opens the booking.
+      { path: '/payments/:ourRef', element: <CardReturnPage /> },
       // The client's account (Phase 2): its sign-in pages wear the client
       // shell. The dashboard (Phase 8, R8.1-R8.3) needs the account session:
       // the account nav, then the bookings, one booking and its session-fee
@@ -148,6 +152,8 @@ export const routes: RouteObject[] = [
       { path: 'payout-method', element: <AdminPayoutMethod /> },
       // Paying for the subscription that keeps the profile bookable (Phase 5, R5.2).
       { path: 'subscription', element: <AdminSubscription /> },
+      // Where Flutterwave returns a card payment for the subscription (Cards as built): the same page, following it.
+      { path: 'subscription/payments/:ourRef', element: <AdminSubscriptionPayment /> },
       { path: 'settings', element: <AdminSettings /> },
       // Onboarding (Phase 7, R7.2, R7.3): the public profile, its portfolio,
       // and the checklist a pending studio submits for review.

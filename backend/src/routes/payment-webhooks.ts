@@ -10,6 +10,11 @@ import { type WebhookDeps, receiveWebhook } from '../payments/webhooks.js';
  *
  *   POST|PUT /api/webhooks/mtn-momo/:ourRef/:signature
  *   POST     /api/webhooks/flutterwave         signed in `flutterwave-signature`
+ *   POST     /api/webhooks/flutterwave-checkout   cards (Flutterwave v3): the secret
+ *            hash in `verif-hash`, compared in constant time; a verified delivery
+ *            is only a claim, re-verified through Flutterwave's API before
+ *            anything is applied (payments/webhooks.ts `reverifyClaim`), and a
+ *            500 when that API cannot be reached, so Flutterwave retries
  *
  * Every provider whose payments may still be settling keeps its route mounted,
  * whether a method routes to it today or not (spec §6.18, R3.1). A delivery
@@ -43,6 +48,12 @@ export function paymentWebhooksRouter(deps: PaymentWebhooksDeps): Router {
   const flutterwave = deps.providers.flutterwave;
   if (flutterwave !== undefined) {
     router.post('/flutterwave', raw, deliver(deps, flutterwave));
+  }
+
+  const cards = deps.providers.flutterwave_checkout;
+  if (cards !== undefined) {
+    // FLUTTERWAVE_CHECKOUT_WEBHOOK_PATH, under this router's /api/webhooks.
+    router.post('/flutterwave-checkout', raw, deliver(deps, cards));
   }
 
   return router;

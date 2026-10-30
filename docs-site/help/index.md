@@ -3,8 +3,8 @@
 Everything you need to book a shoot, pay, and come back to your booking. No
 account is required — your booking lives behind a private link we email you.
 
-- **[Paying for your booking](./paying)** — the booking fee, Mobile Money, and
-  the session fee after the shoot.
+- **[Paying for your booking](./paying)** — the booking fee, Mobile Money or
+  card, and the session fee after the shoot.
 - **[Your privacy and payment safety](./privacy-and-safety)** — what we keep,
   what we never see, and how to have your data deleted.
 

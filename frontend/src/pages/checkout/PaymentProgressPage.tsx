@@ -1,11 +1,12 @@
 import { CircleX, Clock, LoaderCircle, ReceiptText, Undo2, Unlink } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 import { bookingPath } from '@/catalogue/booking-access'
 import { type PaymentProgress, checkoutPath, fetchPaymentProgress } from '@/catalogue/payments'
 import { BackLink } from '@/components/ui/back-link'
 import { Button } from '@/components/ui/button'
+import { useCardReturn } from '@/lib/card-payment'
 import { formatMoney } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { pageY, statusTitle } from '@/pages/client/classes'
@@ -30,6 +31,15 @@ import { BookingFacts } from './BookingFacts'
  * outcome (received, refund, refundOther, duplicate) is neutral. The `dl` in
  * `BookingFacts` below already carries the reference in mono, for every
  * outcome.
+ *
+ * A card payment (Flutterwave v3 Inline, "Cards as built") lands here from the
+ * modal's callback or from Flutterwave's redirect, which appends
+ * `?status=&tx_ref=&transaction_id=`. The page reads `transaction_id` once
+ * (digits only), takes that query off the URL, and passes the id to its poll so
+ * the API can verify that try; `status=successful` is never read, so a forged
+ * one changes nothing (R3.3, T3.2). While a card payment waits, the page says it
+ * is being confirmed with Flutterwave, that closing the window unpaid charged
+ * nothing, and offers the way back to payment.
  */
 
 export const POLL_INTERVAL_MS = 3_000
@@ -67,15 +77,21 @@ type Props = {
    * Where another attempt starts, when it is not one of the guest pages: the
    * dashboard's booking page for a session fee paid from the account
    * (marketplace-spec R8.1). Without it, the checkout or the guest booking page.
+   * Null when this page does not know the way back (the token-free card return
+   * page with nothing remembered): no "Try again" or "Back to payment" link then.
    */
-  payAgainAt?: string
+  payAgainAt?: string | null
   /** A way back to where the payment started, shown under every outcome (the dashboard's booking). */
   back?: { to: string; label: string }
+  /** Said under the booking, for every outcome (the card return page's way back). */
+  footer?: ReactNode
 }
 
-export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Props = {}) {
+export function PaymentProgressPage({ payAgainAt: payAgainOverride, back, footer }: Props = {}) {
   const { t } = useTranslation()
   const { reference = '', token = '', ourRef = '' } = useParams()
+  // Flutterwave's redirect query, read once and taken off the URL; only the poll's answer counts.
+  const { card, transactionId } = useCardReturn(ourRef)
   /** Tagged with the payment it describes, so another payment's answer is never shown as this one's. */
   const [answer, setAnswer] = useState<{ ourRef: string; progress: PaymentProgress | null } | null>(null)
   const [failures, setFailures] = useState(0)
@@ -89,7 +105,7 @@ export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Prop
 
     const poll = async () => {
       try {
-        const next = await fetchPaymentProgress(ourRef, controller.signal)
+        const next = await fetchPaymentProgress(ourRef, controller.signal, transactionId)
         if (controller.signal.aborted) return
         setAnswer({ ourRef, progress: next })
         setFailures(0)
@@ -111,7 +127,7 @@ export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Prop
       controller.abort()
       clearTimeout(timer)
     }
-  }, [ourRef, round])
+  }, [ourRef, round, transactionId])
 
   const current = answer?.ourRef === ourRef ? answer : null
   const missing = current !== null && current.progress === null
@@ -164,7 +180,8 @@ export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Prop
   const { booking } = progress
   // The booking fee is paid from a checkout link, the session fee from the
   // client's own booking page: another attempt belongs where this one started.
-  const payAgainAt = payAgainOverride ?? (reference === '' ? bookingPath(token) : checkoutPath(reference, token))
+  const payAgainAt =
+    payAgainOverride !== undefined ? payAgainOverride : reference === '' ? bookingPath(token) : checkoutPath(reference, token)
 
   const heading = (key: string) => (
     <h1 ref={headingRef} tabIndex={-1} className={cn(statusTitle, 'outline-none')}>
@@ -177,20 +194,36 @@ export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Prop
       {/* One measure for every outcome's words; the booking card below keeps the full width. */}
       <div className="flex max-w-xl flex-col gap-4 text-pretty">
         {view === 'waiting' && (
-          <section className="flex flex-col gap-4" role="status" aria-live="polite">
+          <section className="flex flex-col gap-4" role="status" aria-live="polite" data-waiting={card ? 'card' : 'phone'}>
             {/* The one moving thing on the page. A visitor who asks for less motion gets a still phone instead of a frozen spinner. Blue, never green: nothing is settled yet. */}
             <IconTile tone="accent" size="lg">
               <LoaderCircle aria-hidden="true" className="size-7 motion-safe:animate-spin motion-reduce:hidden" />
               <Clock aria-hidden="true" className="hidden size-7 motion-reduce:block" />
             </IconTile>
-            {heading('checkout:progress.pendingTitle')}
-            <p className="text-sm">{t('checkout:progress.pendingBody', { amount })}</p>
-            <p className="text-sm">{t('checkout:progress.pendingWait')}</p>
+            {card ? (
+              <>
+                {heading('checkout:progress.cardPendingTitle')}
+                <p className="text-sm">{t('checkout:progress.cardPendingBody', { amount })}</p>
+                <p className="text-sm">{t('checkout:progress.cardPendingClosed')}</p>
+              </>
+            ) : (
+              <>
+                {heading('checkout:progress.pendingTitle')}
+                <p className="text-sm">{t('checkout:progress.pendingBody', { amount })}</p>
+                <p className="text-sm">{t('checkout:progress.pendingWait')}</p>
+              </>
+            )}
             <p className="text-muted-foreground text-sm">{t('checkout:progress.pendingLeave')}</p>
             {failures >= TROUBLE_AFTER_FAILURES && !gaveUp && (
               <p className="text-muted-foreground text-sm">{t('checkout:progress.connectionTrouble')}</p>
             )}
           </section>
+        )}
+        {view === 'waiting' && card && payAgainAt !== null && (
+          // Closed unpaid, the modal can be opened again from where it started (the API answers the same checkout).
+          <Button asChild variant="outline" className="self-start max-sm:w-full">
+            <Link to={payAgainAt}>{t('checkout:progress.backToPayment')}</Link>
+          </Button>
         )}
         {view === 'waiting' && gaveUp && (
           <div className="flex flex-col items-start gap-2">
@@ -239,9 +272,11 @@ export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Prop
                 ? t('checkout:progress.failedUnavailable')
                 : t('checkout:progress.failedDeclined')}
             </p>
-            <Button asChild className="self-start">
-              <Link to={payAgainAt}>{t('checkout:progress.tryAgain')}</Link>
-            </Button>
+            {payAgainAt !== null && (
+              <Button asChild className="self-start">
+                <Link to={payAgainAt}>{t('checkout:progress.tryAgain')}</Link>
+              </Button>
+            )}
           </section>
         )}
         {view === 'refund' && (
@@ -275,6 +310,7 @@ export function PaymentProgressPage({ payAgainAt: payAgainOverride, back }: Prop
         endsAt={booking.endsAt}
       />
 
+      {footer}
       {back !== undefined && <BackLink to={back.to}>{back.label}</BackLink>}
     </main>
   )

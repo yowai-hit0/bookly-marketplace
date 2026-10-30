@@ -157,6 +157,8 @@ function GuestBookingView({
     cancel: () => cancelBooking(token),
     pay: (request) => startSessionFeePayment(token, request),
     paymentPath: (ourRef) => bookingPaymentPath(token, ourRef),
+    // For the token-free card return page (`/payments/:ourRef`), in this tab only.
+    cardReturnToken: token,
   }
   return (
     <BookingView

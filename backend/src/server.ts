@@ -6,6 +6,7 @@ import { createEmailHandler } from './email/handler.js';
 import { createMailProvider } from './email/mailer.js';
 import { EnvValidationError, parseEnv } from './env.js';
 import { startOutboxWorker } from './outbox/worker.js';
+import { createPaymentCheck } from './payments/card-check.js';
 import { createPaymentProviders } from './payments/providers.js';
 import { reconcilerPlans, startPaymentReconciler } from './payments/reconcile.js';
 import { startSubscriptionJob } from './subscriptions/job.js';
@@ -43,7 +44,8 @@ function boot(): void {
       prisma,
       now: () => new Date(),
       // The provider of each payment follows the method the client chose (R3.1).
-      payments: { routing: payments.routing, secret: env.SESSION_SECRET },
+      // A card payment's status poll asks Flutterwave itself, throttled per payment (C5).
+      payments: { routing: payments.routing, secret: env.SESSION_SECRET, checkPayment: createPaymentCheck({ prisma, providers: payments.all }) },
     },
     // Every provider's callbacks, not only those collecting a method today (spec §6.18).
     webhooks: { prisma, providers: payments.all },

@@ -1,18 +1,21 @@
 import { ApiError } from '@/auth/api'
-import { PHONE_METHODS, type PaymentMethod, type PaymentStatus } from '@/catalogue/payments'
+import { type PaymentMethod, type PaymentStatus, cardConfigOf, knownMethodOf, payBody, transactionQuery } from '@/catalogue/payments'
+import type { InlineCardConfig } from '@/lib/flutterwave-inline'
 import { adminFetch } from './api'
 
 /**
  * The studio's subscription (marketplace spec Phase 5: R5.2, R5.3;
  * backend/openapi/paths/studio-subscription.yaml): the page's data, paying for
- * a month or a year by Mobile Money, and following that payment until it
- * settles. Every call carries the studio token (`adminFetch`), and every answer
+ * a month or a year by Mobile Money or card, and following that payment until
+ * it settles. Every call carries the studio token (`adminFetch`), and every answer
  * is `no-store` on the server; the requests ask for it too, so a remembered
  * answer never shows a paid period as unpaid.
  *
  * The amount is the server's: the request names the plan, never a price
- * (T5.3). The methods are the API's answer and nothing else (R3.1), MoMo only
- * while cards are deferred; an empty list means no provider is configured.
+ * (T5.3). The methods are the API's answer and nothing else (R3.1): MoMo and,
+ * since 2026-10-30, `card` (Flutterwave v3 Inline, "Cards as built"), whose
+ * answer is the Inline config the page opens the modal with; an empty list
+ * means no provider is configured.
  */
 
 export const SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due', 'expired'] as const
@@ -25,8 +28,8 @@ export function isSubscriptionStatus(value: string | null): value is Subscriptio
 export const PLAN_INTERVALS = ['monthly', 'yearly'] as const
 export type PlanInterval = (typeof PLAN_INTERVALS)[number]
 
-/** A method the subscription can be paid by: a phone method. */
-export type SubscriptionMethod = Extract<PaymentMethod, 'momo_mtn' | 'momo_airtel'>
+/** A method the subscription can be paid by: a phone method or a card. */
+export type SubscriptionMethod = PaymentMethod
 
 /** One stretch of time the subscription covers: the free trial, or a paid month or year. */
 export type SubscriptionPeriod = {
@@ -84,13 +87,22 @@ export type SubscriptionPaymentProgress = {
   subscription: { status: SubscriptionStatus; currentPeriodEndsAt: string; takingBookings: boolean }
 }
 
+/** `phone` is ignored for a card, which is sent as `{ planInterval, method: 'card' }`. */
 export type PayRequest = { planInterval: PlanInterval; method: SubscriptionMethod; phone: string }
 
 export type PayResult =
   /** The phone has been prompted: follow `ourRef`. */
   | { status: 'started'; ourRef: string; planInterval: PlanInterval; amountRwf: number }
-  /** Another payment still waits on the payer: follow that one instead. */
-  | { status: 'in_progress'; ourRef: string }
+  /**
+   * A card payment, new (201) or still open for the same plan (200, the same
+   * `ourRef` and `tx_ref`): open Flutterwave's modal with `card`, unchanged.
+   */
+  | { status: 'card'; ourRef: string; planInterval: PlanInterval; amountRwf: number; card: InlineCardConfig }
+  /**
+   * Another payment still waits on the payer: follow that one instead. `method`
+   * is how it was started (`card` is followed as a card); null is none, or unknown.
+   */
+  | { status: 'in_progress'; ourRef: string; method: SubscriptionMethod | null }
   /** Pending or suspended: the subscription cannot be paid now. */
   | { status: 'not_approved' }
   | { status: 'no_subscription' }
@@ -106,13 +118,13 @@ export type PayResult =
 
 const NO_STORE: RequestInit = { cache: 'no-store' }
 
-/** The phone methods, in the order the checkout offers them. */
-export const SUBSCRIPTION_METHODS = ['momo_mtn', 'momo_airtel'] as const satisfies readonly SubscriptionMethod[]
+/** The methods, in the order the checkout offers them: MTN MoMo, Airtel Money, then card. */
+export const SUBSCRIPTION_METHODS = ['momo_mtn', 'momo_airtel', 'card'] as const satisfies readonly SubscriptionMethod[]
 
-/** Only the methods this app can label and pay from a phone; anything else (a card) is dropped, not drawn blank. */
-function phoneMethods(methods: unknown): SubscriptionMethod[] {
+/** Only the methods this app can label and pay; anything else is dropped, not drawn blank. */
+function knownMethods(methods: unknown): SubscriptionMethod[] {
   if (!Array.isArray(methods)) return []
-  return SUBSCRIPTION_METHODS.filter((method) => PHONE_METHODS.has(method) && methods.includes(method))
+  return SUBSCRIPTION_METHODS.filter((method) => methods.includes(method))
 }
 
 export const subscriptionApi = {
@@ -131,7 +143,7 @@ export const subscriptionApi = {
     return {
       subscription: body.subscription ?? null,
       prices: body.prices,
-      methods: phoneMethods(body.methods),
+      methods: knownMethods(body.methods),
       graceDays: typeof body.graceDays === 'number' ? body.graceDays : 0,
     }
   },
@@ -139,18 +151,27 @@ export const subscriptionApi = {
   /** Starts a payment for the plan. Never throws for a refusal: each is a `PayResult`. A 401 still throws. */
   pay: async (request: PayRequest): Promise<PayResult> => {
     try {
-      const body = await adminFetch<{ payment?: { ourRef?: unknown; planInterval?: unknown; amountRwf?: unknown } | null } | null>(
-        '/studio/subscription/payments',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) },
-      )
+      const body = await adminFetch<{
+        payment?: { ourRef?: unknown; planInterval?: unknown; amountRwf?: unknown } | null
+        card?: unknown
+      } | null>('/studio/subscription/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planInterval: request.planInterval, ...payBody(request) }),
+      })
       const payment = body?.payment
       if (typeof payment?.ourRef === 'string' && payment.ourRef !== '') {
-        return {
-          status: 'started',
+        const started = {
           ourRef: payment.ourRef,
           planInterval: payment.planInterval === 'yearly' ? 'yearly' : payment.planInterval === 'monthly' ? 'monthly' : request.planInterval,
           amountRwf: typeof payment.amountRwf === 'number' ? payment.amountRwf : 0,
+        } as const
+        // A card answer (201 new, 200 still open) carries the Inline config; one without a usable config did not start.
+        if (request.method === 'card' || (typeof body === 'object' && body !== null && 'card' in body)) {
+          const card = cardConfigOf(body?.card, payment.ourRef)
+          return card === null ? { status: 'failed' } : { status: 'card', ...started, card }
         }
+        return { status: 'started', ...started }
       }
       return { status: 'failed' }
     } catch (error) {
@@ -159,11 +180,16 @@ export const subscriptionApi = {
     }
   },
 
-  /** Where a payment stands, or null when there is no such payment of this studio's. */
-  payment: async (ourRef: string): Promise<SubscriptionPaymentProgress | null> => {
+  /**
+   * Where a payment stands, or null when there is no such payment of this
+   * studio's. With a card try's `transactionId` (digits only, or nothing is
+   * sent) the API verifies it with Flutterwave first; the answer is still the
+   * only word on the payment.
+   */
+  payment: async (ourRef: string, transactionId?: string | null): Promise<SubscriptionPaymentProgress | null> => {
     try {
       const body = await adminFetch<Partial<SubscriptionPaymentProgress> | null>(
-        `/studio/subscription/payments/${encodeURIComponent(ourRef)}`,
+        `/studio/subscription/payments/${encodeURIComponent(ourRef)}${transactionQuery(transactionId)}`,
         NO_STORE,
       )
       if (typeof body?.payment?.status !== 'string' || typeof body.subscription?.currentPeriodEndsAt !== 'string') {
@@ -180,7 +206,7 @@ export const subscriptionApi = {
 function refusalOf(error: ApiError): PayResult {
   const body = (typeof error.body === 'object' && error.body !== null ? error.body : {}) as {
     reason?: unknown
-    payment?: { ourRef?: unknown } | null
+    payment?: { ourRef?: unknown; method?: unknown } | null
   }
   switch (error.status) {
     case 400:
@@ -189,7 +215,7 @@ function refusalOf(error: ApiError): PayResult {
       if (error.message === 'photographer_not_approved') return { status: 'not_approved' }
       if (error.message === 'no_subscription') return { status: 'no_subscription' }
       const ourRef = body.payment?.ourRef
-      if (error.message === 'payment_in_progress' && typeof ourRef === 'string' && ourRef !== '') return { status: 'in_progress', ourRef }
+      if (error.message === 'payment_in_progress' && typeof ourRef === 'string' && ourRef !== '') return { status: 'in_progress', ourRef, method: knownMethodOf(body.payment?.method) }
       return { status: 'failed' }
     }
     case 422:

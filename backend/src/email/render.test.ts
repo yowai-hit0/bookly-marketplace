@@ -884,7 +884,7 @@ describe('reschedule with and without an access token', () => {
 
 describe('payouts and refunds copy (Phase 4)', () => {
   it('refund_due: money paid online is the platform’s to refund; the photographer is told there is nothing to send', () => {
-    for (const provider of ['mtn_momo_direct', 'flutterwave']) {
+    for (const provider of ['mtn_momo_direct', 'flutterwave', 'flutterwave_checkout']) {
       const email = renderWith('photographer_alert refund_due', { provider });
       expect(email.text).toContain('the platform refunds them and records it');
       expect(email.text).not.toContain('record the refund on the booking');
@@ -1191,6 +1191,14 @@ describe('photographer_alert refund_due for cash (admin console fixes, item 7)',
     expect(email.text).toContain('Cash');
     expect(email.text).toContain('This was paid in cash: give it back to the client, then record the refund on the booking.');
     expect(email.text).not.toContain('Refund the client through');
+  });
+
+  it('names a card payment as paid by card through Flutterwave (cards, 2026-10-30)', () => {
+    const email = renderWith('photographer_alert refund_due', { provider: 'flutterwave_checkout' });
+
+    expect(email.text).toContain('Card (Flutterwave)');
+    expect(email.text).toContain('the platform refunds them and records it');
+    expect(email.text).not.toContain('flutterwave_checkout');
   });
 
   it('for money paid online, says the platform refunds it instead (Phase 4 refund decision)', () => {

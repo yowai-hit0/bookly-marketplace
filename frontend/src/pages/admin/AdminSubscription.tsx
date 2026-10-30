@@ -1,14 +1,17 @@
-import { CircleAlert, CircleCheck, CircleX, Clock, Info, LoaderCircle, Repeat, Smartphone } from 'lucide-react'
+import { CircleAlert, CircleCheck, CircleX, Clock, CreditCard, Info, LoaderCircle, LockKeyhole, Repeat, Smartphone } from 'lucide-react'
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useParams } from 'react-router'
 import { UnauthenticatedError } from '@/admin/api'
 import { useSubscriptionRefresh } from '@/admin/subscription-refresh'
 import {
   PLAN_INTERVALS,
   type PlanInterval,
+  type PayRequest,
   type StudioSubscription,
   type SubscriptionMethod,
   type SubscriptionPage,
+  type SubscriptionPayment,
   type SubscriptionPaymentProgress,
   type SubscriptionPeriod,
   paymentOutcome,
@@ -21,8 +24,11 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useCardReturn } from '@/lib/card-payment'
 import { formatDateTime, formatMoney } from '@/lib/format'
+import { useCardCheckout } from '@/lib/use-card-checkout'
 import { cn } from '@/lib/utils'
+import { CardNotice } from '@/pages/checkout/CardNotice'
 import { AdminField } from './AdminField'
 import { CHOICE, DATA, EYEBROW, FIELD, META, PAGE, SECTION_TITLE, TD, TH, TR } from './console/classes'
 import { PageHeader } from './console/PageHeader'
@@ -32,7 +38,7 @@ import { SubscriptionStatusBadge } from './console/SubscriptionStatusBadge'
 /**
  * `/studio/subscription` (marketplace spec Phase 5: R5.2, R5.3, R5.5): where
  * the photographer sees the subscription's status and pays for a month or a
- * year by Mobile Money.
+ * year by Mobile Money or card.
  *
  * - The status card says what the status means: a trial's end, the date paid
  *   until, a lapsed subscription's end and when the profile is hidden, or that
@@ -48,6 +54,15 @@ import { SubscriptionStatusBadge } from './console/SubscriptionStatusBadge'
  *   end date the API answered, never one worked out here.
  * - With no payment provider configured the methods are empty, and the page
  *   says online payment is unavailable instead of offering a form.
+ * - A card (Flutterwave v3 Inline, "Cards as built", 2026-10-30) asks for no
+ *   number: the API answers the Inline config and Flutterwave's modal opens
+ *   here. Its callback follows the payment in place, as a MoMo payment is
+ *   followed, passing the try's transaction id to the poll; closing it unpaid
+ *   says nothing was charged. A card checkout still open is offered again, not
+ *   followed: the payer may have closed it, and the API answers the same one.
+ * - `/studio/subscription/payments/:ourRef` (`AdminSubscriptionPayment`) is
+ *   where Flutterwave's redirect lands (3-D Secure, and on today's v3.js every
+ *   completed try): this page, following that payment.
  */
 
 /** How often a waiting payment is asked about. */
@@ -59,27 +74,52 @@ const TROUBLE_AFTER_FAILURES = 3
 
 type Loaded = { attempt: number; page: SubscriptionPage | null }
 
-/** The payment being followed. `amountRwf` is unknown for one a 409 named, until its first answer. */
-type Following = { ourRef: string; amountRwf: number | null; resumed: boolean }
+/**
+ * The payment being followed. `amountRwf` is unknown for one a 409 named, until
+ * its first answer. `card` when it is known to be a card payment; the poll's
+ * `method` says so too. `transactionId`: the card try the modal or the redirect
+ * named, digits only, for the API to verify.
+ */
+type Following = { ourRef: string; amountRwf: number | null; resumed: boolean; card?: boolean; transactionId?: string | null }
+
+/** Where Flutterwave's redirect returned the photographer: the payment to follow on arrival. */
+type Returned = { ourRef: string; transactionId: string | null }
+
+/** A card payment still waiting is a checkout that may be open, or closed unpaid: offered again, never followed on load. */
+function isCardPayment(payment: SubscriptionPayment): boolean {
+  return payment.method === 'card'
+}
 
 type Outcome =
   | { kind: 'succeeded'; paidUntil: string }
   | { kind: 'failed'; failure: 'declined' | 'unavailable' }
   | { kind: 'missing' }
 
-export function AdminSubscription() {
+/** `/studio/subscription/payments/:ourRef`: the subscription page, following the payment Flutterwave returned from. */
+export function AdminSubscriptionPayment() {
+  const { ourRef = '' } = useParams()
+  // Flutterwave's query, read once and taken off the URL; only the poll's answer counts.
+  const { transactionId } = useCardReturn(ourRef)
+  return <AdminSubscription key={ourRef} returned={{ ourRef, transactionId }} />
+}
+
+export function AdminSubscription({ returned }: { returned?: Returned } = {}) {
   const { t } = useTranslation()
   const refreshLayout = useSubscriptionRefresh()
   const [attempt, setAttempt] = useState(0)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
-  const [following, setFollowing] = useState<Following | null>(null)
+  const [following, setFollowing] = useState<Following | null>(() =>
+    returned === undefined
+      ? null
+      : { ourRef: returned.ourRef, amountRwf: null, resumed: false, card: true, transactionId: returned.transactionId },
+  )
   const [outcome, setOutcome] = useState<Outcome | null>(null)
 
-  /** Takes a fresh page; a payment it says is still waiting is followed, unless one already is. */
+  /** Takes a fresh page; a payment it says is still waiting is followed, unless one already is, or it is a card's. */
   const accept = useCallback((forAttempt: number, page: SubscriptionPage) => {
     setLoaded({ attempt: forAttempt, page })
     const waiting = page.subscription?.paymentInProgress ?? null
-    if (waiting !== null && paymentOutcome(waiting.status) === 'waiting') {
+    if (waiting !== null && paymentOutcome(waiting.status) === 'waiting' && !isCardPayment(waiting)) {
       setFollowing((current) => current ?? { ourRef: waiting.ourRef, amountRwf: waiting.amountRwf, resumed: true })
     }
   }, [])
@@ -128,13 +168,19 @@ export function AdminSubscription() {
     setFollowing(next)
   }
 
+  /** Back to the form from a card payment's wait; the page is read again, so a checkout still open is offered. */
+  function backToPayment() {
+    setFollowing(null)
+    reloadQuietly()
+  }
+
   const current = loaded !== null && loaded.attempt === attempt ? loaded : null
   const page = current?.page ?? null
 
   return (
     <main className={cn(PAGE, 'max-w-4xl')}>
       <PageHeader eyebrow={t('studio:nav.label')} eyebrowIcon={Repeat} title={t('admin:subscription.title')}>
-        <p className={cn(META, 'max-w-prose text-pretty')}>{t('admin:subscription.intro')}</p>
+        <p className={cn(META, 'max-w-prose text-pretty')}>{t('admin:subscription.introOnline')}</p>
       </PageHeader>
 
       {current === null && <PageSkeleton />}
@@ -173,6 +219,7 @@ export function AdminSubscription() {
                 following={following}
                 onSettled={settled}
                 onMissing={missing}
+                onBack={backToPayment}
               />
             ) : page.methods.length === 0 ? (
               <Callout variant="console" tone="warning" icon={CircleAlert} role="alert" data-subscription="no-methods">
@@ -263,9 +310,21 @@ function PayForm({
   const [errors, setErrors] = useState<PayError[]>([])
   const [submitting, setSubmitting] = useState(false)
   const phoneRef = useRef<HTMLInputElement>(null)
+  const payRef = useRef<HTMLButtonElement>(null)
+  const card = useCardCheckout()
+  const busy = submitting || card.busy
+  // Closing the modal, or failing to load it, hands the page back: focus returns to Pay, with the words above it.
+  useEffect(() => {
+    if (card.phase === 'closed' || card.phase === 'loadFailed') payRef.current?.focus()
+  }, [card.phase])
 
   // A method the page no longer offers (a reload dropped it) is not a choice.
   const chosen = method !== null && methods.includes(method) ? method : (methods[0] ?? null)
+  const needsPhone = chosen !== 'card'
+  // A card checkout still open, offered again for its own plan (the API answers the same one).
+  const waiting = subscription.paymentInProgress
+  const openCard =
+    waiting !== null && isCardPayment(waiting) && paymentOutcome(waiting.status) === 'waiting' && methods.includes('card') ? waiting : null
   const saving = yearlySaving(prices)
   const amount = formatMoney(prices[plan])
   // The API's status is at its clock: trialing or active means the current period is still running.
@@ -278,20 +337,27 @@ function PayForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (submitting || chosen === null) return
-    setErrors([])
+    if (busy || chosen === null) return
 
     const phone = String(new FormData(event.currentTarget).get('phone') ?? '').trim()
-    if (!isPlausiblePhone(phone)) {
+    if (needsPhone && !isPlausiblePhone(phone)) {
+      setErrors([])
+      card.reset()
       markPhone()
       return
     }
     setPhoneInvalid(false)
+    await pay({ planInterval: plan, method: chosen, phone: needsPhone ? phone : '' })
+  }
 
+  async function pay(request: PayRequest) {
+    if (busy) return
+    setErrors([])
+    card.reset()
     setSubmitting(true)
     let result
     try {
-      result = await subscriptionApi.pay({ planInterval: plan, method: chosen, phone })
+      result = await subscriptionApi.pay(request)
     } catch (error) {
       setSubmitting(false)
       // A 401 has dropped the session; the guard takes him to sign in.
@@ -301,11 +367,19 @@ function PayForm({
     setSubmitting(false)
 
     switch (result.status) {
+      case 'card': {
+        const { ourRef, amountRwf } = result
+        void card.open(result.card, (transactionId) => {
+          onFollow({ ourRef, amountRwf, resumed: false, card: true, transactionId })
+        })
+        return
+      }
       case 'started':
         onFollow({ ourRef: result.ourRef, amountRwf: result.amountRwf, resumed: false })
         return
       case 'in_progress':
-        onFollow({ ourRef: result.ourRef, amountRwf: null, resumed: true })
+        // A card checkout still open is followed as a card: the progress speaks of a card, not a phone.
+        onFollow({ ourRef: result.ourRef, amountRwf: null, resumed: true, ...(result.method === 'card' ? { card: true } : {}) })
         return
       case 'not_approved':
         setErrors(['photographer_not_approved'])
@@ -316,9 +390,10 @@ function PayForm({
       case 'invalid': {
         const next: PayError[] = []
         if (result.fields.includes('method')) next.push('method')
-        if (result.fields.includes('phone')) markPhone()
+        const phoneShown = request.method !== 'card'
+        if (phoneShown && result.fields.includes('phone')) markPhone()
         // A field the page has no control for must still be said.
-        if (next.length === 0 && !result.fields.includes('phone')) next.push('failed')
+        if (next.length === 0 && !(phoneShown && result.fields.includes('phone'))) next.push('failed')
         setErrors(next)
         return
       }
@@ -374,6 +449,28 @@ function PayForm({
         </div>
       </fieldset>
 
+      {openCard !== null && (
+        <Callout
+          variant="console"
+          tone="info"
+          icon={CreditCard}
+          data-subscription="card-open"
+          action={
+            <Button
+              type="button"
+              variant="console-outline"
+              size="console-sm"
+              onClick={() => void pay({ planInterval: openCard.planInterval, method: 'card', phone: '' })}
+              aria-disabled={busy}
+            >
+              {busy ? t('checkout:card.reopening') : t('checkout:card.reopen')}
+            </Button>
+          }
+        >
+          <p>{t('admin:subscription.pay.cardOpen', { amount: formatMoney(openCard.amountRwf) })}</p>
+        </Callout>
+      )}
+
       <Callout variant="console" tone="info" icon={Clock} data-subscription="on-top">
         <p>
           {runningUntil
@@ -393,6 +490,7 @@ function PayForm({
                 value={option}
                 checked={chosen === option}
                 onChange={() => setMethod(option)}
+                aria-describedby={option === 'card' && chosen === 'card' ? 'subscription-card-hint' : undefined}
                 className={CHOICE}
               />
               {t(`checkout:methods.${option}`)}
@@ -401,24 +499,32 @@ function PayForm({
         </div>
       </fieldset>
 
-      <AdminField
-        label={t('checkout:phone.label')}
-        hint={t('checkout:phone.hint')}
-        error={phoneInvalid ? t('checkout:phone.invalid') : null}
-        className="max-w-sm"
-      >
-        {(props) => (
-          <Input
-            {...props}
-            ref={phoneRef}
-            name="phone"
-            type="tel"
-            autoComplete="tel"
-            required
-            className={cn(FIELD, 'font-mono')}
-          />
-        )}
-      </AdminField>
+      {needsPhone ? (
+        <AdminField
+          label={t('checkout:phone.label')}
+          hint={t('checkout:phone.hint')}
+          error={phoneInvalid ? t('checkout:phone.invalid') : null}
+          className="max-w-sm"
+        >
+          {(props) => (
+            <Input
+              {...props}
+              ref={phoneRef}
+              name="phone"
+              type="tel"
+              autoComplete="tel"
+              required
+              className={cn(FIELD, 'font-mono')}
+            />
+          )}
+        </AdminField>
+      ) : (
+        // A card is typed into Flutterwave's window, not here; no fee line (the platform absorbs it).
+        <p id="subscription-card-hint" className={cn(META, 'flex items-start gap-2')} data-card-hint="">
+          <LockKeyhole aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {t('checkout:card.hint')}
+        </p>
+      )}
 
       <div className="flex flex-col gap-4 border-t pt-6">
         {errors.map((error) => (
@@ -427,15 +533,21 @@ function PayForm({
             {t(`admin:subscription.errors.${error}`)}
           </p>
         ))}
+        <CardNotice phase={card.phase} />
         <Button
+          ref={payRef}
           type="submit"
           size="console"
           className="sm:min-w-40 sm:self-start"
           // Not `disabled`: that would drop keyboard focus mid-submit; a second press is ignored.
-          aria-disabled={submitting}
-          aria-busy={submitting}
+          aria-disabled={busy}
+          aria-busy={busy}
         >
-          {submitting ? t('admin:subscription.pay.submitting') : t('admin:subscription.pay.submit', { amount })}
+          {submitting
+            ? t('admin:subscription.pay.submitting')
+            : card.busy
+              ? t('checkout:card.opening')
+              : t('admin:subscription.pay.submit', { amount })}
         </Button>
       </div>
     </form>
@@ -451,13 +563,18 @@ function PaymentFollow({
   following,
   onSettled,
   onMissing,
+  onBack,
 }: {
   following: Following
   onSettled: (progress: SubscriptionPaymentProgress) => void
   onMissing: () => void
+  /** Leaves a card payment's wait for the form (the modal may have been closed unpaid). */
+  onBack: () => void
 }) {
   const { t } = useTranslation()
   const [amountRwf, setAmountRwf] = useState<number | null>(following.amountRwf)
+  // Known from the start (the modal, the redirect), or from the poll's `method` (a 409 named it).
+  const [card, setCard] = useState(following.card === true)
   const [failures, setFailures] = useState(0)
   const [gaveUp, setGaveUp] = useState(false)
   const [round, setRound] = useState(0)
@@ -474,7 +591,7 @@ function PaymentFollow({
 
     const poll = async () => {
       try {
-        const progress = await subscriptionApi.payment(following.ourRef)
+        const progress = await subscriptionApi.payment(following.ourRef, following.transactionId)
         if (stopped) return
         setFailures(0)
         if (progress === null) {
@@ -482,6 +599,7 @@ function PaymentFollow({
           return
         }
         setAmountRwf(progress.payment.amountRwf)
+        if (progress.payment.method === 'card') setCard(true)
         if (paymentOutcome(progress.payment.status) !== 'waiting') {
           handlers.current.onSettled(progress)
           return
@@ -502,22 +620,33 @@ function PaymentFollow({
       stopped = true
       clearTimeout(timer)
     }
-  }, [following.ourRef, round])
+  }, [following.ourRef, following.transactionId, round])
+
+  const Still = card ? CreditCard : Smartphone
 
   return (
-    <div className="flex flex-col gap-4 rounded-xs border p-4 sm:p-6" data-following={following.ourRef}>
+    <div className="flex flex-col gap-4 rounded-xs border p-4 sm:p-6" data-following={following.ourRef} data-following-card={card || undefined}>
       <div className="flex flex-col gap-3" role="status" aria-live="polite">
         <p className="flex items-center gap-2.5 text-lg font-medium">
-          {/* The one moving thing on the page; a still phone under reduced motion. */}
+          {/* The one moving thing on the page; a still phone (or card) under reduced motion. */}
           <LoaderCircle aria-hidden="true" className="size-5 shrink-0 motion-safe:animate-spin motion-reduce:hidden" />
-          <Smartphone aria-hidden="true" className="hidden size-5 shrink-0 motion-reduce:block" />
-          {t('admin:subscription.progress.waitingTitle')}
+          <Still aria-hidden="true" className="hidden size-5 shrink-0 motion-reduce:block" />
+          {t(card ? 'admin:subscription.progress.cardWaitingTitle' : 'admin:subscription.progress.waitingTitle')}
         </p>
         {following.resumed && <p className="text-sm">{t('admin:subscription.progress.resumed')}</p>}
-        {amountRwf !== null && <p className="text-sm">{t('admin:subscription.progress.waitingBody', { amount: formatMoney(amountRwf) })}</p>}
-        <p className={META}>{t('admin:subscription.progress.waitingWait')}</p>
+        {amountRwf !== null && (
+          <p className="text-sm">
+            {t(card ? 'admin:subscription.progress.cardWaitingBody' : 'admin:subscription.progress.waitingBody', { amount: formatMoney(amountRwf) })}
+          </p>
+        )}
+        <p className={META}>{t(card ? 'checkout:progress.cardPendingClosed' : 'admin:subscription.progress.waitingWait')}</p>
         {failures >= TROUBLE_AFTER_FAILURES && !gaveUp && <p className={META}>{t('admin:subscription.progress.connectionTrouble')}</p>}
       </div>
+      {card && (
+        <Button variant="console-outline" size="console-sm" className="self-start" onClick={onBack} data-back-to-payment="">
+          {t('checkout:progress.backToPayment')}
+        </Button>
+      )}
       {gaveUp && (
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm">{t('admin:subscription.progress.stillWaiting')}</p>

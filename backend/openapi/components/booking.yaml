@@ -135,14 +135,20 @@ schemas:
               booking fee has succeeded; `expired` when the hold lapsed unpaid;
               `closed` for anything else (cancelled, or nothing to pay).
           waitingPayment:
-            description: An attempt still waiting on the payer, if any; poll `GET /api/payments/{ourRef}`.
+            description: |
+              An attempt still waiting on the payer, if any; poll `GET /api/payments/{ourRef}`.
+              `method: card` is a card checkout the page may reopen by paying with `card` again.
             oneOf:
               - type: 'null'
               - type: object
-                required: [ourRef]
+                required: [ourRef, method]
                 additionalProperties: false
                 properties:
                   ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+                  method:
+                    oneOf:
+                      - type: 'null'
+                      - $ref: 'common.yaml#/schemas/PaymentMethod'
           cancellation: { $ref: '#/schemas/CancellationTerms' }
 
   CancellationTerms:
@@ -305,10 +311,14 @@ schemas:
                 oneOf:
                   - type: 'null'
                   - type: object
-                    required: [ourRef]
+                    required: [ourRef, method]
                     additionalProperties: false
                     properties:
                       ourRef: { $ref: 'common.yaml#/schemas/Uuid' }
+                      method:
+                        oneOf:
+                          - type: 'null'
+                          - $ref: 'common.yaml#/schemas/PaymentMethod'
       delivery:
         description: Present once the photographer has sent the photos. `url` is null after the link expires (end of `expiresOn`, Kigali time).
         oneOf:

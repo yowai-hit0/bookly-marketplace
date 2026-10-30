@@ -1,13 +1,13 @@
 import type { PrismaClient } from '@prisma/client';
 import { type Response, Router } from 'express';
-import { z } from 'zod';
 import { cancellationDeadline } from '../booking/client-view.js';
-import { normalizePhone } from '../booking/phone.js';
+import type { PaymentCheck } from '../payments/card-check.js';
+import { cardConfig, cardReturnPaths, cardTitles } from '../payments/card-checkout.js';
 import { verifyCheckoutToken } from '../payments/checkout-link.js';
 import { startBookingFeePayment } from '../payments/initiate.js';
-import type { PaymentMethod } from '../payments/provider.js';
+import type { CardSession } from '../payments/provider.js';
 import type { PaymentRouting } from '../payments/routing.js';
-import { parseOrReject } from './validation.js';
+import { paymentBodyParser } from './payment-body.js';
 
 /**
  * Paying the booking fee (plan.md Task 16; spec §3.1 steps 9-10, §6.19). All
@@ -25,25 +25,35 @@ import { parseOrReject } from './validation.js';
  *              endsAt, holdExpiresAt, bookingFeeRwf, state, waitingPayment,
  *              cancellation: { deadline, bookingFeeRefundable } } }
  *            state: payable | paid | expired | closed
+ *            waitingPayment: { ourRef, method } | null -- the newest attempt not
+ *            yet settled; `method: 'card'` tells the page to reopen the card
+ *            checkout (POST again with `method: 'card'`)
  *            cancellation: the policy the booking was made under (R1.8), so
  *            the pay page states the terms before the client pays
  *        404 not_found               unknown reference or wrong token, alike
  *
- *   POST /api/checkout/:reference/:token/payments   { method, phone }
+ *   POST /api/checkout/:reference/:token/payments   { method, phone }  (no phone for card)
  *        201 { payment: { ourRef, status: 'pending' } }   the phone is prompted
+ *        201 { payment: { ourRef, status: 'pending' }, card }   method card: `card` is
+ *            the Flutterwave Inline config (payments/card-checkout.ts)
+ *        200 { payment: { ourRef, status: 'pending' }, card }   a card checkout of
+ *            this fee is still open: the same payment and the same `tx_ref`
  *        404 not_found
  *        409 already_paid | hold_expired | nothing_to_pay
  *        409 photographer_unavailable   the photographer can no longer be
  *                                       booked (R3.4, T3.4); nothing is charged
- *        409 payment_in_progress { payment: { ourRef } }  an attempt still waits
+ *        409 payment_in_progress { payment: { ourRef, method } }  an attempt still waits
  *        422 validation_failed { fields }   a method not on offer, a bad number
  *        502 payment_not_started { reason: rejected | unavailable,
  *                                  payment: { ourRef, status: 'failed' } }
  *
- *   GET  /api/payments/:ourRef
+ *   GET  /api/payments/:ourRef[?transactionId=]
  *        200 { payment: { status, amountRwf, failure }, booking: { reference, status,
  *              serviceName, packageName, startsAt, endsAt } }
  *            failure: declined | unavailable | null
+ *            A pending card payment is first verified with Flutterwave, at most
+ *            once per payment every few seconds (payments/card-check.ts);
+ *            `transactionId` (the modal's or the redirect's) says which try.
  *        404 not_found
  *
  * The checkout's scope comes from its token alone (spec §2.2). The status
@@ -59,12 +69,13 @@ export type CheckoutDeps = {
   secret: string;
   /** The provider call's deadline; injectable for tests. */
   providerTimeoutMs?: number;
+  /** Asks Flutterwave about a pending card payment as its page polls (C5). Absent: the poll only reads. */
+  checkPayment?: PaymentCheck;
 };
 
 const REFERENCE = /^BKY-\d{4}-[0-9A-HJKMNP-TV-Z]{5}$/;
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PHONE_MAX_LENGTH = 40;
 
 export function checkoutRouter(deps: CheckoutDeps): Router {
   const { prisma, routing, secret } = deps;
@@ -97,10 +108,13 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
              (b.hold_expires_at IS NOT NULL AND b.hold_expires_at > now()) AS hold_live,
              EXISTS (SELECT 1 FROM payment p
                       WHERE p.booking_id = b.id AND p.kind = 'booking_fee' AND p.status = 'succeeded') AS paid,
-             (SELECT p.our_ref::text FROM payment p
-               WHERE p.booking_id = b.id AND p.kind = 'booking_fee' AND p.status IN ('initiated', 'pending')
-               ORDER BY p.initiated_at DESC LIMIT 1) AS waiting_our_ref
+             w.our_ref AS waiting_our_ref, w.method AS waiting_method
         FROM booking b
+        LEFT JOIN LATERAL (
+          SELECT p.our_ref::text AS our_ref, p.method
+            FROM payment p
+           WHERE p.booking_id = b.id AND p.kind = 'booking_fee' AND p.status IN ('initiated', 'pending')
+           ORDER BY p.initiated_at DESC LIMIT 1) w ON true
        WHERE b.reference = ${reference}`;
     const booking = rows[0];
     if (booking === undefined) {
@@ -118,7 +132,7 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
         holdExpiresAt: booking.hold_expires_at?.toISOString() ?? null,
         bookingFeeRwf: booking.booking_fee_rwf,
         state: checkoutState(booking),
-        waitingPayment: booking.waiting_our_ref === null ? null : { ourRef: booking.waiting_our_ref },
+        waitingPayment: booking.waiting_our_ref === null ? null : { ourRef: booking.waiting_our_ref, method: booking.waiting_method },
         // The same shape as the client's booking page (booking/client-view.ts).
         cancellation: {
           deadline: cancellationDeadline({ startsAt: booking.starts_at, clientCancelCutoffHours: booking.client_cancel_cutoff_hours }).toISOString(),
@@ -128,20 +142,13 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
     });
   });
 
-  const paymentBody = z.object({
-    // Only a method on offer: one not enabled, or whose provider is unconfigured, is a 422 (R3.1).
-    method: z.string().refine((method) => routing.providerFor(method) !== undefined, 'Method not available'),
-    phone: z
-      .string()
-      .max(PHONE_MAX_LENGTH)
-      .refine((value) => normalizePhone(value) !== null, 'Invalid phone number')
-      .transform((value) => normalizePhone(value) ?? value),
-  });
+  // Only a method on offer (R3.1); a phone for MoMo, none for a card (routes/payment-body.ts).
+  const parseBody = paymentBodyParser(routing, {});
 
   router.post('/checkout/:reference/:token/payments', async (req, res) => {
     const reference = authorised(req.params, res);
     if (reference === null) return;
-    const body = parseOrReject(paymentBody, req.body, res);
+    const body = parseBody(req.body, res);
     if (body === undefined) return;
 
     // The client's method picks the provider (R3.1); the refinement above has made sure there is one.
@@ -149,12 +156,20 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
     if (provider === undefined) throw new Error('A validated method has no provider');
     const result = await startBookingFeePayment(
       { prisma, provider, ...(deps.providerTimeoutMs === undefined ? {} : { timeoutMs: deps.providerTimeoutMs }) },
-      { reference, method: body.method as PaymentMethod, payerPhone: body.phone },
+      { reference, method: body.method, payerPhone: body.phone },
     );
+    const card = (ourRef: string, session: CardSession) =>
+      cardConfig(provider, ourRef, session, cardTitles.bookingFee(reference), cardReturnPaths.bookingFee(reference, req.params.token ?? '', ourRef));
 
     switch (result.status) {
       case 'started':
-        res.status(201).json({ payment: { ourRef: result.ourRef, status: 'pending' } });
+        res.status(201).json({
+          payment: { ourRef: result.ourRef, status: 'pending' },
+          ...(result.card === undefined ? {} : { card: card(result.ourRef, result.card) }),
+        });
+        return;
+      case 'card_in_progress':
+        res.status(200).json({ payment: { ourRef: result.ourRef, status: 'pending' }, card: card(result.ourRef, result.card) });
         return;
       case 'not_found':
         res.status(404).json({ error: 'not_found' });
@@ -166,7 +181,7 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
         res.status(409).json({ error: result.status });
         return;
       case 'in_progress':
-        res.status(409).json({ error: 'payment_in_progress', payment: { ourRef: result.ourRef } });
+        res.status(409).json({ error: 'payment_in_progress', payment: { ourRef: result.ourRef, method: result.method } });
         return;
       case 'provider_failed':
         res.status(502).json({
@@ -180,6 +195,11 @@ export function checkoutRouter(deps: CheckoutDeps): Router {
 
   router.get('/payments/:ourRef', async (req, res) => {
     const { ourRef } = req.params;
+    // Verify a pending card payment first, so this answer can already be its result (C5).
+    if (deps.checkPayment !== undefined && UUID.test(ourRef)) {
+      const transactionId = typeof req.query.transactionId === 'string' ? req.query.transactionId : undefined;
+      await deps.checkPayment(ourRef, { transactionId, subject: 'booking' });
+    }
     const payment = UUID.test(ourRef)
       ? await prisma.payment.findUnique({
           where: { ourRef: ourRef.toLowerCase() },
@@ -239,6 +259,7 @@ type CheckoutRow = {
   hold_live: boolean;
   paid: boolean;
   waiting_our_ref: string | null;
+  waiting_method: string | null;
 };
 
 function checkoutState(booking: CheckoutRow): 'payable' | 'paid' | 'expired' | 'closed' {

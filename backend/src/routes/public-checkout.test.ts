@@ -152,7 +152,7 @@ describe('GET /api/payment-methods (R3.1)', () => {
     expect((await request(appWith(routing)).get('/api/payment-methods')).body).toStrictEqual({ methods: ['momo_mtn'] });
   });
 
-  it('never reports card, even from a provider that lists it', async () => {
+  it('never reports card from a provider with no browser checkout, even one that lists it', async () => {
     const res = await request(appWith(stubProvider({ id: 'flutterwave', methods: ['card', 'momo_mtn', 'momo_airtel'] }))).get('/api/payment-methods');
 
     expect(res.body).toStrictEqual({ methods: ['momo_mtn', 'momo_airtel'] });
@@ -210,7 +210,7 @@ describe('GET /api/checkout/:reference/:token', () => {
 
     const res = await request(appWith()).get(checkoutUrl(booking.reference));
 
-    expect(res.body.checkout.waitingPayment).toStrictEqual({ ourRef: latest.ourRef });
+    expect(res.body.checkout.waitingPayment).toStrictEqual({ ourRef: latest.ourRef, method: null });
   });
 
   it('names no waiting attempt when the only attempts failed', async () => {
@@ -508,6 +508,16 @@ describe('POST /api/checkout/:reference/:token/payments', () => {
     expect(provider.initiated).toEqual([]);
   });
 
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)('409 payment_in_progress names the waiting attempt’s %s method', async (method, provider) => {
+    const booking = await insertBooking(prisma, world);
+    const waiting = await insertPayment(prisma, booking.id, { status: 'pending', ageSeconds: 30, provider, method });
+
+    const res = await pay(appWith(), booking.reference);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: waiting.ourRef, method } });
+  });
+
   it('409 payment_in_progress with the waiting attempt’s our_ref', async () => {
     const booking = await insertBooking(prisma, world);
     const waiting = await insertPayment(prisma, booking.id, { status: 'pending', ageSeconds: 30 });
@@ -515,7 +525,7 @@ describe('POST /api/checkout/:reference/:token/payments', () => {
     const res = await pay(appWith(), booking.reference);
 
     expect(res.status).toBe(409);
-    expect(res.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: waiting.ourRef } });
+    expect(res.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: waiting.ourRef, method: null } });
   });
 
   it('answers a second press of Pay with the first attempt: one 201, then 409 naming it', async () => {
@@ -622,7 +632,7 @@ describe('POST /api/checkout/:reference/:token/payments: the method picks the pr
     const second = await pay(app, booking.reference, { method: 'momo_airtel', phone: '0731234567' });
 
     expect(second.status).toBe(409);
-    expect(second.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: first.body.payment.ourRef } });
+    expect(second.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: first.body.payment.ourRef, method: 'momo_mtn' } });
     expect(flutterwave.initiated).toEqual([]);
   });
 

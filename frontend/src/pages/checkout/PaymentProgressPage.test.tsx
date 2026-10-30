@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
+import { saveSession } from '@/auth/session'
 import type { PaymentProgress } from '@/catalogue/payments'
 import { routes } from '@/routes'
 import { POLL_GIVE_UP_MS, POLL_INTERVAL_MS } from './PaymentProgressPage'
@@ -434,5 +435,208 @@ describe('the payment it follows', () => {
     await settle()
 
     expect(calls).toEqual(['/api/payments/a%3Fb'])
+  })
+})
+
+// --- Cards (Flutterwave v3 Inline, "Cards as built") ---------------------------------------------
+
+describe('a card payment returning from Flutterwave', () => {
+  const CARD_TITLE = 'Confirming your card payment'
+  const REDIRECT = `${PATH}?status=successful&tx_ref=${OUR_REF}&transaction_id=4100000123`
+
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('stays pending under a forged ?status=successful while the API says pending, never saying confirmed (T3.2)', async () => {
+    stubApi(() => answer(PENDING))
+    renderAt(`${PATH}?status=successful&tx_ref=${OUR_REF}`)
+    await settle()
+    for (let i = 0; i < 10; i += 1) await advance(POLL_INTERVAL_MS)
+
+    expect(screen.getByRole('heading', { level: 1, name: CARD_TITLE })).toBeInTheDocument()
+    expect(screen.queryByText(CONFIRMED)).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/successful|confirmed/i)
+  })
+
+  it('passes transaction_id to every poll, then takes the redirect query off the URL, keeping it in the history state', async () => {
+    const calls = stubApi(() => answer(PENDING))
+    const { router } = renderAt(REDIRECT)
+    await settle()
+    await advance(POLL_INTERVAL_MS)
+
+    expect(calls.length).toBeGreaterThanOrEqual(2)
+    for (const call of calls) expect(call).toBe(`/api/payments/${OUR_REF}?transactionId=4100000123`)
+    expect(router.state.location.pathname).toBe(PATH)
+    expect(router.state.location.search).toBe('')
+    expect(router.state.location.state).toStrictEqual({ card: true, transactionId: '4100000123' })
+    // Replaced, not pushed: Back does not return to the query.
+    expect(router.state.historyAction).toBe('REPLACE')
+  })
+
+  it.each([
+    ['letters', 'abc'],
+    ['a query smuggled in', '41%26status%3Dsuccessful'],
+    ['too many digits', '1'.repeat(21)],
+    ['nothing', ''],
+  ])('passes no transaction id for %s, and still strips the query', async (_label, value) => {
+    const calls = stubApi(() => answer(PENDING))
+    const { router } = renderAt(`${PATH}?status=successful&tx_ref=${OUR_REF}&transaction_id=${value}`)
+    await settle()
+
+    expect(calls[0]).toBe(`/api/payments/${OUR_REF}`)
+    expect(router.state.location.search).toBe('')
+    expect(screen.getByRole('heading', { level: 1, name: CARD_TITLE })).toBeInTheDocument()
+  })
+
+  it('says the payment is being confirmed with Flutterwave, that closing unpaid charged nothing, and offers the way back to payment', async () => {
+    stubApi(() => answer(PENDING))
+    renderAt(REDIRECT)
+    await settle()
+
+    const status = screen.getByRole('status')
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(status).toHaveTextContent('We are confirming your payment of 19,500 RWF with Flutterwave. This page updates by itself.')
+    expect(status).toHaveTextContent('If you closed the card window without paying, nothing was charged.')
+    expect(status).not.toHaveTextContent(/phone|PIN|Mobile Money/)
+    expect(screen.getByRole('link', { name: 'Back to payment' })).toHaveAttribute('href', `/checkout/${REFERENCE}/${TOKEN}`)
+  })
+
+  it('knows a card payment from the pay page navigation state, and from this tab after a reload', async () => {
+    stubApi(() => answer(PENDING))
+    const router = createMemoryRouter(routes, { initialEntries: [{ pathname: PATH, state: { card: true, transactionId: '77' } }] })
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        calls.push(String(input))
+        return answer(PENDING)
+      }),
+    )
+    render(<RouterProvider router={router} />)
+    await settle()
+    expect(screen.getByRole('heading', { level: 1, name: CARD_TITLE })).toBeInTheDocument()
+    expect(calls[0]).toBe(`/api/payments/${OUR_REF}?transactionId=77`)
+    cleanup()
+
+    // A full page load with no state or query: the tab remembered the card payment.
+    sessionStorage.setItem(`bookly.cardPayment.${OUR_REF}`, '1')
+    renderAt(PATH)
+    await settle()
+    expect(screen.getByRole('heading', { level: 1, name: CARD_TITLE })).toBeInTheDocument()
+  })
+
+  it('keeps the phone wording, and no Back to payment, for a payment not known to be a card', async () => {
+    stubApi(() => answer(PENDING))
+    renderAt(PATH)
+    await settle()
+
+    expect(screen.getByRole('heading', { level: 1, name: PENDING_TITLE })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Back to payment' })).not.toBeInTheDocument()
+  })
+
+  it('says confirmed once the API answers succeeded, with no Back to payment', async () => {
+    let paid = false
+    stubApi(() => answer(paid ? progress('succeeded', 'confirmed') : PENDING))
+    renderAt(REDIRECT)
+    await settle()
+    paid = true
+    await advance(POLL_INTERVAL_MS)
+
+    expect(screen.getByRole('heading', { level: 1, name: CONFIRMED })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Back to payment' })).not.toBeInTheDocument()
+  })
+
+  it('reads an expired card session as declined, with Try again back to the checkout', async () => {
+    stubApi(() => answer(progress('failed', 'pending_payment', 'declined')))
+    renderAt(REDIRECT)
+    await settle()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'The payment did not go through' })).toBeInTheDocument()
+    expect(screen.getByText('The payment was declined, or was not approved in time.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Try again' })).toHaveAttribute('href', `/checkout/${REFERENCE}/${TOKEN}`)
+  })
+})
+
+describe('/payments/:ourRef, the token-free card return page for a guest session fee', () => {
+  const BOOKING_TOKEN = 'Zt9_x-9QzT7vL4pR8sK1nB6yH3cF5dG0wJeLmNoPqRs'
+  const RETURN = `/payments/${OUR_REF}?status=successful&tx_ref=${OUR_REF}&transaction_id=4100000123`
+
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  it('with the token this tab kept, follows the payment and links back to the booking, the token in no other place', async () => {
+    sessionStorage.setItem(`bookly.cardPayment.${OUR_REF}`, '1')
+    sessionStorage.setItem(`bookly.cardBookingToken.${OUR_REF}`, BOOKING_TOKEN)
+    const calls = stubApi(() => answer(PENDING))
+    const { router } = renderAt(RETURN)
+    await settle()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Confirming your card payment' })).toBeInTheDocument()
+    expect(calls[0]).toBe(`/api/payments/${OUR_REF}?transactionId=4100000123`)
+    expect(router.state.location.pathname).toBe(`/payments/${OUR_REF}`)
+    expect(router.state.location.search).toBe('')
+    expect(screen.getByRole('link', { name: 'Back to payment' })).toHaveAttribute('href', `/booking/${BOOKING_TOKEN}`)
+    expect(screen.getByRole('link', { name: 'Back to your booking' })).toHaveAttribute('href', `/booking/${BOOKING_TOKEN}`)
+    for (const call of calls) expect(call).not.toContain(BOOKING_TOKEN)
+    expect(JSON.stringify(router.state.location)).not.toContain(BOOKING_TOKEN)
+  })
+
+  it('without a kept token, says to reopen the booking from its email and offers the email-me-my-links page', async () => {
+    stubApi(() => answer(PENDING))
+    renderAt(RETURN)
+    await settle()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Confirming your card payment' })).toBeInTheDocument()
+    expect(screen.getByText('To get back to your booking, open it from the link in your booking email.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Get a new link by email' })).toHaveAttribute('href', '/my-booking')
+    expect(screen.queryByRole('link', { name: 'Back to payment' })).not.toBeInTheDocument()
+    expect(document.querySelector('a[href^="/booking/"]')).toBeNull()
+  })
+
+  it('without a kept token, a failed payment offers no Try again link it cannot honour', async () => {
+    stubApi(() => answer(progress('failed', 'confirmed', 'declined')))
+    renderAt(RETURN)
+    await settle()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'The payment did not go through' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Try again' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Get a new link by email' })).toBeInTheDocument()
+  })
+
+  it('reads storage that throws as nothing kept', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    stubApi(() => answer(PENDING))
+    renderAt(RETURN)
+    await settle()
+
+    expect(screen.getByText('To get back to your booking, open it from the link in your booking email.')).toBeInTheDocument()
+    vi.restoreAllMocks()
+  })
+
+  it('says the link is not valid for a payment the API does not know', async () => {
+    stubApi(() => answer({ error: 'not_found' }, 404))
+    renderAt(`/payments/${OTHER_REF}`)
+    await settle()
+
+    expect(screen.getByRole('heading', { level: 1, name: 'This payment link is not valid' })).toBeInTheDocument()
+  })
+})
+
+describe('/account/bookings/:reference/payments/:ourRef for a card session fee', () => {
+  it('offers Back to payment to the account booking page while the card payment waits', async () => {
+    saveSession('account', { token: 'account.jwt', expiresAt: '2099-01-01T00:00:00.000Z' })
+    stubApi((url) => (url.startsWith('/api/payments/') ? answer(PENDING) : answer({ user: { id: 'c1', email: 'aline@example.com' } })))
+    renderAt(`/account/bookings/${REFERENCE}/payments/${OUR_REF}?status=successful&tx_ref=${OUR_REF}&transaction_id=9`)
+    await settle()
+    await settle()
+
+    await advance(100)
+    expect(screen.getByRole('heading', { level: 1, name: 'Confirming your card payment' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to payment' })).toHaveAttribute('href', `/account/bookings/${REFERENCE}`)
+    sessionStorage.clear()
   })
 })

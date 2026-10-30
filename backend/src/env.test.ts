@@ -6,6 +6,12 @@ const valid = {
   WEB_ORIGIN: 'http://localhost:5173',
   SESSION_SECRET: 'a-test-secret-that-is-at-least-32-chars-long',
 };
+/** Placeholder Flutterwave v3 sandbox keys: the shape only, never real ones. */
+const CARD_KEYS = {
+  FLUTTERWAVE_V3_SECRET_KEY: 'FLWSECK_TEST-placeholder-secret-X',
+  FLUTTERWAVE_V3_PUBLIC_KEY: 'FLWPUBK_TEST-placeholder-public-X',
+  FLUTTERWAVE_V3_WEBHOOK_HASH: 'placeholder-webhook-hash',
+};
 
 describe('parseEnv', () => {
   it('applies defaults for the optional variables', () => {
@@ -324,8 +330,20 @@ describe('parseEnv: method routing (marketplace-spec.md R3.1, 2026-10-17)', () =
     expect(parseEnv({ ...valid, PAYMENT_METHODS_ENABLED }).PAYMENT_METHODS_ENABLED).toEqual(expected);
   });
 
-  it.each(['card', 'momo_mtn,card', 'card,momo_airtel'])('refuses card in PAYMENT_METHODS_ENABLED=%j: it is deferred', (PAYMENT_METHODS_ENABLED) => {
-    expect(() => parseEnv({ ...valid, PAYMENT_METHODS_ENABLED })).toThrow(/PAYMENT_METHODS_ENABLED: card is reserved for the hosted card checkout, which is deferred/);
+  it.each(['card', 'momo_mtn,card', 'card,momo_airtel'])('refuses card in PAYMENT_METHODS_ENABLED=%j without the Flutterwave v3 keys, in any environment', (PAYMENT_METHODS_ENABLED) => {
+    for (const NODE_ENV of ['development', 'test', 'production']) {
+      expect(() => parseEnv({ ...valid, NODE_ENV, PAYMENT_METHODS_ENABLED }), NODE_ENV).toThrow(
+        /PAYMENT_METHODS_ENABLED: card is listed, but FLUTTERWAVE_V3_SECRET_KEY, FLUTTERWAVE_V3_PUBLIC_KEY and FLUTTERWAVE_V3_WEBHOOK_HASH are not set/,
+      );
+    }
+  });
+
+  it.each([
+    ['card', ['card']],
+    ['card,momo_mtn', ['momo_mtn', 'card']],
+    ['momo_airtel , card,momo_mtn,card', ['momo_mtn', 'momo_airtel', 'card']],
+  ])('reads PAYMENT_METHODS_ENABLED=%j as %j once the card keys are set, in the pay page order', (PAYMENT_METHODS_ENABLED, expected) => {
+    expect(parseEnv({ ...valid, ...CARD_KEYS, PAYMENT_METHODS_ENABLED }).PAYMENT_METHODS_ENABLED).toEqual(expected);
   });
 
   it.each(['paypal', 'momo_mtn,paypal', 'MOMO_MTN', 'momo mtn', 'momo_mtn;momo_airtel'])('refuses an unknown method in PAYMENT_METHODS_ENABLED=%j, naming it', (PAYMENT_METHODS_ENABLED) => {
@@ -338,6 +356,94 @@ describe('parseEnv: method routing (marketplace-spec.md R3.1, 2026-10-17)', () =
 
   it('does not echo a long unknown value back in full', () => {
     expect(() => parseEnv({ ...valid, PAYMENT_METHODS_ENABLED: 'x'.repeat(500) })).toThrow(new RegExp(`unknown method "${'x'.repeat(40)}"`));
+  });
+});
+
+describe('parseEnv: cards, Flutterwave v3 Inline (user decisions, 2026-10-30)', () => {
+  const production = {
+    ...valid,
+    NODE_ENV: 'production',
+    RESEND_API_KEY: 're_live_key',
+    API_ORIGIN: 'https://api.bookly.example',
+  };
+  const LIVE_KEYS = {
+    FLUTTERWAVE_V3_SECRET_KEY: 'FLWSECK-live-secret-X',
+    FLUTTERWAVE_V3_PUBLIC_KEY: 'FLWPUBK-live-public-X',
+    FLUTTERWAVE_V3_WEBHOOK_HASH: 'live-webhook-hash',
+  };
+
+  it('is off by default, with the v3 API at api.flutterwave.com', () => {
+    const env = parseEnv(valid);
+    expect(env.FLUTTERWAVE_V3_BASE_URL).toBe('https://api.flutterwave.com');
+    for (const key of ['FLUTTERWAVE_V3_SECRET_KEY', 'FLUTTERWAVE_V3_PUBLIC_KEY', 'FLUTTERWAVE_V3_WEBHOOK_HASH'] as const) expect(env[key]).toBeUndefined();
+    expect(offeredMethods(env)).not.toContain('card');
+  });
+
+  it('offers card, last, once all three keys are set', () => {
+    const env = parseEnv({ ...valid, ...CARD_KEYS, FLUTTERWAVE_V3_BASE_URL: 'https://flutterwave.test' });
+    expect(env).toMatchObject({ ...CARD_KEYS, FLUTTERWAVE_V3_BASE_URL: 'https://flutterwave.test' });
+    expect(offeredMethods(env)).toEqual(['card']);
+    expect(offeredMethods(parseEnv({ ...valid, ...CARD_KEYS, MTN_MOMO_SUBSCRIPTION_KEY: 's', MTN_MOMO_API_USER: 'u', MTN_MOMO_API_KEY: 'k' }))).toEqual(['momo_mtn', 'card']);
+  });
+
+  it.each(['FLUTTERWAVE_V3_SECRET_KEY', 'FLUTTERWAVE_V3_PUBLIC_KEY', 'FLUTTERWAVE_V3_WEBHOOK_HASH'] as const)(
+    'refuses %s missing from an otherwise complete set, in any environment, naming it',
+    (key) => {
+      const partial: Record<string, string> = { ...CARD_KEYS };
+      delete partial[key];
+      for (const NODE_ENV of ['development', 'test', 'production']) {
+        expect(() => parseEnv({ ...valid, NODE_ENV, ...partial }), NODE_ENV).toThrow(new RegExp(`${key}: set FLUTTERWAVE_V3_SECRET_KEY, FLUTTERWAVE_V3_PUBLIC_KEY and FLUTTERWAVE_V3_WEBHOOK_HASH together, or none: ${key} missing`));
+      }
+    },
+  );
+
+  it('refuses one key alone, naming both that are missing', () => {
+    expect(() => parseEnv({ ...valid, FLUTTERWAVE_V3_WEBHOOK_HASH: 'h' })).toThrow(/FLUTTERWAVE_V3_SECRET_KEY and FLUTTERWAVE_V3_PUBLIC_KEY missing/);
+  });
+
+  it.each(['FLUTTERWAVE_V3_SECRET_KEY', 'FLUTTERWAVE_V3_PUBLIC_KEY', 'FLUTTERWAVE_V3_WEBHOOK_HASH', 'FLUTTERWAVE_V3_BASE_URL'])('rejects an empty %s, naming it', (key) => {
+    expect(() => parseEnv({ ...valid, ...CARD_KEYS, [key]: '' })).toThrow(new RegExp(key));
+  });
+
+  it('refuses a public key that is not one, without echoing what was pasted (it may be the secret)', () => {
+    const pasted = 'FLWSECK_TEST-the-secret-pasted-in-the-wrong-place-X';
+    let message = '';
+    try {
+      parseEnv({ ...valid, ...CARD_KEYS, FLUTTERWAVE_V3_PUBLIC_KEY: pasted });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/FLUTTERWAVE_V3_PUBLIC_KEY: must be a Flutterwave v3 public key \(FLWPUBK\.\.\.\)/);
+    expect(message).not.toContain(pasted);
+  });
+
+  it('refuses a secret key that is not one', () => {
+    expect(() => parseEnv({ ...valid, ...CARD_KEYS, FLUTTERWAVE_V3_SECRET_KEY: 'sk_live_123' })).toThrow(/FLUTTERWAVE_V3_SECRET_KEY: must be a Flutterwave v3 secret key/);
+  });
+
+  it('refuses a test key beside a live one, either way round', () => {
+    expect(() => parseEnv({ ...valid, ...CARD_KEYS, FLUTTERWAVE_V3_PUBLIC_KEY: LIVE_KEYS.FLUTTERWAVE_V3_PUBLIC_KEY })).toThrow(/both be test keys or both live keys/);
+    expect(() => parseEnv({ ...valid, ...LIVE_KEYS, FLUTTERWAVE_V3_PUBLIC_KEY: CARD_KEYS.FLUTTERWAVE_V3_PUBLIC_KEY })).toThrow(/both be test keys or both live keys/);
+    expect(() => parseEnv({ ...valid, ...LIVE_KEYS })).not.toThrow();
+  });
+
+  it('lets production offer card alone, as its only method', () => {
+    const env = parseEnv({ ...production, ...LIVE_KEYS });
+    expect(offeredMethods(env)).toEqual(['card']);
+    expect(offeredMethods(parseEnv({ ...production, ...LIVE_KEYS, PAYMENT_METHODS_ENABLED: 'card' }))).toEqual(['card']);
+  });
+
+  it('keeps the MoMo production checks unchanged beside cards', () => {
+    // Cards on offer satisfy "at least one method", but a listed MoMo method must still be collectable.
+    expect(() => parseEnv({ ...production, ...LIVE_KEYS, PAYMENT_METHODS_ENABLED: 'momo_mtn,card' })).toThrow(/to offer momo_mtn through mtn_momo_direct/);
+  });
+
+  it('does not stop production for cards being unconfigured when card is not listed', () => {
+    expect(() => parseEnv({ ...production, MTN_MOMO_SUBSCRIPTION_KEY: 's', MTN_MOMO_API_USER: 'u', MTN_MOMO_API_KEY: 'k' })).not.toThrow();
+  });
+
+  it('never needs the v4 webhook hash for cards', () => {
+    expect(() => parseEnv({ ...production, ...LIVE_KEYS })).not.toThrow();
   });
 });
 

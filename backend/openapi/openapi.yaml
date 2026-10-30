@@ -343,6 +343,8 @@ paths:
     $ref: paths/webhooks.yaml#/mtnMomo
   /api/webhooks/flutterwave:
     $ref: paths/webhooks.yaml#/flutterwave
+  /api/webhooks/flutterwave-checkout:
+    $ref: paths/webhooks.yaml#/flutterwaveCheckout
 components:
   securitySchemes:
     studioBearer:

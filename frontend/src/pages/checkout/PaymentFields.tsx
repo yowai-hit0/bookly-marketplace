@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react'
+import { Check, LockKeyhole } from 'lucide-react'
 import type { RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { type PaymentMethod, needsPhoneFor } from '@/catalogue/payments'
@@ -22,6 +22,11 @@ import { eyebrow } from '@/pages/client/classes'
  * `SelectableCard` with its native radio visually hidden (`data-focus-ring`
  * hands its outline to the card) and a text chip carrying the method's
  * existing name -- no logo artwork, no MTN yellow.
+ *
+ * A card (Flutterwave v3 Inline, 2026-10-30) asks for nothing here: the
+ * details go into Flutterwave's own window, which the pay page opens, and one
+ * line under the options says so. No fee line: the platform absorbs the card
+ * fee, so the client pays the amount on the button.
  */
 
 type Props = {
@@ -35,6 +40,8 @@ type Props = {
 
 export function PaymentFields({ methods, method, onMethod, phoneId, phoneRef, phoneInvalid }: Props) {
   const { t } = useTranslation()
+
+  const cardHintId = `${phoneId}-card-hint`
 
   return (
     <>
@@ -50,6 +57,8 @@ export function PaymentFields({ methods, method, onMethod, phoneId, phoneRef, ph
                 value={option}
                 checked={checked}
                 onChange={() => onMethod(option)}
+                // The line under the options says where the card is entered; a screen reader hears it with the choice.
+                aria-describedby={option === 'card' && checked ? cardHintId : undefined}
                 data-focus-ring="parent"
                 className="sr-only"
               />
@@ -77,6 +86,13 @@ export function PaymentFields({ methods, method, onMethod, phoneId, phoneRef, ph
           )
         })}
       </fieldset>
+
+      {method === 'card' && (
+        <p id={cardHintId} className="text-muted-foreground flex items-start gap-2 text-sm" data-card-hint="">
+          <LockKeyhole aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          {t('checkout:card.hint')}
+        </p>
+      )}
 
       {needsPhoneFor(method) && (
         <div className="flex flex-col gap-1.5">

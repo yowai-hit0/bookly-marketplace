@@ -6,9 +6,12 @@ import {
   fetchCheckout,
   fetchPaymentMethods,
   fetchPaymentProgress,
+  payBody,
   paymentPath,
   startPayment,
+  transactionQuery,
 } from './payments'
+import { cardConfig } from '@/test/card-fixtures'
 
 /**
  * The payment client (plan.md Task 16, spec §3.1 steps 9-10, §6.19).
@@ -310,7 +313,11 @@ describe('startPayment', () => {
     ['201 without an our_ref', 201, { payment: {} }, { status: 'failed' }],
     ['201 with a numeric our_ref', 201, { payment: { ourRef: 7 } }, { status: 'failed' }],
     ['404', 404, { error: 'not_found' }, { status: 'not_found' }],
-    ['409 payment_in_progress', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, { status: 'in_progress', ourRef: OUR_REF }],
+    ['409 payment_in_progress', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, { status: 'in_progress', ourRef: OUR_REF, method: null }],
+    ['409 payment_in_progress of a card', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, { status: 'in_progress', ourRef: OUR_REF, method: 'card' }],
+    ['409 payment_in_progress of a MoMo prompt', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'momo_airtel' } }, { status: 'in_progress', ourRef: OUR_REF, method: 'momo_airtel' }],
+    ['409 payment_in_progress of an unknown method', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'bitcoin' } }, { status: 'in_progress', ourRef: OUR_REF, method: null }],
+    ['409 payment_in_progress with a null method', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: null } }, { status: 'in_progress', ourRef: OUR_REF, method: null }],
     ['409 payment_in_progress without an our_ref', 409, { error: 'payment_in_progress' }, { status: 'failed' }],
     ['409 already_paid', 409, { error: 'already_paid' }, { status: 'already_paid' }],
     ['409 hold_expired', 409, { error: 'hold_expired' }, { status: 'closed' }],
@@ -352,5 +359,95 @@ describe('startPayment', () => {
     const mock = stubFetch(() => json({ error: 'not_found' }, 404))
     await startPayment('a/b', 'c d', REQUEST)
     expect(sentRequest(mock).url).toBe('/api/checkout/a%2Fb/c%20d/payments')
+  })
+})
+
+// --- Cards (Flutterwave v3 Inline, "Cards as built") ---------------------------------------------
+
+describe('startPayment by card', () => {
+  const CARD = { method: 'card' as const, phone: '078 812 3456' }
+
+  it('POSTs the method alone: a card needs no phone, and a typed one is not sent', async () => {
+    const mock = stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: cardConfig(OUR_REF) }, 201))
+    await startPayment(REFERENCE, TOKEN, CARD)
+    expect(JSON.parse(String(sentRequest(mock).init.body))).toStrictEqual({ method: 'card' })
+  })
+
+  it.each([201, 200])('answers a %i carrying the Inline config as a card payment, with the config unchanged', async (status) => {
+    const card = cardConfig(OUR_REF)
+    stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card }, status))
+    await expect(startPayment(REFERENCE, TOKEN, CARD)).resolves.toStrictEqual({ status: 'card', ourRef: OUR_REF, card })
+  })
+
+  it.each<[string, unknown]>([
+    ['no config', undefined],
+    ['a null config', null],
+    ['a config for another payment', cardConfig('another-ref')],
+    ['another currency', cardConfig(OUR_REF, { currency: 'USD' })],
+    ['a string amount', { ...cardConfig(OUR_REF), amount: '19500' }],
+    ['a negative amount', cardConfig(OUR_REF, { amount: -1 })],
+    ['another payment type', { ...cardConfig(OUR_REF), payment_options: 'account' }],
+    ['no return URL', { ...cardConfig(OUR_REF), redirect_url: undefined }],
+    ['no session length', { ...cardConfig(OUR_REF), configurations: {} }],
+  ])('is failed for a card answer with %s', async (_label, card) => {
+    stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' }, ...(card === undefined ? {} : { card }) }, 201))
+    await expect(startPayment(REFERENCE, TOKEN, CARD)).resolves.toStrictEqual({ status: 'failed' })
+  })
+
+  it('is failed for a malformed config even when a MoMo method was asked', async () => {
+    stubFetch(() => json({ payment: { ourRef: OUR_REF }, card: { public_key: 'x' } }, 201))
+    await expect(startPayment(REFERENCE, TOKEN, { method: 'momo_mtn', phone: '0788123456' })).resolves.toStrictEqual({ status: 'failed' })
+  })
+
+  it('still reads MoMo as before: a 201 without a config is started, and a 200 without one is not', async () => {
+    stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' } }, 201))
+    await expect(startPayment(REFERENCE, TOKEN, { method: 'momo_airtel', phone: '0731234567' })).resolves.toStrictEqual({
+      status: 'started',
+      ourRef: OUR_REF,
+    })
+    stubFetch(() => json({ payment: { ourRef: OUR_REF, status: 'pending' } }, 200))
+    await expect(startPayment(REFERENCE, TOKEN, { method: 'momo_mtn', phone: '0788123456' })).resolves.toStrictEqual({ status: 'failed' })
+  })
+
+  it.each([
+    ['409 payment_in_progress', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, { status: 'in_progress', ourRef: OUR_REF, method: null }],
+    ['409 payment_in_progress of a card', 409, { error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, { status: 'in_progress', ourRef: OUR_REF, method: 'card' }],
+    ['409 already_paid', 409, { error: 'already_paid' }, { status: 'already_paid' }],
+    ['409 hold_expired', 409, { error: 'hold_expired' }, { status: 'closed' }],
+    ['409 photographer_unavailable', 409, { error: 'photographer_unavailable' }, { status: 'photographer_unavailable' }],
+    ['422 on the method', 422, { error: 'validation_failed', fields: ['method'] }, { status: 'invalid', fields: ['method'] }],
+    ['400', 400, { error: 'invalid_request' }, { status: 'failed' }],
+  ])('maps a card %s as it maps MoMo', async (_label, status, body, expected) => {
+    stubFetch(() => json(body, status))
+    await expect(startPayment(REFERENCE, TOKEN, CARD)).resolves.toStrictEqual(expected)
+  })
+})
+
+describe('fetchPaymentProgress with a card try', () => {
+  it.each<[string | null | undefined, string]>([
+    ['4100000123', '?transactionId=4100000123'],
+    ['1'.repeat(20), `?transactionId=${'1'.repeat(20)}`],
+    ['1'.repeat(21), ''],
+    ['41x', ''],
+    ['4&status=successful', ''],
+    ['', ''],
+    [null, ''],
+    [undefined, ''],
+  ])('passes %j as %j', async (transactionId, query) => {
+    const mock = stubFetch(() => json(PROGRESS))
+    await fetchPaymentProgress(OUR_REF, undefined, transactionId)
+    expect(sentRequest(mock).url).toBe(`/api/payments/${OUR_REF}${query}`)
+  })
+})
+
+describe('payBody and transactionQuery', () => {
+  it('sends a card as its method alone and MoMo with its phone', () => {
+    expect(payBody({ method: 'card', phone: '0788' })).toStrictEqual({ method: 'card' })
+    expect(payBody({ method: 'momo_mtn', phone: '0788' })).toStrictEqual({ method: 'momo_mtn', phone: '0788' })
+  })
+
+  it('builds a query only for digits', () => {
+    expect(transactionQuery('12')).toBe('?transactionId=12')
+    expect(transactionQuery('1 2')).toBe('')
   })
 })

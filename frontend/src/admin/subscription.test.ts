@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, UnauthenticatedError } from '@/auth/api'
 import { readSession, saveSession } from '@/auth/session'
+import { cardConfig } from '@/test/card-fixtures'
 import { json, stubApi } from '@/test/fetch'
 import { OUR_REF, paidPeriod, paymentProgress, subscriptionPage, trialPeriod } from '@/test/subscription-fixtures'
 import { isSubscriptionStatus, lastPaidPeriod, paymentOutcome, subscriptionApi, yearlySaving } from './subscription'
@@ -47,8 +48,9 @@ describe('subscriptionApi.load', () => {
     [['momo_airtel'], ['momo_airtel']],
     // The checkout's order, whatever order the API lists them in.
     [['momo_airtel', 'momo_mtn'], ['momo_mtn', 'momo_airtel']],
-    // A card (deferred) and a method this app cannot label are dropped, not drawn blank.
-    [['card', 'momo_mtn', 'paypal'], ['momo_mtn']],
+    // A card is offered last since 2026-10-30; a method this app cannot label is dropped, not drawn blank.
+    [['card', 'momo_mtn', 'paypal'], ['momo_mtn', 'card']],
+    [['card'], ['card']],
   ])('offers %j as %j', async (methods, offered) => {
     stubApi(() => json({ ...subscriptionPage(), methods }))
 
@@ -122,7 +124,22 @@ describe('subscriptionApi.pay', () => {
     [
       '409 payment_in_progress',
       json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, 409),
-      { status: 'in_progress', ourRef: OUR_REF },
+      { status: 'in_progress', ourRef: OUR_REF, method: null },
+    ],
+    [
+      '409 payment_in_progress of a card',
+      json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, 409),
+      { status: 'in_progress', ourRef: OUR_REF, method: 'card' },
+    ],
+    [
+      '409 payment_in_progress of a MoMo prompt',
+      json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'momo_mtn' } }, 409),
+      { status: 'in_progress', ourRef: OUR_REF, method: 'momo_mtn' },
+    ],
+    [
+      '409 payment_in_progress of an unknown method',
+      json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'cheque' } }, 409),
+      { status: 'in_progress', ourRef: OUR_REF, method: null },
     ],
     ['409 payment_in_progress without a reference', json({ error: 'payment_in_progress' }, 409), { status: 'failed' }],
     ['an unknown 409', json({ error: 'something_else' }, 409), { status: 'failed' }],
@@ -176,7 +193,80 @@ describe('subscriptionApi.pay', () => {
   })
 })
 
+describe('subscriptionApi.pay by card (Flutterwave v3 Inline)', () => {
+  const CARD_PAY = { planInterval: 'monthly', method: 'card', phone: '0788123456' } as const
+  const payment = { ourRef: OUR_REF, status: 'pending', planInterval: 'monthly', amountRwf: 10_000 }
+
+  it('posts the plan and the method only: no phone, never an amount', async () => {
+    const api = stubApi(() => json({ payment, card: cardConfig(OUR_REF, { amount: 10_000 }) }, 201))
+
+    await subscriptionApi.pay(CARD_PAY)
+    expect(api.sent[0]?.body).toStrictEqual({ planInterval: 'monthly', method: 'card' })
+  })
+
+  it.each([201, 200])('answers a %i with the Inline config, unchanged, as a card payment to open', async (status) => {
+    const card = cardConfig(OUR_REF, { amount: 10_000 })
+    stubApi(() => json({ payment, card }, status))
+
+    await expect(subscriptionApi.pay(CARD_PAY)).resolves.toStrictEqual({
+      status: 'card',
+      ourRef: OUR_REF,
+      planInterval: 'monthly',
+      amountRwf: 10_000,
+      card,
+    })
+  })
+
+  it.each<[string, unknown]>([
+    ['no config at all', undefined],
+    ['a config for another payment', cardConfig('another-ref')],
+    ['another currency', cardConfig(OUR_REF, { currency: 'USD' })],
+    ['no amount', { ...cardConfig(OUR_REF), amount: undefined }],
+    ['a zero amount', cardConfig(OUR_REF, { amount: 0 })],
+    ['another payment type', { ...cardConfig(OUR_REF), payment_options: 'card,ussd' }],
+    ['no public key', cardConfig(OUR_REF, { public_key: '' })],
+    ['a return URL that is no web address', cardConfig(OUR_REF, { redirect_url: 'javascript:alert(1)' })],
+    ['no customer', { ...cardConfig(OUR_REF), customer: null }],
+    ['a string', 'FLWPUBK'],
+  ])('is a failure when the card answer carries %s', async (_label, card) => {
+    stubApi(() => json({ payment, ...(card === undefined ? {} : { card }) }, 201))
+
+    await expect(subscriptionApi.pay(CARD_PAY)).resolves.toStrictEqual({ status: 'failed' })
+  })
+
+  it('still reads a MoMo 201 without a config as started', async () => {
+    stubApi(() => json({ payment }, 201))
+
+    await expect(subscriptionApi.pay(PAY)).resolves.toMatchObject({ status: 'started', ourRef: OUR_REF })
+  })
+
+  it('answers a card 409 payment_in_progress by the existing rules', async () => {
+    stubApi(() => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, 409))
+
+    await expect(subscriptionApi.pay(CARD_PAY)).resolves.toStrictEqual({ status: 'in_progress', ourRef: OUR_REF, method: null })
+  })
+
+  it('names the waiting payment as a card when the 409 does', async () => {
+    stubApi(() => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, 409))
+
+    await expect(subscriptionApi.pay(CARD_PAY)).resolves.toStrictEqual({ status: 'in_progress', ourRef: OUR_REF, method: 'card' })
+  })
+})
+
 describe('subscriptionApi.payment', () => {
+  it("passes a card try's transaction id when it is digits, and nothing otherwise", async () => {
+    const api = stubApi(() => json(paymentProgress()))
+    const base = `/api/studio/subscription/payments/${OUR_REF}`
+
+    await subscriptionApi.payment(OUR_REF, '4100000123')
+    await subscriptionApi.payment(OUR_REF, '41x')
+    await subscriptionApi.payment(OUR_REF, '1'.repeat(21))
+    await subscriptionApi.payment(OUR_REF, '4100000123&status=successful')
+    await subscriptionApi.payment(OUR_REF, null)
+    expect(api.sent.map((sent) => sent.url)).toEqual([`${base}?transactionId=4100000123`, base, base, base, base])
+  })
+
+
   it('reads one payment by its reference, escaped, never from the cache', async () => {
     const progress = paymentProgress({ status: 'succeeded' }, { status: 'active' })
     const api = stubApi(() => json(progress))

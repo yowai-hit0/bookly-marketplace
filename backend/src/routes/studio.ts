@@ -16,6 +16,7 @@ import { studioPayoutsRouter } from './studio-payouts.js';
 import { studioProfileRouter } from './studio-profile.js';
 import { settingsRouter } from './studio-settings.js';
 import { studioSetupRouter } from './studio-setup.js';
+import type { PaymentCheck } from '../payments/card-check.js';
 import { studioSubscriptionRouter } from './studio-subscription.js';
 import { studioMe } from '../subscriptions/views.js';
 import { parseOrReject } from './validation.js';
@@ -39,6 +40,8 @@ export type StudioRouterDeps = AuthDeps & {
   paymentRouting?: PaymentRouting;
   /** The provider call's deadline; injectable for tests. */
   providerTimeoutMs?: number;
+  /** Asks Flutterwave about a pending card payment as the subscription page polls (payments/card-check.ts). */
+  checkPayment?: PaymentCheck;
 };
 
 /**
@@ -121,6 +124,7 @@ export function studioRouter(deps: StudioRouterDeps): Router {
       ...deps,
       ...(deps.paymentRouting === undefined ? {} : { routing: deps.paymentRouting }),
       ...(deps.providerTimeoutMs === undefined ? {} : { providerTimeoutMs: deps.providerTimeoutMs }),
+      ...(deps.checkPayment === undefined ? {} : { checkPayment: deps.checkPayment }),
     }),
   );
 

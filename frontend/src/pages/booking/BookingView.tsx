@@ -3,6 +3,7 @@ import {
   CalendarDays,
   Camera,
   CircleAlert,
+  CreditCard,
   ExternalLink,
   Hash,
   Images,
@@ -20,16 +21,19 @@ import { Link, useNavigate } from 'react-router'
 import { kigaliDateOf } from '@/admin/calendar-dates'
 import type { CancelBookingResult, ClientBooking } from '@/catalogue/booking-access'
 import { isPlausiblePhone } from '@/catalogue/bookings'
-import { type PaymentMethod, type StartPaymentResult, needsPhoneFor } from '@/catalogue/payments'
+import { type PayRequest, type PaymentMethod, type StartPaymentResult, needsPhoneFor } from '@/catalogue/payments'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { StatusBadge } from '@/components/ui/status-badge'
+import { cardNavigationState, rememberCardPayment } from '@/lib/card-payment'
 import { deadlineParts, deadlinePassed, termsSentence } from '@/lib/cancellation'
 import { formatDate, formatMoney, formatTime } from '@/lib/format'
 import { safeHttpsUrl } from '@/lib/safe-url'
+import { useCardCheckout } from '@/lib/use-card-checkout'
 import { cn } from '@/lib/utils'
 import { data, eyebrow, pageTitle, panel, panelTitle } from '@/pages/client/classes'
 import { FactGrid, FactTile } from '@/pages/client/FactGrid'
+import { CardNotice } from '@/pages/checkout/CardNotice'
 import { PaymentFields } from '@/pages/checkout/PaymentFields'
 import { StageLegend } from '@/pages/StageLegend'
 import { Notices } from './Notices'
@@ -55,8 +59,15 @@ import { Notices } from './Notices'
  */
 export type BookingActions = {
   cancel: () => Promise<CancelBookingResult>
-  pay: (request: { method: PaymentMethod; phone: string }) => Promise<StartPaymentResult>
+  pay: (request: PayRequest) => Promise<StartPaymentResult>
   paymentPath: (ourRef: string) => string
+  /**
+   * The guest page's access token, kept in this tab under a card payment's
+   * `ourRef` before its modal opens, so the token-free card return page
+   * (`/payments/:ourRef`) can link back to the booking. The dashboard has none:
+   * its return page is behind the session.
+   */
+  cardReturnToken?: string
 }
 
 type ViewProps = {
@@ -327,32 +338,60 @@ function SessionFee({ actions, booking, methods, onMissing, onReload }: SessionF
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<'rejected' | 'unavailable' | 'failed' | null>(null)
   const phoneRef = useRef<HTMLInputElement>(null)
+  const payRef = useRef<HTMLButtonElement>(null)
+  const card = useCardCheckout()
   const fee = booking.sessionFee === null ? 0 : booking.sessionFee.outstandingRwf
   const amount = formatMoney(fee)
   const phoneId = `${idPrefix}phone`
   const waiting = booking.sessionFee?.waitingPayment ?? null
+  // Only an explicit `card` is a card checkout to reopen; no method reads as a phone prompt.
+  const waitingCard = waiting !== null && waiting.method === 'card' && methods.includes('card')
+  const busy = submitting || card.busy
+
+  // Closing the modal, or failing to load it, hands the page back: focus returns to Pay, with the words below it.
+  useEffect(() => {
+    if (card.phase === 'closed' || card.phase === 'loadFailed') payRef.current?.focus()
+  }, [card.phase])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (submitting || method === null) return
-    setError(null)
+    if (busy || method === null) return
 
     const phone = String(new FormData(event.currentTarget).get('phone') ?? '').trim()
     const needsPhone = needsPhoneFor(method)
     if (needsPhone && !isPlausiblePhone(phone)) {
+      setError(null)
+      card.reset()
       setPhoneInvalid(true)
       phoneRef.current?.focus()
       return
     }
     setPhoneInvalid(false)
+    await pay({ method, phone: needsPhone ? phone : '' })
+  }
 
+  async function pay(request: PayRequest) {
+    if (busy) return
+    setError(null)
+    card.reset()
     setSubmitting(true)
-    const result = await actions.pay({ method, phone: needsPhone ? phone : '' })
+    const result = await actions.pay(request)
     setSubmitting(false)
 
     switch (result.status) {
+      case 'card':
+        // Before the modal, so a 3-D Secure redirect's full page load still knows the way back.
+        rememberCardPayment(result.ourRef, actions.cardReturnToken)
+        void card.open(result.card, (transactionId) => {
+          void navigate(actions.paymentPath(result.ourRef), { state: cardNavigationState(transactionId) })
+        })
+        return
       case 'started':
+        void navigate(actions.paymentPath(result.ourRef))
+        return
       case 'in_progress':
+        // A card checkout still open is followed as a card: its progress page speaks of a card, not a phone.
+        if (result.method === 'card') rememberCardPayment(result.ourRef, actions.cardReturnToken)
         void navigate(actions.paymentPath(result.ourRef))
         return
       case 'not_found':
@@ -364,7 +403,7 @@ function SessionFee({ actions, booking, methods, onMissing, onReload }: SessionF
         return
       case 'invalid':
         // Only a field on screen can be marked; anything else must still be said.
-        if (needsPhone && result.fields.includes('phone')) {
+        if (needsPhoneFor(request.method) && result.fields.includes('phone')) {
           setPhoneInvalid(true)
           phoneRef.current?.focus()
         } else {
@@ -388,7 +427,28 @@ function SessionFee({ actions, booking, methods, onMissing, onReload }: SessionF
         <p className="text-sm">{t('booking:sessionFee.intro', { amount })}</p>
       </div>
 
-      {waiting !== null && (
+      {waiting !== null && waitingCard && (
+        <Callout
+          variant="console"
+          tone="info"
+          icon={CreditCard}
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void pay({ method: 'card', phone: '' })}
+              aria-disabled={busy}
+              data-card-reopen=""
+            >
+              {busy ? t('checkout:card.reopening') : t('checkout:card.reopen')}
+            </Button>
+          }
+        >
+          <p>{t('checkout:card.waitingText')}</p>
+        </Callout>
+      )}
+      {waiting !== null && !waitingCard && (
         <Callout variant="console" tone="info" icon={Smartphone}>
           <p>
             {t('checkout:waiting.text')}{' '}
@@ -418,20 +478,22 @@ function SessionFee({ actions, booking, methods, onMissing, onReload }: SessionF
             phoneInvalid={phoneInvalid}
           />
           <Button
+            ref={payRef}
             type="submit"
             size="lg"
             className="w-full sm:w-auto sm:self-start"
             // Not `disabled`: that would drop keyboard focus mid-submit.
-            aria-disabled={submitting}
-            aria-busy={submitting}
+            aria-disabled={busy}
+            aria-busy={busy}
           >
-            {submitting ? t('checkout:paying') : t('booking:sessionFee.pay', { amount })}
+            {submitting ? t('checkout:paying') : card.busy ? t('checkout:card.opening') : t('booking:sessionFee.pay', { amount })}
           </Button>
           {error !== null && (
             <Callout variant="console" tone="destructive" icon={CircleAlert} role="alert">
               <p>{t(`checkout:errors.${error}`)}</p>
             </Callout>
           )}
+          <CardNotice phase={card.phase} />
         </form>
       )}
     </section>

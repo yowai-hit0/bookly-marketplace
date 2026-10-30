@@ -1,11 +1,13 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@/i18n'
 import { forgetAccountMe } from '@/auth/account'
 import { saveSession } from '@/auth/session'
+import { FLUTTERWAVE_INLINE_SRC, resetFlutterwaveInlineForTests } from '@/lib/flutterwave-inline'
 import { routes } from '@/routes'
+import { cardConfig, fakeFlutterwave, removeFakeFlutterwave } from '@/test/card-fixtures'
 import { CHECKOUT_PATH, CLIENT_BOOKING, OUR_REF, REFERENCE, SESSION, USER, detail } from '@/test/account-fixtures'
 import { type Sent, json, stubApi } from '@/test/fetch'
 
@@ -28,18 +30,21 @@ type Answers = {
   booking?: (sent: Sent) => Response
   cancel?: (sent: Sent) => Response
   pay?: (sent: Sent) => Response
+  /** The methods on offer; MTN MoMo alone unless a test says otherwise. */
+  methods?: string[]
 }
 
 function api(answers: Answers = {}) {
   return stubApi((sent) => {
     if (sent.url === '/api/account/me') return json({ user: USER })
-    if (sent.url === '/api/payment-methods') return json({ methods: ['momo_mtn'] })
+    if (sent.url === '/api/payment-methods') return json({ methods: answers.methods ?? ['momo_mtn'] })
     if (sent.method === 'GET' && sent.url === API) return answers.booking?.(sent) ?? json(detail())
     if (sent.method === 'POST' && sent.url === `${API}/cancel`) {
       return answers.cancel?.(sent) ?? json(detail({ status: 'cancelled_by_client', stage: 'cancelled_by_client', canCancel: false, cancelledAt: '2026-10-01T06:00:00.000Z', sessionFee: null }))
     }
     if (sent.method === 'POST' && sent.url === `${API}/payments`) return answers.pay?.(sent) ?? json({ payment: { ourRef: OUR_REF, status: 'pending' } }, 201)
-    if (sent.url === `/api/payments/${OUR_REF}`) {
+    // With or without a card try's `?transactionId=`.
+    if (sent.url === `/api/payments/${OUR_REF}` || sent.url.startsWith(`/api/payments/${OUR_REF}?`)) {
       return json({
         payment: { status: 'pending', amountRwf: 30_000, failure: null },
         booking: { reference: REFERENCE, status: 'confirmed', serviceName: 'Portraits', packageName: 'Standard', startsAt: CLIENT_BOOKING.startsAt, endsAt: CLIENT_BOOKING.endsAt },
@@ -139,7 +144,7 @@ describe('one booking in the dashboard', () => {
 
   it('an attempt already waiting is followed instead of a new one', async () => {
     saveSession('account', SESSION)
-    api({ pay: () => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF } }, 409) })
+    api({ pay: () => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'momo_mtn' } }, 409) })
     const { router, main } = await loaded()
     const user = userEvent.setup({ delay: null })
     await user.type(main.getByRole('textbox', { name: 'Mobile Money number' }), '0788123456')
@@ -269,5 +274,80 @@ describe('one booking in the dashboard', () => {
     const router = renderAt()
     expect(router.state.location.pathname).toBe('/account/login')
     expect(new URLSearchParams(router.state.location.search).get('next')).toBe(PATH)
+  })
+})
+
+// --- The session fee by card (Flutterwave v3 Inline, "Cards as built") ----------------------------
+
+describe('paying the session fee by card from the account', () => {
+  const CARD = cardConfig(OUR_REF, { amount: 30_000, redirect_url: `https://bookly.example/account/bookings/${REFERENCE}/payments/${OUR_REF}` })
+
+  beforeEach(() => {
+    resetFlutterwaveInlineForTests()
+  })
+
+  afterEach(() => {
+    removeFakeFlutterwave()
+    for (const script of document.querySelectorAll(`script[src="${FLUTTERWAVE_INLINE_SRC}"]`)) script.remove()
+  })
+
+  it('opens the modal with the config unchanged and, on its callback, follows the payment on the account progress page', async () => {
+    saveSession('account', SESSION)
+    const flutterwave = fakeFlutterwave()
+    const stub = api({ methods: ['momo_mtn', 'card'], pay: () => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: CARD }, 201) })
+    const { router, main } = await loaded()
+    const user = userEvent.setup({ delay: null })
+
+    await user.click(main.getByRole('radio', { name: 'Card' }))
+    expect(main.queryByRole('textbox', { name: 'Mobile Money number' })).toBeNull()
+    await user.click(main.getByRole('button', { name: 'Pay 30,000 RWF' }))
+
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+    expect(flutterwave.opened[0]?.config).toStrictEqual(CARD)
+    expect(stub.sent.filter((call) => call.method === 'POST').map((call) => call.body)).toEqual([{ method: 'card' }])
+    // No access token on the account page: nothing kept but the card mark.
+    expect(Object.keys(sessionStorage).filter((key) => key.startsWith('bookly.cardBookingToken.'))).toEqual([])
+
+    act(() => {
+      flutterwave.pay(31)
+    })
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/payments/${OUR_REF}`))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Confirming your card payment' })).toBeInTheDocument()
+    const progress = within(screen.getByRole('main'))
+    expect(progress.getByRole('link', { name: 'Back to payment' })).toHaveAttribute('href', PATH)
+    expect(progress.getByRole('link', { name: 'Back to your booking' })).toHaveAttribute('href', PATH)
+    expect(stub.sent.map((call) => call.url)).toContain(`/api/payments/${OUR_REF}?transactionId=31`)
+  })
+
+  it('marks a waiting payment as a card, for its progress page, when the 409 names a card', async () => {
+    saveSession('account', SESSION)
+    api({ methods: ['momo_mtn', 'card'], pay: () => json({ error: 'payment_in_progress', payment: { ourRef: OUR_REF, method: 'card' } }, 409) })
+    const { router, main } = await loaded()
+    const user = userEvent.setup({ delay: null })
+
+    await user.type(main.getByRole('textbox', { name: 'Mobile Money number' }), '0788123456')
+    await user.click(main.getByRole('button', { name: 'Pay 30,000 RWF' }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`${PATH}/payments/${OUR_REF}`))
+    expect(sessionStorage.getItem(`bookly.cardPayment.${OUR_REF}`)).toBe('1')
+    expect(Object.keys(sessionStorage).filter((key) => key.startsWith('bookly.cardBookingToken.'))).toEqual([])
+  })
+
+  it('on onclose stays on the booking and says nothing was charged', async () => {
+    saveSession('account', SESSION)
+    const flutterwave = fakeFlutterwave()
+    api({ methods: ['momo_mtn', 'card'], pay: () => json({ payment: { ourRef: OUR_REF, status: 'pending' }, card: CARD }, 200) })
+    const { router, main } = await loaded()
+    const user = userEvent.setup({ delay: null })
+
+    await user.click(main.getByRole('radio', { name: 'Card' }))
+    await user.click(main.getByRole('button', { name: 'Pay 30,000 RWF' }))
+    await waitFor(() => expect(flutterwave.opened).toHaveLength(1))
+    act(() => {
+      flutterwave.dismiss()
+    })
+
+    expect(await main.findByRole('status')).toHaveTextContent('The card window was closed.')
+    expect(router.state.location.pathname).toBe(PATH)
   })
 })

@@ -28,8 +28,11 @@ payments:
     tags: [Studio subscription]
     summary: Pay for a month or a year
     description: |
-      Prompts the phone by Mobile Money for the platform's price of the chosen
-      plan. The amount is the server's: any amount in the body is ignored (T5.3).
+      Prompts the phone by Mobile Money, or answers the Flutterwave Inline
+      config for a card (`card`, returning to `/studio/subscription/payments/{ourRef}`),
+      for the platform's price of the chosen plan. The amount is the server's:
+      any amount in the body is ignored (T5.3). Paying the SAME plan by card
+      again while its checkout is open answers `200` with the same one.
       When the payment succeeds (webhook or status lookup), a period of the plan
       is added on top of the time already covered -- starting at the later of now
       and the current period's end -- and a receipt is emailed (R5.3). Every
@@ -46,10 +49,15 @@ payments:
           schema: { $ref: ../components/subscriptions.yaml#/schemas/SubscriptionPayRequest }
     responses:
       '201':
-        description: The phone is prompted. Poll the payment's `ourRef`.
+        description: The phone is prompted (for a card, open `card`). Poll the payment's `ourRef`.
         content:
           application/json:
             schema: { $ref: ../components/subscriptions.yaml#/schemas/SubscriptionPaymentStarted }
+      '200':
+        description: This plan's card checkout is still open; reopen it.
+        content:
+          application/json:
+            schema: { $ref: ../components/subscriptions.yaml#/schemas/SubscriptionCardPaymentOpen }
       '400':
         $ref: ../components/common.yaml#/responses/BadRequest
       '401':
@@ -84,9 +92,12 @@ payment:
     description: |
       For the page to poll after a prompt: the payment, and the subscription as it
       now stands. Another photographer's payment, a booking's payment and an
-      unknown reference are all a 404.
+      unknown reference are all a 404. A pending card payment of the
+      photographer's own is first verified with Flutterwave, throttled per
+      payment, as on `GET /api/payments/{ourRef}`.
     parameters:
       - $ref: ../components/common.yaml#/parameters/OurRef
+      - $ref: ../components/common.yaml#/parameters/TransactionId
     responses:
       '200':
         description: The payment and the subscription.

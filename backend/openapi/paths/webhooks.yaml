@@ -115,6 +115,59 @@ flutterwave:
       '500':
         $ref: '#/_responses/failed'
 
+flutterwaveCheckout:
+  post:
+    operationId: flutterwaveCheckoutWebhook
+    tags: [Webhooks]
+    summary: Flutterwave v3 webhook (cards)
+    description: |
+      Card payments through Flutterwave v3 Inline (2026-10-30). Verified by the
+      `verif-hash` header, the dashboard's secret hash itself, compared in
+      constant time; missing or wrong, the delivery is stored unverified,
+      applied to nothing, and answered 401.
+
+      The hash is a static shared secret, not an HMAC of the body, so a
+      verified delivery is only a CLAIM: it is stored, never applied, and the
+      transaction it names is asked of Flutterwave's API
+      (`GET /v3/transactions/{id}/verify`). Only that answer is applied, through
+      the same store-first, deduplicated, forward-only path, settling a payment
+      only when its status is `successful` and its `tx_ref`, `amount` and
+      `currency` (RWF) match exactly. A claimed declined try or pending report
+      is not asked about: it would apply nothing (a declined card leaves the
+      payment open for the next one in the same modal). The API unreachable is
+      a 500, so Flutterwave retries.
+    security: []
+    parameters:
+      - name: verif-hash
+        in: header
+        required: true
+        description: The dashboard's secret hash (`FLUTTERWAVE_V3_WEBHOOK_HASH`).
+        schema: { type: string }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: A Flutterwave v3 charge event.
+            properties:
+              event: { type: string, examples: [charge.completed] }
+              data:
+                type: object
+                properties:
+                  id: { type: integer }
+                  tx_ref: { type: string }
+                  amount: { type: number }
+                  currency: { type: string }
+                  status: { type: string, examples: [successful, failed, pending] }
+    responses:
+      '200':
+        $ref: '#/_responses/received'
+      '401':
+        $ref: '#/_responses/invalidSignature'
+      '500':
+        $ref: '#/_responses/failed'
+
 _responses:
   received:
     description: The delivery is on record, applied or ignored.

@@ -8,6 +8,7 @@
 User-agent: *
 Disallow: /checkout/
 Disallow: /booking/
+Disallow: /payments/
 Disallow: /email-confirm/
 Disallow: /my-booking
 Disallow: /account

@@ -11,10 +11,11 @@ import { toPublicUser } from '../auth/public-user.js';
 import { kigaliDateOf } from '../availability/engine.js';
 import { cancelLoaded } from '../booking/cancel.js';
 import { normalizePhone } from '../booking/phone.js';
+import { cardConfig, cardReturnPaths, cardTitles } from '../payments/card-checkout.js';
 import { startSessionFeePayment } from '../payments/initiate.js';
-import type { PaymentMethod } from '../payments/provider.js';
 import type { PaymentRouting } from '../payments/routing.js';
 import { MAX_PASSWORD_LENGTH, MIN_NEW_PASSWORD_LENGTH, sendSignedIn, signupEmail } from './area-auth.js';
+import { paymentBodyParser } from './payment-body.js';
 import { parseOrReject } from './validation.js';
 
 /**
@@ -28,9 +29,11 @@ import { parseOrReject } from './validation.js';
  *   GET    /bookings/:reference                 200 { booking, photographer, checkoutPath } | 404
  *   POST   /bookings/:reference/cancel          200 { booking, photographer, checkoutPath } | 404
  *                                               409 not_cancellable { booking, photographer, checkoutPath }
- *   POST   /bookings/:reference/payments        { method, phone }   (when payments are configured)
+ *   POST   /bookings/:reference/payments        { method, phone }   (when payments are configured; no phone for card)
  *                                               201 { payment: { ourRef, status } } | 404 | 422
- *                                               409 nothing_to_pay { booking, ... } | 409 payment_in_progress { payment }
+ *                                               201 { payment, card } a card: the Flutterwave Inline config
+ *                                               200 { payment, card } its card checkout is still open
+ *                                               409 nothing_to_pay { booking, ... } | 409 payment_in_progress { payment: { ourRef, method } }
  *                                               502 payment_not_started { reason, payment }
  *   GET    /payments?page                       200 { payments, total, page, pageSize, pageCount }
  *   GET    /payments/:ourRef                    200 { receipt } | 404 | 409 no_receipt { payment: { status } }
@@ -171,14 +174,7 @@ export function accountDashboardRouter(deps: AccountDashboardDeps): Router {
 
   const payments = deps.payments;
   if (payments !== undefined) {
-    const paymentBody = z.object({
-      method: z.string().refine((method) => payments.routing.providerFor(method) !== undefined, 'Method not available'),
-      phone: z
-        .string()
-        .max(PHONE_MAX_LENGTH)
-        .refine((value) => normalizePhone(value) !== null, 'Invalid phone number')
-        .transform((value) => normalizePhone(value) ?? value),
-    });
+    const parseBody = paymentBodyParser(payments.routing, {});
 
     // The session fee, as the guest booking page pays it (routes/client-booking.ts).
     router.post('/bookings/:reference/payments', async (req, res) => {
@@ -187,21 +183,33 @@ export function accountDashboardRouter(deps: AccountDashboardDeps): Router {
         notFound(res);
         return;
       }
-      const body = parseOrReject(paymentBody, req.body, res);
+      const body = parseBody(req.body, res);
       if (body === undefined) return;
       const provider = payments.routing.providerFor(body.method);
       if (provider === undefined) throw new Error('A validated method has no provider');
 
       const result = await startSessionFeePayment(
         { prisma, provider, ...(payments.providerTimeoutMs === undefined ? {} : { timeoutMs: payments.providerTimeoutMs }) },
-        { bookingId: booking.id, reference: booking.reference, method: body.method as PaymentMethod, payerPhone: body.phone },
+        { bookingId: booking.id, reference: booking.reference, method: body.method, payerPhone: body.phone },
       );
+      const title = cardTitles.sessionFee(booking.reference);
       switch (result.status) {
         case 'started':
-          res.status(201).json({ payment: { ourRef: result.ourRef, status: 'pending' } });
+          res.status(201).json({
+            payment: { ourRef: result.ourRef, status: 'pending' },
+            ...(result.card === undefined
+              ? {}
+              : { card: cardConfig(provider, result.ourRef, result.card, title, cardReturnPaths.accountSessionFee(booking.reference, result.ourRef)) }),
+          });
+          return;
+        case 'card_in_progress':
+          res.status(200).json({
+            payment: { ourRef: result.ourRef, status: 'pending' },
+            card: cardConfig(provider, result.ourRef, result.card, title, cardReturnPaths.accountSessionFee(booking.reference, result.ourRef)),
+          });
           return;
         case 'in_progress':
-          res.status(409).json({ error: 'payment_in_progress', payment: { ourRef: result.ourRef } });
+          res.status(409).json({ error: 'payment_in_progress', payment: { ourRef: result.ourRef, method: result.method } });
           return;
         case 'provider_failed':
           res.status(502).json({ error: 'payment_not_started', reason: result.outcome, payment: { ourRef: result.ourRef, status: 'failed' } });

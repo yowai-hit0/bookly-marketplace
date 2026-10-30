@@ -1,10 +1,11 @@
-import { CircleCheck, Clock, Hourglass, Lock, Smartphone, TriangleAlert, Undo2, Unlink, type LucideIcon } from 'lucide-react'
+import { CircleCheck, Clock, CreditCard, Hourglass, Lock, Smartphone, TriangleAlert, Undo2, Unlink, type LucideIcon } from 'lucide-react'
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router'
 import { isPlausiblePhone } from '@/catalogue/bookings'
 import {
   type Checkout,
+  type PayRequest,
   type PaymentMethod,
   fetchCheckout,
   fetchPaymentMethods,
@@ -15,11 +16,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { StatusIcon } from '@/components/ui/status-icon'
+import { cardNavigationState, rememberCardPayment } from '@/lib/card-payment'
 import { termsSentence } from '@/lib/cancellation'
 import { formatMoney, formatTime } from '@/lib/format'
+import { useCardCheckout } from '@/lib/use-card-checkout'
 import { cn } from '@/lib/utils'
 import { pageTitle, pageY, statusTitle } from '@/pages/client/classes'
 import { BookingFacts } from './BookingFacts'
+import { CardNotice } from './CardNotice'
 import { PaymentFields } from './PaymentFields'
 
 /**
@@ -32,6 +36,13 @@ import { PaymentFields } from './PaymentFields'
  * not disabled, absent. A photographer who can no longer be booked is said so
  * at the button, and nothing is charged (R3.4). Starting a payment moves to its progress page, which waits
  * for the provider; nothing here ever says a payment succeeded.
+ *
+ * A card (Flutterwave v3 Inline, "Cards as built") asks for no number: the API
+ * answers the Inline config, and Flutterwave's modal opens on this page
+ * (`useCardCheckout`). Its callback moves to the progress page with the try's
+ * transaction id; closing it stays here and says nothing was charged. A card
+ * checkout still open (`waitingPayment.method: 'card'`) is offered again: the
+ * API answers the same payment and config.
  *
  * Addressed by the booking's reference and checkout token, so a reload lands
  * back here with nothing lost.
@@ -133,6 +144,12 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<SubmitError | null>(null)
   const phoneRef = useRef<HTMLInputElement>(null)
+  const payRef = useRef<HTMLButtonElement>(null)
+  const card = useCardCheckout()
+  // Closing the modal, or failing to load it, hands the page back: focus returns to Pay, with the words below it.
+  useEffect(() => {
+    if (card.phase === 'closed' || card.phase === 'loadFailed') payRef.current?.focus()
+  }, [card.phase])
 
   if (checkout.state === 'paid') {
     return <Notice icon={CircleCheck} tone="positive" title={t('checkout:paid.title')} body={t('checkout:paid.body')} />
@@ -153,27 +170,48 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
   const fee = formatMoney(checkout.bookingFeeRwf)
   const phoneId = `${idPrefix}phone`
   const needsPhone = needsPhoneFor(method)
+  const busy = submitting || card.busy
+  const waiting = checkout.waitingPayment
+  const waitingCard = waiting !== null && waiting.method === 'card' && methods.includes('card')
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (submitting || method === null) return
-    setError(null)
+    if (busy || method === null) return
 
     const phone = String(new FormData(event.currentTarget).get('phone') ?? '').trim()
     if (needsPhone && !isPlausiblePhone(phone)) {
+      setError(null)
+      card.reset()
       setPhoneInvalid(true)
       phoneRef.current?.focus()
       return
     }
     setPhoneInvalid(false)
+    await pay({ method, phone: needsPhone ? phone : '' })
+  }
 
+  async function pay(request: PayRequest) {
+    if (busy) return
+    setError(null)
+    card.reset()
     setSubmitting(true)
-    const result = await startPayment(reference, token, { method, phone: needsPhone ? phone : '' })
+    const result = await startPayment(reference, token, request)
     setSubmitting(false)
 
     switch (result.status) {
+      case 'card':
+        // Before the modal: a 3-D Secure redirect reloads the progress page, which then still knows it is a card.
+        rememberCardPayment(result.ourRef)
+        void card.open(result.card, (transactionId) => {
+          void navigate(paymentPath(reference, token, result.ourRef), { state: cardNavigationState(transactionId) })
+        })
+        return
       case 'started':
+        void navigate(paymentPath(reference, token, result.ourRef))
+        return
       case 'in_progress':
+        // A card checkout still open is followed as a card: its progress page speaks of a card, not a phone.
+        if (result.method === 'card') rememberCardPayment(result.ourRef)
         void navigate(paymentPath(reference, token, result.ourRef))
         return
       case 'already_paid':
@@ -188,7 +226,7 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
         return
       case 'invalid':
         // Only a field on screen can be marked; anything else must still be said.
-        if (needsPhone && result.fields.includes('phone')) {
+        if (needsPhoneFor(request.method) && result.fields.includes('phone')) {
           setPhoneInvalid(true)
           phoneRef.current?.focus()
         } else {
@@ -240,14 +278,36 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
           </Callout>
         )}
 
-        {checkout.waitingPayment !== null && (
+        {waiting !== null && waitingCard && (
+          // A card checkout still open: reopening asks the API again, which answers the same payment and config.
+          <Callout
+            variant="console"
+            tone="info"
+            icon={CreditCard}
+            action={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void pay({ method: 'card', phone: '' })}
+                aria-disabled={busy}
+                data-card-reopen=""
+              >
+                {busy ? t('checkout:card.reopening') : t('checkout:card.reopen')}
+              </Button>
+            }
+          >
+            <p>{t('checkout:card.waitingText')}</p>
+          </Callout>
+        )}
+        {waiting !== null && !waitingCard && (
           <Callout
             variant="console"
             tone="info"
             icon={Smartphone}
             action={
               <Link
-                to={paymentPath(reference, token, checkout.waitingPayment.ourRef)}
+                to={paymentPath(reference, token, waiting.ourRef)}
                 className="text-console-link hover:text-console-link-hover rounded-sm underline-offset-4 hover:underline"
               >
                 {t('checkout:waiting.link')}
@@ -275,19 +335,21 @@ function CheckoutView({ reference, token, checkout, methods, onStale, onMissing 
           />
 
           <Button
+            ref={payRef}
             type="submit"
             className="h-12 w-full sm:w-auto sm:self-start"
             // Not `disabled`: that would drop keyboard focus mid-submit.
-            aria-disabled={submitting}
-            aria-busy={submitting}
+            aria-disabled={busy}
+            aria-busy={busy}
           >
-            {submitting ? t('checkout:paying') : t('checkout:pay', { amount: fee })}
+            {submitting ? t('checkout:paying') : card.busy ? t('checkout:card.opening') : t('checkout:pay', { amount: fee })}
           </Button>
           {error !== null && (
             <p className="text-destructive text-sm" role="alert">
               {t(`checkout:errors.${error}`)}
             </p>
           )}
+          <CardNotice phase={card.phase} />
         </form>
       )}
     </section>

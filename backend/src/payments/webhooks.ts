@@ -12,6 +12,7 @@ import { recordEarning, recordRefundDue } from '../payouts/ledger.js';
 import { type SettlingSubscriptionPayment, addPaidPeriod } from '../subscriptions/payments.js';
 import { PLAN_INTERVALS, type PlanInterval } from '../subscriptions/plan.js';
 import { SUPERSEDED_BY_CASH } from './cash.js';
+import { CARD_SESSION_EXPIRED } from './flutterwave-checkout.js';
 import {
   type PaymentProvider,
   type PaymentProviderId,
@@ -72,6 +73,13 @@ import {
  * (subscriptions/payments.ts `addPaidPeriod`). Every success does -- a late
  * one, a duplicate, a revived one -- and none is ever `refund_due`, overpaid or
  * earned (user decision, Phase 5).
+ *
+ * Cards (Flutterwave v3 Inline, 2026-10-30) prove a webhook only with a static
+ * shared secret, not an HMAC of the body, so their delivery is a CLAIM: stored
+ * first, never applied, and the transaction it names is asked of Flutterwave's
+ * API (`PaymentProvider.reverify`); only that answer goes down the path above,
+ * exactly as a reconciler's lookup does. A card FAILED report is one declined
+ * try in a modal that stays open (`attemptOnly`): recorded, never applied.
  */
 
 export type WebhookDeps = {
@@ -117,12 +125,84 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** One inbound HTTP delivery: verified and read by its provider, then recorded and applied. */
 export async function receiveWebhook(deps: WebhookDeps, provider: PaymentProvider, delivery: WebhookDelivery): Promise<WebhookOutcome> {
-  return recordEvent(deps, provider.id, {
-    signatureValid: safely(() => provider.verifyWebhook(delivery), false),
-    event: safely(() => provider.parseWebhook(delivery), null),
-    payload: payloadOf(delivery.rawBody),
+  const signatureValid = safely(() => provider.verifyWebhook(delivery), false);
+  const event = safely(() => provider.parseWebhook(delivery), null);
+  const payload = payloadOf(delivery.rawBody);
+  // A forged or unreadable delivery is stored as any other provider's is.
+  if (provider.reverify === undefined || !signatureValid || event === null) {
+    return recordEvent(deps, provider.id, { signatureValid, event, payload, expectedCurrency: provider.currency });
+  }
+  return reverifyClaim(deps, provider, provider.reverify.bind(provider), event, payload);
+}
+
+/** Far below the 60 s Flutterwave waits for our answer (developer.flutterwave.com/v3.0/docs/webhooks). */
+const REVERIFY_TIMEOUT_MS = 15_000;
+
+/**
+ * A verified delivery from a provider whose signature is a static secret
+ * (Flutterwave v3's `verif-hash`): whoever holds the secret could say anything,
+ * so the delivery is only a claim.
+ *
+ *   1. Stored first, under an id of its own, `ignored`: the claim is evidence,
+ *      never the result, and a replay of it is stored again rather than
+ *      deduplicated against an event it never was.
+ *   2. A claimed failure or a pending report applies nothing anyway (a card's
+ *      failure is one try, `attemptOnly`), so it is not asked about.
+ *   3. Anything else is asked of the provider's API. What the API answers is
+ *      what goes down the ordinary path (`recordEvent`: store, dedupe, apply
+ *      forward-only, amount and currency checked), verified because we asked.
+ *      The API naming another `tx_ref` than the claim did applies nothing.
+ *   4. The API unreachable: a failure, so the route answers 500 and the
+ *      provider retries; the reconciler would settle it anyway.
+ *
+ * The claim row's note ends up saying which: `reverified_as:<row>`,
+ * `claim_not_asked`, `claim_unknown_to_provider`, `claim_mismatch` or `reverify_failed`.
+ */
+async function reverifyClaim(
+  deps: WebhookDeps,
+  provider: PaymentProvider,
+  reverify: NonNullable<PaymentProvider['reverify']>,
+  claim: ProviderEvent,
+  payload: unknown,
+): Promise<WebhookOutcome> {
+  const log = deps.log ?? defaultLog;
+  const claimRowId = await insertSettled(deps.prisma, provider.id, `claim:${randomUUID()}`, claim, true, storableJson(payload), 'claim_received');
+  const note = async (text: string) => {
+    await deps.prisma.webhookEvent.update({ where: { id: claimRowId }, data: { processingError: storableText(text, PROCESSING_ERROR_MAX_LENGTH) } });
+  };
+
+  if (claim.reportedStatus === 'failed' || claim.reportedStatus === 'pending') {
+    await note('claim_not_asked');
+    return { status: 'ignored', eventRowId: claimRowId, note: claim.reportedStatus === 'failed' && claim.attemptOnly === true ? 'attempt_failed' : 'no_transition' };
+  }
+
+  let verified: { event: ProviderEvent; payload: unknown } | null;
+  try {
+    verified = await reverify(claim, AbortSignal.timeout(REVERIFY_TIMEOUT_MS));
+  } catch (error) {
+    await note('reverify_failed');
+    log({ level: 'error', event: 'webhook_reverify_failed', provider: provider.id, eventRowId: claimRowId, message: error instanceof Error ? error.message : String(error) });
+    return { status: 'failed', eventRowId: claimRowId, note: 'reverify_failed' };
+  }
+  if (verified === null) {
+    await note('claim_unknown_to_provider');
+    log({ level: 'warn', event: 'webhook_claim_unknown_to_provider', provider: provider.id, eventRowId: claimRowId });
+    return { status: 'ignored', eventRowId: claimRowId, note: 'claim_unknown_to_provider' };
+  }
+  if (claim.ourRef !== null && verified.event.ourRef !== claim.ourRef) {
+    await note('claim_mismatch');
+    log({ level: 'error', event: 'webhook_claim_mismatch', provider: provider.id, eventRowId: claimRowId });
+    return { status: 'ignored', eventRowId: claimRowId, note: 'claim_mismatch' };
+  }
+
+  const outcome = await recordEvent(deps, provider.id, {
+    signatureValid: true,
+    event: verified.event,
+    payload: verified.payload,
     expectedCurrency: provider.currency,
   });
+  await note(`reverified_as:${outcome.eventRowId}`);
+  return outcome;
 }
 
 export async function recordEvent(deps: WebhookDeps, providerId: PaymentProviderId, incoming: IncomingEvent): Promise<WebhookOutcome> {
@@ -340,6 +420,11 @@ async function applyEvent(
     return finish('ignored', `payment_${payment.status}`);
   }
   if (event.reportedStatus === null) return finish('ignored', 'unrecognised_status');
+  // One declined try in a checkout that stays open for another (a card in the
+  // Inline modal): the payment is still waiting, and only the session's end
+  // closes it (payments/reconcile.ts). Never a verdict, so never applied --
+  // and so never the FAILED verdict `revivable` looks for.
+  if (event.reportedStatus === 'failed' && event.attemptOnly === true) return finish('ignored', 'attempt_failed');
 
   const reported = {
     ...(event.providerRef === null || payment.provider_ref !== null ? {} : { providerRef: event.providerRef }),
@@ -526,6 +611,10 @@ function settlingSubscription(payment: PaymentRecord): SettlingSubscriptionPayme
  *
  *   superseded_by_cash          payments/cash.ts. The photographer recorded cash
  *                               and we voided the open ask. Revived.
+ *   card_session_expired        payments/reconcile.ts. A card payment whose browser
+ *                               checkout ended with nothing paid as far as the
+ *                               lookup could tell (none, or only declined tries).
+ *                               Ours, not Flutterwave's verdict. Revived.
  *   provider_timeout            payments/initiate.ts. Our call to the provider
  *                               did not answer within the deadline; the prompt may
  *                               still have reached the payer. Revived.
@@ -551,7 +640,7 @@ function settlingSubscription(payment: PaymentRecord): SettlingSubscriptionPayme
  * is guarded on a status not yet settled), so the guard costs nothing in the
  * cases it does not catch.
  */
-const REVIVABLE_FAILURE_REASONS: ReadonlySet<string> = new Set([SUPERSEDED_BY_CASH, 'provider_timeout']);
+const REVIVABLE_FAILURE_REASONS: ReadonlySet<string> = new Set([SUPERSEDED_BY_CASH, 'provider_timeout', CARD_SESSION_EXPIRED]);
 const REVIVABLE_FAILURE_PREFIX = 'provider_unavailable: ';
 
 export function locallyFailed(reason: string | null): boolean {

@@ -793,6 +793,15 @@ describe('payouts', () => {
       [paymentId, adminId, reference],
     );
 
+  it('takes flutterwave_checkout as a payment provider, and refuses one it does not know (cards, 2026-10-30)', async () => {
+    const w = await payoutWorld();
+    await insertPaid(w, { provider: 'flutterwave_checkout' });
+    await insertPaid(w, { kind: 'booking_fee', provider: 'flutterwave_checkout', amount: 20000, status: 'pending' });
+    for (const provider of ['stripe', 'flutterwave_card', 'FLUTTERWAVE_CHECKOUT']) {
+      expect(await sqlstateOf(db, () => insertPaid(w, { provider })), provider).toBe('23514');
+    }
+  });
+
   it('has both refund-reference partial uniques, by name and predicate', async () => {
     const result = await db.query<{ indexname: string; indexdef: string }>(`SELECT indexname, indexdef FROM pg_indexes WHERE indexname = ANY($1)`, [
       ['payment_refund_reference_online_unique', 'payment_overpayment_refund_reference_unique'],
@@ -890,6 +899,19 @@ describe('webhook_event', () => {
 
     await insertEvent();
     expect(await sqlstateOf(db, insertEvent)).toBe('23505');
+  });
+
+  it('takes flutterwave_checkout as a provider, and refuses one it does not know (cards, 2026-10-30)', async () => {
+    await db.query(
+      `INSERT INTO webhook_event (provider, event_id, event_type, signature_valid)
+       VALUES ('flutterwave_checkout', '285959875:SUCCESSFUL', 'verify.SUCCESSFUL', true)`,
+    );
+    const unknown = () =>
+      db.query(
+        `INSERT INTO webhook_event (provider, event_id, event_type, signature_valid)
+         VALUES ('stripe', 'evt_1', 'charge.completed', true)`,
+      );
+    expect(await sqlstateOf(db, unknown)).toBe('23514');
   });
 
   it('accepts the same event id from a different provider', async () => {

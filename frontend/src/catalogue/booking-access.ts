@@ -1,6 +1,6 @@
 import { env } from '@/env'
 import type { CancellationTerms } from '@/lib/cancellation'
-import { type PaymentMethod, type StartPaymentResult, PaymentApiError } from './payments'
+import { type PayRequest, type PaymentMethod, type StartPaymentResult, PaymentApiError, knownMethodOf, payBody, startedPaymentOf } from './payments'
 
 /**
  * A client's own booking: `GET /api/booking/:token`, its cancellation and its
@@ -84,7 +84,12 @@ export type ClientBooking = {
   cancellation: CancellationTerms
   cancellationReason: string | null
   cancelledAt: string | null
-  sessionFee: { outstandingRwf: number; waitingPayment: { ourRef: string } | null } | null
+  /**
+   * `waitingPayment.method` is how the attempt was started (backend
+   * `booking/client-view.ts`): `card` is a card checkout still open, which the
+   * page offers to reopen; a missing one reads as a phone prompt, as before cards.
+   */
+  sessionFee: { outstandingRwf: number; waitingPayment: { ourRef: string; method?: PaymentMethod | null } | null } | null
   delivery: { url: string | null; expiresOn: string | null; expired: boolean; note: string | null } | null
   notices: ClientNotice[]
 }
@@ -145,23 +150,20 @@ export function cancelResultOf(status: number, body: unknown): CancelBookingResu
 }
 
 /** Starts a session-fee payment. The outcomes are the checkout's, minus the ones only it can meet. */
-export async function startSessionFeePayment(
-  token: string,
-  request: { method: PaymentMethod; phone: string },
-): Promise<StartPaymentResult> {
+export async function startSessionFeePayment(token: string, request: PayRequest): Promise<StartPaymentResult> {
   let res: Response
   try {
     res = await fetch(`${env.VITE_API_BASE_URL}/booking/${encodeURIComponent(token)}/payments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify(payBody(request)),
     })
   } catch {
     return { status: 'failed' }
   }
 
   try {
-    return sessionFeeResultOf(res.status, await res.json())
+    return sessionFeeResultOf(res.status, await res.json(), request.method)
   } catch {
     // Not the JSON this status promises.
     return { status: 'failed' }
@@ -171,19 +173,23 @@ export async function startSessionFeePayment(
 /**
  * A session-fee payment's answer, from its status and body: shared by the
  * guest page and the dashboard, which answer alike. Status 0 is no answer.
+ * A card's 201 or 200 carries the Inline config (`startedPaymentOf`).
  */
-export function sessionFeeResultOf(status: number, raw: unknown): StartPaymentResult {
+export function sessionFeeResultOf(status: number, raw: unknown, method: PaymentMethod = 'momo_mtn'): StartPaymentResult {
   const body = raw as {
     error?: unknown
     reason?: unknown
     fields?: unknown
-    payment?: { ourRef?: unknown } | null
+    payment?: { ourRef?: unknown; method?: unknown } | null
   } | null
   const ourRef = typeof body?.payment?.ourRef === 'string' ? body.payment.ourRef : null
-  if (status === 201 && ourRef !== null) return { status: 'started', ourRef }
+  const started = startedPaymentOf(method, status, raw)
+  if (started !== null) return started
   if (status === 404) return { status: 'not_found' }
   if (status === 409) {
-    if (body?.error === 'payment_in_progress' && ourRef !== null) return { status: 'in_progress', ourRef }
+    if (body?.error === 'payment_in_progress' && ourRef !== null) {
+      return { status: 'in_progress', ourRef, method: knownMethodOf(body.payment?.method) }
+    }
     // Paid, cancelled or rescheduled under the page: reloading shows which.
     return { status: 'closed' }
   }

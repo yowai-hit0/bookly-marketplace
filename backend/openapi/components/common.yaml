@@ -98,12 +98,16 @@ schemas:
   PaymentMethod:
     type: string
     description: |
-      `card` is reserved for the hosted card checkout, deferred (marketplace-spec.md
-      R3.2, 2026-10-17): it is never offered and a payment request naming it is a 422.
+      `card` is paid in Flutterwave's v3 Inline modal on our own page (user
+      decisions, 2026-10-30), offered only when its keys are configured; a
+      method not on offer is a 422 at every pay route.
     enum: [momo_mtn, momo_airtel, card]
 
   PaymentStarted:
     type: object
+    description: |
+      The attempt, and for `method: card` the Flutterwave Inline config to open
+      (`card`, absent for MoMo).
     required: [payment]
     additionalProperties: false
     properties:
@@ -116,20 +120,112 @@ schemas:
             $ref: '#/schemas/Uuid'
           status:
             const: pending
+      card:
+        $ref: '#/schemas/InlineCardConfig'
+
+  CardPaymentOpen:
+    type: object
+    description: |
+      A card payment of this fee whose checkout session is still open: the SAME
+      payment and `tx_ref`, answered again instead of starting a second one. Its
+      `session_duration` is what is left of the first session.
+    required: [payment, card]
+    additionalProperties: false
+    properties:
+      payment:
+        type: object
+        required: [ourRef, status]
+        additionalProperties: false
+        properties:
+          ourRef:
+            $ref: '#/schemas/Uuid'
+          status:
+            const: pending
+      card:
+        $ref: '#/schemas/InlineCardConfig'
+
+  InlineCardConfig:
+    type: object
+    description: |
+      The argument to Flutterwave v3 Inline's `FlutterwaveCheckout({...})`,
+      built entirely on the server: pass it as it is, adding only the page's own
+      `callback` and `onclose`. Nothing in it may come from the page. The
+      redirect after the modal (3-D Secure included) appends `tx_ref`,
+      `transaction_id` and `status`; none of it is a result -- poll the status
+      route, passing `transactionId` (cards as built, marketplace-spec.md).
+    required: [public_key, tx_ref, amount, currency, payment_options, redirect_url, customer, customizations, configurations]
+    additionalProperties: false
+    properties:
+      public_key:
+        type: string
+        description: The Flutterwave v3 public key (`FLWPUBK…`). Never the secret key.
+        examples: ['FLWPUBK_TEST-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-X']
+      tx_ref:
+        description: Our `ourRef`. Flutterwave verifies and reports by it.
+        $ref: '#/schemas/Uuid'
+      amount:
+        description: Whole RWF, the payment row's frozen amount.
+        $ref: '#/schemas/Rwf'
+      currency:
+        const: RWF
+      payment_options:
+        const: card
+      redirect_url:
+        type: string
+        format: uri
+        description: |
+          A page on WEB_ORIGIN, built on the server: `/checkout/{reference}/{token}/payments/{ourRef}`
+          (booking fee), `/payments/{ourRef}` (session fee, guest page; never the
+          booking's token), `/account/bookings/{reference}/payments/{ourRef}`
+          (session fee, account) or `/studio/subscription/payments/{ourRef}`.
+      customer:
+        type: object
+        required: [email, name]
+        additionalProperties: false
+        properties:
+          email: { type: string }
+          name: { type: string }
+          phone_number:
+            type: string
+            description: Absent when there is no phone on record.
+      customizations:
+        type: object
+        required: [title]
+        additionalProperties: false
+        properties:
+          title: { type: string, examples: ['Bookly booking fee BKY-2610-7K3QX'] }
+      configurations:
+        type: object
+        required: [session_duration]
+        additionalProperties: false
+        properties:
+          session_duration:
+            type: integer
+            minimum: 1
+            maximum: 1440
+            description: Minutes the modal may stay open; never past the payment's own session (15 minutes from its start) nor, for a booking fee, the hold.
 
   PaymentInProgress:
     type: object
-    description: An earlier attempt is still waiting on the payer's phone. Poll its `ourRef` instead.
+    description: |
+      An earlier attempt is still waiting on the payer. Poll its `ourRef`
+      instead. `method` says how it was started: `card` is a checkout the
+      page may reopen by paying with `card` again; a MoMo method is a prompt on
+      the payer's phone; null where the attempt names no method.
     required: [error, payment]
     properties:
       error:
         const: payment_in_progress
       payment:
         type: object
-        required: [ourRef]
+        required: [ourRef, method]
         properties:
           ourRef:
             $ref: '#/schemas/Uuid'
+          method:
+            oneOf:
+              - type: 'null'
+              - $ref: '#/schemas/PaymentMethod'
 
   PaymentNotStarted:
     type: object
@@ -155,7 +251,10 @@ schemas:
 
   PayRequest:
     type: object
-    required: [method, phone]
+    description: |
+      `phone` is required for MoMo (missing: 400) and not read for `card`. Any
+      other key (an amount, a status, a provider) is ignored.
+    required: [method]
     properties:
       method:
         description: One of the methods on offer (`GET /api/payment-methods`); it decides which provider is prompted. Anything else is a 422.
@@ -164,7 +263,7 @@ schemas:
       phone:
         type: string
         maxLength: 40
-        description: The number to prompt. Rwandan numbers may be local (`0788…`) or international (`+250788…`); an unusable number is a 422.
+        description: The MoMo number to prompt. Rwandan numbers may be local (`0788…`) or international (`+250788…`); an unusable number is a 422. Not read for `card`.
         examples: ['+250788123456']
 
 responses:
@@ -283,6 +382,19 @@ parameters:
     description: Our id for one payment attempt, returned when it was started.
     schema:
       $ref: '#/schemas/Uuid'
+
+  TransactionId:
+    name: transactionId
+    in: query
+    required: false
+    description: |
+      For a card payment: the `transaction_id` Flutterwave gave the page (the
+      modal's callback, or the redirect's query). Only says WHICH transaction to
+      verify; the server asks Flutterwave itself, and an id that is not this
+      payment's settles nothing. Anything but digits is ignored.
+    schema:
+      type: string
+      examples: ['285959875']
 
   RowId:
     name: id

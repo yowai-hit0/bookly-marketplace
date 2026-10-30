@@ -111,6 +111,11 @@ payments:
       are. The amount is computed server-side from the booking, never sent by
       the client. Still payable when the photographer has been suspended since
       the booking: existing bookings carry on (R5.5, T9.2).
+
+      `method: card` answers the Flutterwave Inline config (`card`), whose
+      return page is the token-free `/payments/{ourRef}`: the booking's access
+      token never goes into a URL Flutterwave stores. Paying by card again
+      while that checkout is open answers `200` with the same one.
     security: []
     parameters:
       - $ref: ../components/common.yaml#/parameters/AccessToken
@@ -121,10 +126,17 @@ payments:
           schema: { $ref: ../components/common.yaml#/schemas/PayRequest }
     responses:
       '201':
-        description: The attempt was accepted; poll its `ourRef`.
+        description: The attempt was accepted; poll its `ourRef`. For a card, open `card`.
         content:
           application/json:
             schema: { $ref: ../components/common.yaml#/schemas/PaymentStarted }
+      '200':
+        description: This fee's card checkout is still open; reopen it.
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/CardPaymentOpen }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
       '404':
         $ref: ../components/common.yaml#/responses/NotFound
       '409':
@@ -137,7 +149,7 @@ payments:
                 - $ref: ../components/common.yaml#/schemas/PaymentInProgress
             examples:
               nothing_to_pay: { value: { error: nothing_to_pay, booking: null } }
-              in_progress: { value: { error: payment_in_progress, payment: { ourRef: 00000000-0000-4000-8000-000000000000 } } }
+              in_progress: { value: { error: payment_in_progress, payment: { ourRef: 00000000-0000-4000-8000-000000000000, method: momo_mtn } } }
       '422':
         description: A method not on offer, or an unusable phone number.
         content:

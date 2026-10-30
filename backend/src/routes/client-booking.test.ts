@@ -455,8 +455,18 @@ describe('POST /api/booking/:token/payments', () => {
     const res = await request(appWith(provider)).post(`${bookingUrl(token)}/payments`).send(payBody());
 
     expect(res.status, res.text).toBe(409);
-    expect(res.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: waiting.ourRef } });
+    expect(res.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: waiting.ourRef, method: null } });
     expect(provider.initiated).toEqual([]);
+  });
+
+  it.each([['card', 'flutterwave_checkout'], ['momo_airtel', 'flutterwave'], ['momo_mtn', 'mtn_momo_direct']] as const)('names the waiting attempt’s %s method in the 409 payment_in_progress', async (method, provider) => {
+    const { booking, token } = await payableBooking();
+    const waiting = await insertPayment(prisma, booking.id, { status: 'pending', kind: 'session_fee', amountRwf: 30_000, ageSeconds: 30, provider, method });
+
+    const res = await request(appWith(stubProvider())).post(`${bookingUrl(token)}/payments`).send(payBody());
+
+    expect(res.status, res.text).toBe(409);
+    expect(res.body).toStrictEqual({ error: 'payment_in_progress', payment: { ourRef: waiting.ourRef, method } });
   });
 
   it('answers a second press of Pay with the first attempt', async () => {

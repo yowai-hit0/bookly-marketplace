@@ -1,6 +1,7 @@
 /**
  * The payment provider seam (plan.md Task 16; spec §4.3): initiate, verify,
- * read a webhook, look up a status. MTN MoMo direct and Flutterwave implement
+ * read a webhook, look up a status. MTN MoMo direct, Flutterwave v4 (mobile
+ * money) and Flutterwave v3 Inline (cards, `flutterwave_checkout`) implement
  * it. Which one collects a payment follows the method the client chose
  * (marketplace-spec.md R3.1, `payments/routing.ts`), and the routing is
  * configuration (`MOMO_MTN_PROVIDER`, `PAYMENT_METHODS_ENABLED`), never a
@@ -12,13 +13,18 @@
  * (data-model_v2.md §7.3) -- and it never touches the database.
  */
 
-/** `payment_provider_allowed`. */
-export const PAYMENT_PROVIDERS = ['mtn_momo_direct', 'flutterwave'] as const;
+/** `payment_provider_allowed` (less `cash`, which no provider object stands for). */
+export const PAYMENT_PROVIDERS = ['mtn_momo_direct', 'flutterwave', 'flutterwave_checkout'] as const;
 export type PaymentProviderId = (typeof PAYMENT_PROVIDERS)[number];
 
 /** `payment_method_allowed`. */
 export const PAYMENT_METHODS = ['momo_mtn', 'momo_airtel', 'card'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+/** A stored `payment.method` as a known method, else null (an unset column, or a value this build does not know). */
+export function knownPaymentMethod(value: string | null | undefined): PaymentMethod | null {
+  return PAYMENT_METHODS.find((method) => method === value) ?? null;
+}
 
 /** `payment_status_allowed`, in the order of data-model_v2.md §7.2. */
 export const PAYMENT_STATUSES = ['initiated', 'pending', 'succeeded', 'failed', 'refund_due', 'refunded'] as const;
@@ -44,7 +50,7 @@ export type InitiatePaymentRequest = {
   /** Whole RWF, frozen on the payment row. */
   amountRwf: number;
   method: PaymentMethod;
-  /** E.164 as `normalizePhone` returns it, or the digits typed. */
+  /** E.164 as `normalizePhone` returns it, or the digits typed. Empty for `card`, which needs no phone. */
   payerPhone: string;
   kind: PaymentKind;
   /**
@@ -90,6 +96,48 @@ export type ProviderEvent = {
    * "not stated", as a missing amount is.
    */
   currency?: string | null;
+  /**
+   * A FAILED report about one try, not about the payment: the payer may try
+   * again under the same reference (a card declined in the Flutterwave Inline
+   * modal, which stays open for another card). Recorded, never applied: the
+   * payment stays waiting (payments/webhooks.ts), and its end, if nothing
+   * succeeds, is the session's (payments/reconcile.ts).
+   */
+  attemptOnly?: boolean;
+};
+
+/** Who the payer is, as a browser checkout asks for it (Flutterwave Inline's `customer`). */
+export type CheckoutPayer = { email: string; name: string; phone: string | null };
+
+/** What the server knows about a card payment the browser is about to open (payments/initiate.ts). */
+export type CardSession = {
+  /** Whole RWF, the payment row's frozen amount. */
+  amountRwf: number;
+  /** How long the browser's checkout may stay open, from now; at least a minute. */
+  sessionSeconds: number;
+  payer: CheckoutPayer;
+};
+
+/** A browser checkout, as the server builds it: every value the payer's page may not choose. */
+export type BrowserCheckoutRequest = CardSession & {
+  ourRef: string;
+  /** The modal's heading. */
+  title: string;
+  /** Where the browser lands after the payment (a 3-D Secure redirect included): a path on WEB_ORIGIN. */
+  returnPath: string;
+};
+
+/** Flutterwave Inline's `FlutterwaveCheckout({...})` argument, built entirely on the server (payments/flutterwave-checkout.ts). */
+export type InlineCardConfig = {
+  public_key: string;
+  tx_ref: string;
+  amount: number;
+  currency: string;
+  payment_options: 'card';
+  redirect_url: string;
+  customer: { email: string; name: string; phone_number?: string };
+  customizations: { title: string };
+  configurations: { session_duration: number };
 };
 
 export interface PaymentProvider {
@@ -112,6 +160,32 @@ export interface PaymentProvider {
 
   /** The event a delivery describes, or null when it describes none this provider recognises. Must not throw. */
   parseWebhook(delivery: WebhookDelivery): ProviderEvent | null;
+
+  /**
+   * For a provider whose webhook proves only that the sender knows a static
+   * secret (Flutterwave v3's `verif-hash`, not an HMAC of the body): what the
+   * provider's own API says about the transaction a verified delivery claims.
+   * When present, a delivery is never applied on its own word; this answer is
+   * (payments/webhooks.ts `receiveWebhook`). Null when the API has never heard
+   * of it. Throws when the API cannot be reached or answers unusably.
+   */
+  reverify?(claim: ProviderEvent, signal: AbortSignal): Promise<{ event: ProviderEvent; payload: unknown } | null>;
+
+  /**
+   * One transaction by the provider's own id (Flutterwave's `transaction_id`),
+   * for a client-triggered check (payments/card-check.ts). Same contract as `lookupStatus`.
+   */
+  lookupTransaction?(transactionId: string, signal: AbortSignal): Promise<{ event: ProviderEvent; payload: unknown } | null>;
+
+  /** For a method the payer completes in the browser: the checkout the page opens. Never calls the provider. */
+  browserCheckout?(request: BrowserCheckoutRequest): InlineCardConfig;
+
+  /**
+   * For a browser checkout: past this age a payment nobody paid can no longer
+   * be paid under its reference (its session has ended), so the reconciler may
+   * close it (payments/reconcile.ts).
+   */
+  readonly sessionClosesAfterSeconds?: number;
 }
 
 /** The provider was unreachable, timed out or answered in a way no retry of ours can read. */
