@@ -8,7 +8,8 @@ import { PlatformLayout } from './PlatformLayout'
 
 /**
  * The platform console's shell (Phase 2 brief decision 7; Phase 4 adds
- * Payouts and Refunds; Phase 5 Subscriptions and Settings): the studio
+ * Payouts and Refunds; Phase 5 Subscriptions and Settings; Phase 9
+ * Categories and Activity, and one photographer's page): the studio
  * console's layout with the platform's own sections, rendered here around
  * stand-in pages.
  */
@@ -31,6 +32,9 @@ function renderShell(path = '/platform/photographers') {
         element: <PlatformLayout />,
         children: [
           { path: 'photographers', element: page('Photographers') },
+          { path: 'photographers/:id', element: page('One photographer') },
+          { path: 'categories', element: page('Categories') },
+          { path: 'activity', element: page('Activity') },
           { path: 'payouts', element: page('Payouts') },
           { path: 'payouts/:id', element: page('One payout') },
           { path: 'refunds', element: page('Refunds') },
@@ -62,21 +66,26 @@ afterEach(() => {
 })
 
 describe('the platform shell', () => {
-  it('lists Photographers, Subscriptions, Payouts, Refunds and Settings, in that order', () => {
+  it('lists Photographers, Categories, Subscriptions, Payouts, Refunds, Activity and Settings, in that order', () => {
     renderShell()
 
-    expect(navLinks().map((link) => link.textContent)).toEqual(['Photographers', 'Subscriptions', 'Payouts', 'Refunds', 'Settings'])
+    expect(navLinks().map((link) => link.textContent)).toEqual(['Photographers', 'Categories', 'Subscriptions', 'Payouts', 'Refunds', 'Activity', 'Settings'])
     expect(navLinks().map((link) => link.getAttribute('href'))).toEqual([
       '/platform/photographers',
+      '/platform/categories',
       '/platform/subscriptions',
       '/platform/payouts',
       '/platform/refunds',
+      '/platform/activity',
       '/platform/settings',
     ])
   })
 
   it.each([
     ['/platform/photographers', 'Photographers'],
+    ['/platform/photographers/p1', 'Photographers'],
+    ['/platform/categories', 'Categories'],
+    ['/platform/activity', 'Activity'],
     ['/platform/payouts', 'Payouts'],
     ['/platform/payouts/po1', 'Payouts'],
     ['/platform/refunds', 'Refunds'],

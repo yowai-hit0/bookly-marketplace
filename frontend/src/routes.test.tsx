@@ -142,7 +142,18 @@ describe('routing', () => {
     for (const path of ['/studio/subscription', '/platform/subscriptions', '/platform/settings']) expect(inShell).not.toContain(path)
   })
 
+  it('declares the Phase 9 pages on the platform: one photographer, the categories and the activity', () => {
+    const platform = routes.find((route) => route.path === '/platform')
+    expect((platform?.children ?? []).map((child) => child.path)).toEqual(expect.arrayContaining(['photographers/:id', 'categories', 'activity']))
+    const shell = routes.find((route) => route.path === undefined)
+    const inShell = (shell?.children ?? []).map((child) => child.path)
+    for (const path of ['/platform/categories', '/platform/activity']) expect(inShell).not.toContain(path)
+  })
+
   it.each([
+    ['/platform/photographers/p1', '/platform/login'],
+    ['/platform/categories', '/platform/login'],
+    ['/platform/activity', '/platform/login'],
     ['/studio/subscription', '/studio/login'],
     ['/platform/subscriptions', '/platform/login'],
     ['/platform/settings', '/platform/login'],
@@ -168,6 +179,8 @@ describe('routing', () => {
     ['platform', '/platform/refunds', 'Refunds', { refunds: [] }],
     ['studio', '/studio/subscription', 'Subscription', { subscription: null, prices: { monthly: 10_000, yearly: 100_000 }, methods: [], graceDays: 7 }],
     ['platform', '/platform/subscriptions', 'Subscriptions', { subscriptions: [] }],
+    ['platform', '/platform/categories', 'Categories', { categories: [] }],
+    ['platform', '/platform/activity', 'Activity', { entries: [], total: 0, page: 1, pageSize: 50, pageCount: 0 }],
     [
       'platform',
       '/platform/settings',

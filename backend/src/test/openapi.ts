@@ -126,6 +126,8 @@ const MOUNTS: Record<string, string | readonly string[]> = {
   // Phase 7: the profile, the portfolio and the setup checklist (routes/studio.ts).
   studioProfileRouter: '/api/studio',
   studioSetupRouter: '/api/studio',
+  // Phase 9: the platform's categories (routes/platform.ts).
+  platformCategoriesRouter: '/api/platform',
 };
 
 /**

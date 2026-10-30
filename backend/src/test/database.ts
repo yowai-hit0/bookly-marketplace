@@ -43,6 +43,8 @@ export function databaseName(databaseUrl: string): string {
  * calendar and bookings all reference them (marketplace-data-model.md §3.10).
  */
 export const APPLICATION_TABLES = [
+  // The platform's audit trail (Phase 9): references the acting admin and the photographer.
+  'platform_audit',
   // Payouts (Phase 4): items reference payments and payouts, payouts their
   // method, and all three their photographer and the admins who acted.
   'payout_item',

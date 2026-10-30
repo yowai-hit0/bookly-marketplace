@@ -1,4 +1,8 @@
+import { BOOKING_STATUSES, type BookingStatus } from '@/admin/bookings'
+import { SETUP_ITEMS, type SetupItem, isSetupItem } from '@/admin/setup'
+import type { SubscriptionPeriod, SubscriptionStatus } from '@/admin/subscription'
 import { apiFetch } from '@/auth/api'
+import { type AuditEntry, normaliseEntries } from './audit'
 
 /**
  * The platform console's photographers (marketplace spec R2.1b;
@@ -89,7 +93,119 @@ async function moderate(id: string, action: Moderation, body?: unknown): Promise
   return normalisePhotographer(answer.photographer)
 }
 
+/**
+ * One photographer in full (Phase 9; `GET /api/platform/photographers/:id`):
+ * what the console's detail page weighs, in one read. The payout method is
+ * MASKED (user decision 4): the network or bank, the account name and the
+ * last four digits; the payouts screen, where money is sent, shows the full
+ * number.
+ */
+export type PlatformPhotographerDetail = {
+  photographer: PlatformPhotographer & { approvedBy: { id: string; email: string } | null }
+  profile: {
+    bio: string | null
+    contactPhone: string | null
+    whatsappPhone: string | null
+    contactEmail: string | null
+    coverImageUrl: string | null
+    districts: { code: string; name: string }[]
+    /** Every category they are tagged with; an inactive one is hidden from the public but still theirs. */
+    categories: { slug: string; name: string; isActive: boolean }[]
+  }
+  setup: { items: { key: SetupItem; done: boolean }[]; missing: SetupItem[]; canSubmit: boolean }
+  /** Null until approval creates it; the status is the status at the clock. */
+  subscription: {
+    id: string
+    status: SubscriptionStatus
+    currentPeriodEndsAt: string
+    graceEndsAt: string
+    createdAt: string
+    takingBookings: boolean
+    /** Newest first. */
+    periods: SubscriptionPeriod[]
+  } | null
+  payoutMethod: MaskedPayoutMethod | null
+  /** The current method was saved within the last 72 hours (R4.1). */
+  methodChangedRecently: boolean
+  counts: { bookings: Record<BookingStatus, number>; services: { total: number; active: number } }
+  /** `payableRwf` may be negative, when reversals outweigh new earnings. */
+  earnings: { payableRwf: number; inDraftRwf: number; paidOutRwf: number }
+  /** The latest 20 audit entries about them, newest first. */
+  activity: AuditEntry[]
+}
+
+export type MaskedPayoutMethod = {
+  id: string
+  kind: 'momo' | 'bank'
+  /** The MoMo network (`mtn`, `airtel`) or the bank's name. */
+  provider: string
+  accountName: string
+  last4: string
+  createdAt: string
+}
+
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0
+}
+
+function money(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) ? value : 0
+}
+
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+/**
+ * The detail as the page can rely on it. The API's contract is strict; this
+ * still fills what an older or partial answer leaves out (counts as 0, lists
+ * as empty, the setup items in the checklist's order), so a missing field
+ * never crashes the page.
+ */
+export function normaliseDetail(raw: PlatformPhotographerDetail): PlatformPhotographerDetail {
+  const profile: Partial<PlatformPhotographerDetail['profile']> = raw.profile ?? {}
+  const setup: Partial<PlatformPhotographerDetail['setup']> = raw.setup ?? {}
+  const counts: Partial<PlatformPhotographerDetail['counts']> = raw.counts ?? {}
+  const bookings: Partial<Record<string, unknown>> = counts.bookings ?? {}
+  const services: Partial<Record<string, unknown>> = counts.services ?? {}
+  const earnings: Partial<Record<string, unknown>> = raw.earnings ?? {}
+  const items = (Array.isArray(setup.items) ? setup.items : []).filter((item) => isSetupItem(item?.key))
+  const subscription = raw.subscription ?? null
+  return {
+    photographer: { ...normalisePhotographer(raw.photographer), approvedBy: raw.photographer.approvedBy ?? null },
+    profile: {
+      bio: textOrNull(profile.bio),
+      contactPhone: textOrNull(profile.contactPhone),
+      whatsappPhone: textOrNull(profile.whatsappPhone),
+      contactEmail: textOrNull(profile.contactEmail),
+      coverImageUrl: textOrNull(profile.coverImageUrl),
+      districts: Array.isArray(profile.districts) ? profile.districts : [],
+      categories: Array.isArray(profile.categories) ? profile.categories : [],
+    },
+    setup: {
+      // Always in the checklist's order, each once.
+      items: SETUP_ITEMS.flatMap((key) => items.filter((item) => item.key === key).slice(0, 1)).map((item) => ({ key: item.key, done: item.done === true })),
+      missing: Array.isArray(setup.missing) ? SETUP_ITEMS.filter((key) => (setup.missing as unknown[]).includes(key)) : [],
+      canSubmit: setup.canSubmit === true,
+    },
+    subscription: subscription === null ? null : { ...subscription, periods: Array.isArray(subscription.periods) ? subscription.periods : [] },
+    payoutMethod: raw.payoutMethod ?? null,
+    methodChangedRecently: raw.methodChangedRecently === true,
+    counts: {
+      bookings: Object.fromEntries(BOOKING_STATUSES.map((status) => [status, count(bookings[status])])) as Record<BookingStatus, number>,
+      services: { total: count(services.total), active: count(services.active) },
+    },
+    earnings: { payableRwf: money(earnings.payableRwf), inDraftRwf: money(earnings.inDraftRwf), paidOutRwf: money(earnings.paidOutRwf) },
+    activity: normaliseEntries(raw.activity),
+  }
+}
+
 export const platformApi = {
+  /** One photographer in full. A 404 names nobody; a 400 is an id that is not a uuid. */
+  get: async (id: string): Promise<PlatformPhotographerDetail> =>
+    normaliseDetail(
+      await apiFetch<PlatformPhotographerDetail>('platform', `/platform/photographers/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+    ),
   /** Newest first; every photographer when no filter is given. */
   list: async (filter: PhotographerFilter = {}): Promise<PlatformPhotographer[]> => {
     const query = new URLSearchParams()

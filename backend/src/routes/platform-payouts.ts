@@ -4,6 +4,7 @@ import type { AuthDeps } from '../auth/account-auth.js';
 import { platformAdminLocals } from '../auth/middleware.js';
 import { refundAmountRwf } from '../booking/totals.js';
 import { recordRefund } from '../payments/refund.js';
+import type { AuditLog } from '../platform/audit.js';
 import {
   PAYOUT_STATUSES,
   type PayoutActionResult,
@@ -21,7 +22,8 @@ import { parseOrReject } from './validation.js';
  * The platform's payouts and refunds (marketplace-spec.md R4.4, R4.6, T4.3,
  * T4.4; Phase 4 refund decision), mounted inside `platformRouter` behind
  * `requirePlatformAdmin`: a photographer's or a client's token is a 401 here.
- * The admin acting is the token's user, written on every row they change.
+ * The admin acting is the token's user, written on every row they change and
+ * on the platform's audit trail (Phase 9, R9.4; platform/audit.ts).
  *
  *   GET  /payouts/due                         200 { due }
  *   GET  /payouts?status=draft|paid|cancelled 200 { payouts }
@@ -72,9 +74,10 @@ const refundBody = z.strictObject({
   refundKind: z.enum(['full', 'overpayment']).optional(),
 });
 
-export function platformPayoutsRouter(deps: AuthDeps): Router {
+export function platformPayoutsRouter(deps: AuthDeps & { log?: AuditLog }): Router {
   const router = Router();
-  const payoutDeps = { prisma: deps.prisma, now: deps.now };
+  const log = deps.log === undefined ? {} : { log: deps.log };
+  const payoutDeps = { prisma: deps.prisma, now: deps.now, ...log };
 
   // Before /payouts/:id, which would read `due` as an id.
   router.get('/payouts/due', async (_req, res) => {
@@ -149,7 +152,7 @@ export function platformPayoutsRouter(deps: AuthDeps): Router {
     const body = parseOrReject(refundBody, req.body, res);
     if (body === undefined) return;
     const result = await recordRefund(
-      { prisma: deps.prisma, now: deps.now, actor: { area: 'platform', userId: platformAdminLocals(res).user.id } },
+      { prisma: deps.prisma, now: deps.now, actor: { area: 'platform', userId: platformAdminLocals(res).user.id }, ...log },
       id,
       {
         reference: body.reference,

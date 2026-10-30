@@ -57,6 +57,15 @@ export function readPlatformSettingRow(prisma: Db): Promise<PlatformSettingRow> 
   return prisma.platformSetting.findUniqueOrThrow({ where: { id: 1 } });
 }
 
+/**
+ * Locks the platform row for the rest of the transaction, so a save reads the
+ * values it replaces without another save slipping in between (Phase 9: the
+ * audit row records before and after).
+ */
+export async function lockPlatformSettingRow(tx: Prisma.TransactionClient): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM platform_setting WHERE id = 1 FOR UPDATE`;
+}
+
 /** The platform settings screen's save (Phase 9). Same missing-row rule as the read. */
 export function updatePlatformSettingRow(prisma: Db, data: Prisma.PlatformSettingUpdateInput): Promise<PlatformSettingRow> {
   return prisma.platformSetting.update({ where: { id: 1 }, data });

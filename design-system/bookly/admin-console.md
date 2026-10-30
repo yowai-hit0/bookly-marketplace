@@ -205,6 +205,8 @@ The contract in `pages/admin-shell.md` holds: one `nav[aria-label="Studio"]` (wa
 - **Below `lg` (as shipped, 2026-09-26):** row 1 is the top bar itself: the breadcrumb (the last two segments, the last truncating; the Admin crumb is icon-only below `sm`, still named "Admin", and a 44px square) and the theme toggle. Row 2 is the wordmark with Sign out on the right (icon-only below `sm`, as `admin-shell.md` already had it); row 3 the links wrapping (nine, ten while pending). The brief suggested the breadcrumb as a row *under* the nav; moving it there with `order-*` would make Tab visit it before the links it sits below, so DOM order and reading order were kept equal instead (raised at the checkpoint; see §9). All touch targets 44px.
 - **Content:** `#admin-content` stays the focusable wrapper; the page's `main` gets `px-4 lg:px-12` and `py-8 lg:py-12`.
 
+- **The platform console (Phase 9, 2026-10-27):** `PlatformLayout` is this shell for `/platform/*`: the same top bar (mark, a "PLATFORM" eyebrow instead of breadcrumbs, the theme toggle), sidebar and Sign out. Its nav has **seven** links: Photographers, Categories, Subscriptions, Payouts, Refunds, Activity, Settings (`pages/admin-shell.md`, Phase 9 note). Its pages use this file's kit unchanged: `PageHeader`, `Toolbar`, `StatGrid`, `FormDialog`, `Skeletons`, the console badges and the hairline lists and container-query tables. Page files: `pages/platform-photographer-detail.md`, `pages/platform-categories.md`, `pages/platform-activity.md`.
+
 ### 6.2 Breadcrumbs (new)
 
 - `nav aria-label={t('admin:breadcrumb.label')}` ("Breadcrumb") > `ol`. Separators are `ChevronRight` 16px, `aria-hidden`, in `li` of their own with `role="presentation"`, or as `aria-hidden` spans inside items.

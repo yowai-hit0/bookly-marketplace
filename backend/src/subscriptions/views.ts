@@ -293,6 +293,41 @@ export async function listPlatformSubscriptions(prisma: PrismaClient, now: Date,
     .filter((row) => status === undefined || row.status === status);
 }
 
+/**
+ * One photographer's subscription as the platform's photographer detail shows
+ * it (Phase 9): the list's row plus `takingBookings`, the bookability rule at
+ * the clock. Null until approval creates it (R5.1).
+ */
+export async function platformSubscriptionOf(
+  prisma: PrismaClient,
+  photographerId: string,
+  now: Date,
+): Promise<(PlatformSubscriptionView & { takingBookings: boolean }) | null> {
+  const row = await prisma.subscription.findUnique({
+    where: { photographerId },
+    select: {
+      id: true,
+      status: true,
+      currentPeriodEndsAt: true,
+      createdAt: true,
+      photographer: { select: { id: true, handle: true, displayName: true, status: true } },
+      periods: { select: PERIOD_SELECT, orderBy: { startsAt: 'desc' } },
+    },
+  });
+  if (row === null) return null;
+  const { subscriptionGraceDays } = await getPlatformSettings(prisma);
+  return {
+    id: row.id,
+    photographer: row.photographer,
+    status: statusAt(row.status, row.currentPeriodEndsAt, now, subscriptionGraceDays),
+    currentPeriodEndsAt: row.currentPeriodEndsAt.toISOString(),
+    graceEndsAt: graceEndsAt(row.currentPeriodEndsAt, subscriptionGraceDays).toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    takingBookings: isBookable(row.photographer, row, now),
+    periods: row.periods.filter((period) => period.voidedAt === null).map(periodView),
+  };
+}
+
 function periodView(period: PeriodRow): PeriodView {
   return {
     id: period.id,

@@ -5,6 +5,7 @@ import {
   type PlatformSettingRow,
   readPhotographerSettingRow,
   readPhotographerSettingRows,
+  lockPlatformSettingRow,
   readPlatformSettingRow,
   updatePhotographerSettingRow,
   updatePlatformSettingRow,
@@ -117,6 +118,29 @@ export async function getPlatformSettings(prisma: Db = defaultPrisma): Promise<P
 /** Saves any subset of the platform's values and returns all of them as stored. */
 export async function updatePlatformSettings(update: Partial<PlatformSettings>, prisma: Db = defaultPrisma): Promise<PlatformSettings> {
   return toPlatformSettings(await updatePlatformSettingRow(prisma, update));
+}
+
+/** One platform value's change: what it was and what it became. */
+export type SettingChange = { before: PlatformSettings[keyof PlatformSettings]; after: PlatformSettings[keyof PlatformSettings] };
+
+/**
+ * Saves any subset of the platform's values inside the caller's transaction,
+ * with the row locked first, and answers the stored values and the fields that
+ * actually changed (before and after), for the platform's audit row (Phase 9,
+ * R9.4). A field sent with the value already stored is not a change.
+ */
+export async function changePlatformSettings(
+  update: Partial<PlatformSettings>,
+  tx: Prisma.TransactionClient,
+): Promise<{ settings: PlatformSettings; changed: Partial<Record<keyof PlatformSettings, SettingChange>> }> {
+  await lockPlatformSettingRow(tx);
+  const before = await getPlatformSettings(tx);
+  const settings = await updatePlatformSettings(update, tx);
+  const changed: Partial<Record<keyof PlatformSettings, SettingChange>> = {};
+  for (const key of Object.keys(update) as (keyof PlatformSettings)[]) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(settings[key])) changed[key] = { before: before[key], after: settings[key] };
+  }
+  return { settings, changed };
 }
 
 function toPhotographerSettings(row: PhotographerSettingRow): PhotographerSettings {

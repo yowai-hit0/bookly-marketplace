@@ -38,8 +38,11 @@ import { CheckoutPage } from '@/pages/checkout/CheckoutPage'
 import { PaymentProgressPage } from '@/pages/checkout/PaymentProgressPage'
 import { PhotographerList } from '@/pages/photographers/PhotographerList'
 import { PhotographerProfile } from '@/pages/photographers/PhotographerProfile'
+import { PlatformActivity } from '@/pages/platform/PlatformActivity'
+import { PlatformCategories } from '@/pages/platform/PlatformCategories'
 import { PlatformPayoutDetail } from '@/pages/platform/PlatformPayoutDetail'
 import { PlatformPayouts } from '@/pages/platform/PlatformPayouts'
+import { PlatformPhotographerDetail } from '@/pages/platform/PlatformPhotographerDetail'
 import { PlatformPhotographers } from '@/pages/platform/PlatformPhotographers'
 import { PlatformRefunds } from '@/pages/platform/PlatformRefunds'
 import { PlatformSettings } from '@/pages/platform/PlatformSettings'
@@ -170,6 +173,10 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Navigate to="photographers" replace /> },
       { path: 'photographers', element: <PlatformPhotographers /> },
+      // One photographer in full, the categories and the audit trail (Phase 9, R9.1, R9.2, R9.4).
+      { path: 'photographers/:id', element: <PlatformPhotographerDetail /> },
+      { path: 'categories', element: <PlatformCategories /> },
+      { path: 'activity', element: <PlatformActivity /> },
       // Payouts by hand and refunds of money paid online (Phase 4, R4.4, R4.6).
       { path: 'payouts', element: <PlatformPayouts /> },
       { path: 'payouts/:id', element: <PlatformPayoutDetail /> },

@@ -13,6 +13,7 @@ Companion to `docs/marketplace-spec.md`. Supersedes `docs/data-model_v2.md` for 
 - **Linking** (§2.8) runs on verification, on a password reset that verifies, and on Google sign-in; it skips erased client rows (`anonymized_at IS NULL`).
 - **Phase 8, the client dashboard** (migration `20261027120000_account_dashboard`; marketplace-spec.md Phase 8 as built): `app_user` gains `phone text` (CHECK `app_user_phone_e164`), and `pending_email text`, `pending_email_token_hash text`, `pending_email_expires_at timestamptz` for an address change (CHECK `app_user_pending_email_complete`: all three or none; partial unique `app_user_pending_email_token_hash_unique`). `app_user_has_credential` is relaxed to `password_hash IS NOT NULL OR google_sub IS NOT NULL OR anonymized_at IS NOT NULL`, so an erased account may hold no credential. No template CHECK change: `account_verify_email` gains the variant `email_change`, `account_security_alert` the variants `password_changed` and `email_changed` (§2.14). Linking (§2.8) also runs when an address change is confirmed, for the new address; deleting an account clears `client.user_id` on its rows.
 - **Phase 8 follow-up, account deletion and the outbox** (migration `20261027140000_outbox_erase_on_completion`, user decisions 2026-10-27): `outbox` gains `erase_on_completion boolean NOT NULL DEFAULT false` (CHECK `outbox_erase_on_completion_email_only`), and `account_security_alert` the variant `account_deleted`. Deleting an account erases the user's account-mail rows and sends one notice that erases itself once delivered (§2.14).
+- **Phase 9, the platform's audit trail** (migration `20261027160000_platform_audit`; marketplace-spec.md Phase 9 as built, user decision 1 of 2026-10-27): **new table `platform_audit`** (§3.15), so the marketplace has **28** tables. One row per platform admin action that changed something, written in the action's own transaction. No other table changes: categories (§3.5) are managed through the existing columns (`is_active`, `sort_order`, `name_en`); the slug stays immutable.
 
 | | |
 |---|---|
@@ -658,6 +659,7 @@ model Payment {
 | composite package → service, booking → service/package | RESTRICT |
 | `client.user_id` | SET NULL |
 | payment, subscription_period, payout_item and payout relations | RESTRICT |
+| `platform_audit` → `app_user` (the actor), → `photographer` (Phase 9) | RESTRICT |
 | booking_addon, booking_note → booking | CASCADE (unchanged) |
 
 ### 3.11 Hand-written SQL block (baseline migration)
@@ -813,6 +815,34 @@ model OauthFlow {
 - **Single-use:** the callback runs `UPDATE oauth_flow SET consumed_at = now WHERE state_hash = $1 AND consumed_at IS NULL AND expires_at > now RETURNING code_verifier, nonce`; a flow is spent even when the exchange that follows fails.
 - **Retention:** each start deletes flows that expired more than a day ago. No foreign keys: a flow belongs to no user until Google answers.
 
+### 3.15 `PlatformAudit` (`platform_audit`), Phase 9
+Who did what in the platform console (marketplace-spec.md R9.4; Phase 9 user decision 1, 2026-10-27).
+```prisma
+model PlatformAudit {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorUserId    String   @map("actor_user_id") @db.Uuid      /// the platform admin, from the token
+  action         String                                        /// CHECK platform_audit_action_allowed
+  targetType     String?  @map("target_type")                  /// CHECK platform_audit_target_type_allowed
+  targetId       String?  @map("target_id") @db.Uuid           /// no FK: polymorphic
+  photographerId String?  @map("photographer_id") @db.Uuid
+  details        Json     @default("{}") @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  actor        AppUser       @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  photographer Photographer? @relation(fields: [photographerId], references: [id], onDelete: Restrict)
+  @@index([createdAt(sort: Desc)])
+  @@index([photographerId, createdAt(sort: Desc)])
+  @@map("platform_audit")
+}
+```
+- **Vocabulary** (`platform/audit.ts` `PLATFORM_AUDIT_ACTIONS`, `PLATFORM_AUDIT_TARGET_TYPES`; a schema test holds the CHECKs to the consts): `photographer_approved`, `photographer_suspended`, `photographer_reactivated`, `payout_created`, `payout_paid`, `payout_cancelled`, `refund_recorded`, `settings_updated`, `category_created`, `category_updated`, `category_reordered`, `category_deactivated`, `category_reactivated`, `category_deleted`; targets `photographer`, `payout`, `payment`, `platform_setting`, `category`.
+- **Hand-written CHECKs:** `platform_audit_action_allowed`, `platform_audit_target_type_allowed`, `platform_audit_target_id_has_type (target_id IS NULL OR target_type IS NOT NULL)`, `platform_audit_details_object (jsonb_typeof(details) = 'object')`.
+- **`target_id`** is null where the target has no uuid: the settings row (`platform_setting`, id 1) and the category order. It has no foreign key, so a deleted category keeps its rows.
+- **RESTRICT** on the admin and the photographer: neither is deleted while history names them (a login is disabled, never deleted; a photographer with history is never deleted, as with the outbox).
+- **Written in the action's transaction** (`recordAudit`), so a refused or failed action leaves no row; an idempotent no-op writes none either. The log line (`event: 'platform_action'`, ids only) is written after the commit.
+- **`details`** holds ids, statuses, amounts, references and reasons only: never a password, a token, a full payout account number, a payout's internal note or a client's personal data. The shape per action is in the OpenAPI `AuditAction` schema.
+- **Indexes:** `platform_audit_created_at_idx (created_at DESC)` for the Activity page, `platform_audit_photographer_id_created_at_idx (photographer_id, created_at DESC)` for a photographer's detail page. Pages order by `created_at DESC, id DESC`.
+- **Retention:** kept indefinitely; nothing deletes rows. `test/database.ts` truncates it first.
+
 ## 4. Vocabularies (text + CHECK, with TS consts)
 
 | Column | Values | TS home |
@@ -830,6 +860,7 @@ model OauthFlow {
 | `payout_method.kind` / `momo_network` | `momo`, `bank` / `mtn`, `airtel` | new `payouts/vocab.ts` |
 | `payout.status` | `draft`, `paid`, `cancelled` | `payouts/vocab.ts` |
 | `payout_item.kind` | `earning`, `reversal` | `payouts/vocab.ts` |
+| `platform_audit.action` / `target_type` | 14 actions / 5 target types (§3.15) | `platform/audit.ts` |
 
 ## 5. Migration strategy
 **One squashed baseline**, `backend/prisma/migrations/<ts>_marketplace_init/migration.sql`. Production is empty, the change touches almost every table, and several vocabularies have been rewritten across four migrations already.
@@ -941,5 +972,6 @@ Paths are relative to `backend/src/`.
 - **Districts:** 30 rows, FK enforced. `test/database.ts` must not truncate `district`.
 - **Outbox:** a `booking_id` requires a `photographer_id`; the new templates are accepted; `admin_alert` is refused.
 - **Referential:** a photographer with bookings can't be deleted; configuration rows cascade; deleting a user sets `client.user_id` to null; a category in use can't be deleted.
+- **platform_audit (Phase 9):** 28 tables; the action and target-type CHECKs equal `platform/audit.ts`; a target id needs a type; details are an object; the actor is required and must exist; RESTRICT on the actor and the photographer; both newest-first indexes exist.
 - **app_user:** Google-only for clients only; at least one credential. Phase 8: an erased row may hold none (a live or disabled one still may not); the phone is E.164 or null; a pending address change is all three columns or none; its token hash addresses one login (`app_user_pending_email_token_hash_unique`).
 - **Fixtures:** `test/payment-fixtures.ts` and `db/seed.test.ts` are updated to create a photographer with a live subscription.

@@ -9,6 +9,7 @@ import { LOCKOUT_THRESHOLD } from '../auth/account-auth.js';
 import { hashPassword } from '../auth/password.js';
 import { TOKEN_AUDIENCES, TOKEN_ISSUER, TOKEN_TTL_SECONDS, credentialFingerprint, issueToken } from '../auth/token.js';
 import { createPrismaClient } from '../db/client.js';
+import { checkoutToken } from '../payments/checkout-link.js';
 import { approvePhotographer, reactivatePhotographer, suspendPhotographer } from '../photographers/moderation.js';
 import { isBookable } from '../photographers/bookable.js';
 import { connect, testDatabaseUrl, truncateAll } from '../test/database.js';
@@ -18,11 +19,16 @@ import {
   PHOTOGRAPHER_HANDLE,
   PHOTOGRAPHER_NAME,
   PLATFORM_ADMIN_EMAIL,
+  TEST_SECRET,
   type PaymentWorld,
   createPhotographer,
+  grantAccessToken,
   insertBooking,
+  insertPayment,
   logSink,
+  routeTo,
   seedWorld,
+  stubProvider,
 } from '../test/payment-fixtures.js';
 
 /**
@@ -257,10 +263,10 @@ describe('GET /api/platform/me', () => {
 
 describe('who the platform admits', () => {
   /** Every non-auth platform operation in the spec, with its parameters filled in. */
-  async function platformRoutes(): Promise<{ method: 'get' | 'post'; path: string }[]> {
+  async function platformRoutes(): Promise<{ method: 'get' | 'post' | 'put' | 'patch' | 'delete'; path: string }[]> {
     const operations = specOperations(await loadSpec()).filter((op) => op.path.startsWith('/api/platform/') && !op.path.startsWith('/api/platform/auth/'));
     // Every path parameter (`:id`, `:paymentId`) gets a real row's id, so a leak would act on something.
-    return operations.map((op) => ({ method: op.method as 'get' | 'post', path: op.path.replace(/:\w+/g, world.photographerId) }));
+    return operations.map((op) => ({ method: op.method as 'get' | 'post' | 'put' | 'patch' | 'delete', path: op.path.replace(/:\w+/g, world.photographerId) }));
   }
 
   async function forged(user: AppUser, aud: string, role: string): Promise<string> {
@@ -276,8 +282,10 @@ describe('who the platform admits', () => {
   }
 
   it('covers every platform route the spec declares', async () => {
-    // Moderation (5), Phase 4's payouts and refunds (8), and Phase 5's settings (2) and subscriptions (1).
-    expect((await platformRoutes()).length).toBe(16);
+    // Moderation (5), Phase 4's payouts and refunds (8), Phase 5's settings (2) and subscriptions (1), and
+    // Phase 9's photographer detail (1), audit trail (1) and categories (5). routes/platform-access.test.ts
+    // sweeps every one of them from the spec and the code (T9.1).
+    expect((await platformRoutes()).length).toBe(23);
   });
 
   it.each<[string, () => Promise<string | null>, 'invalid_token' | undefined]>([
@@ -770,16 +778,107 @@ describe('the moderation log', () => {
     await suspendPhotographer(deps, { ...action, reason: 'Logged' });
     await reactivatePhotographer(deps, action);
 
+    // One line per action that changed something, each naming its audit row (Phase 9, R9.4).
+    const audit = await prisma.platformAudit.findMany({ orderBy: { createdAt: 'asc' } });
     expect(entries).toEqual(
-      ['photographer_approve', 'photographer_suspend', 'photographer_reactivate'].map((event, i) => ({
+      ['photographer_approved', 'photographer_suspended', 'photographer_reactivated'].map((action) => ({
         level: 'info',
-        event,
+        event: 'platform_action',
+        action,
+        auditId: audit.find((row) => row.action === action)?.id,
+        actorUserId: admin.id,
+        targetType: 'photographer',
+        targetId: id,
         photographerId: id,
-        byUserId: admin.id,
         at: START.toISOString(),
-        status: ['approved', 'suspended', 'approved'][i],
       })),
     );
+    expect(audit).toHaveLength(3);
   });
 });
 
+// --- T9.2: what a suspension does, end to end -------------------------------------------
+
+describe('suspending through the console (T9.2, R9.1)', () => {
+  /** The whole API, the public side and payments included, on the test's clock. */
+  function fullApp(provider = stubProvider()): Express {
+    return createApp({
+      corsOrigin: WEB_ORIGIN,
+      auth: { prisma, sessionSecret: SECRET, webOrigin: WEB_ORIGIN, now: () => clock },
+      publicApi: { prisma, now: () => clock, payments: { routing: routeTo(provider), secret: TEST_SECRET } },
+    });
+  }
+
+  /** Wednesday 21 October 2026, 09:00 in Kigali: inside the hours below, past the lead time at START. */
+  const SLOT = '2026-10-21T09:00:00+02:00';
+
+  function bookingBody(startsAt = SLOT) {
+    return {
+      packageId: world.packageId,
+      addonIds: [],
+      startsAt,
+      fullName: 'Aline Uwase',
+      email: 'aline.t92@example.com',
+      phone: '0788123456',
+      location: 'Kigali Heights',
+      partySize: 2,
+      consent: true,
+    };
+  }
+
+  beforeEach(async () => {
+    await prisma.workingHours.createMany({
+      data: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ photographerId: world.photographerId, weekday, opensMinute: 480, closesMinute: 1080 })),
+    });
+  });
+
+  it('hides them from the directory and their profile, refuses a new booking, and keeps an existing booking’s session fee payable', async () => {
+    const provider = stubProvider();
+    const server = fullApp(provider);
+    // An existing booking: confirmed, its fee paid, 30,000 still owed on the shoot.
+    const existing = await insertBooking(prisma, world, { status: 'confirmed', startsAt: new Date('2026-10-23T07:00:00Z') });
+    await insertPayment(prisma, existing.id, { status: 'succeeded', amountRwf: 20_000 });
+    const guestToken = await grantAccessToken(prisma, existing.id);
+    // A booking held at checkout, its booking fee not yet paid.
+    const held = await insertBooking(prisma, world, { status: 'pending_payment', startsAt: new Date('2026-10-24T07:00:00Z') });
+
+    // Before: listed, the profile open, and a new booking is taken.
+    const listedBefore = await request(server).get('/api/photographers');
+    expect(listedBefore.body.photographers.map((p: { handle: string }) => p.handle)).toEqual([PHOTOGRAPHER_HANDLE]);
+    expect((await request(server).get(`/api/photographers/${PHOTOGRAPHER_HANDLE}`)).body.photographer).toMatchObject({ takingBookings: true });
+    const before = await request(server).post('/api/bookings').send(bookingBody());
+    expect(before.status, before.text).toBe(201);
+
+    const res = await suspend(world.photographerId, 'Clients reported shoots that never happened.');
+    expect(res.status).toBe(200);
+
+    // Hidden from the directory and its sitemap-feeding list, and the profile is the 404 of an unknown handle.
+    expect((await request(server).get('/api/photographers')).body).toMatchObject({ photographers: [], total: 0 });
+    const profile = await request(server).get(`/api/photographers/${PHOTOGRAPHER_HANDLE}`);
+    const unknown = await request(server).get('/api/photographers/nobody-here');
+    expect([profile.status, profile.body]).toEqual([unknown.status, unknown.body]);
+    expect(profile.status).toBe(404);
+
+    // A new booking is refused: the answer for every unbookable photographer's package (Phase 5 as built).
+    const refused = await request(server).post('/api/bookings').send(bookingBody('2026-10-22T09:00:00+02:00'));
+    expect([refused.status, refused.body]).toEqual([422, { error: 'validation_failed', fields: ['packageId'] }]);
+    // And a booking held before the suspension cannot pay its booking fee now: 409.
+    const heldPay = await request(server)
+      .post(`/api/checkout/${held.reference}/${checkoutToken(TEST_SECRET, held.reference)}/payments`)
+      .send({ method: 'momo_mtn', phone: '078 812 3456' });
+    expect([heldPay.status, heldPay.body]).toEqual([409, { error: 'photographer_unavailable' }]);
+
+    // The existing booking carries on: its page opens and its session fee is taken.
+    expect((await request(server).get(`/api/booking/${guestToken}`)).status).toBe(200);
+    const sessionFee = await request(server).post(`/api/booking/${guestToken}/payments`).send({ method: 'momo_mtn', phone: '078 812 3456' });
+    expect(sessionFee.status, sessionFee.text).toBe(201);
+    expect(provider.initiated).toStrictEqual([expect.objectContaining({ kind: 'session_fee', amountRwf: 30_000 })]);
+    await expect(prisma.booking.findUniqueOrThrow({ where: { id: existing.id } })).resolves.toMatchObject({ status: 'confirmed' });
+
+    // Reactivating restores all of it.
+    expect((await reactivate(world.photographerId)).status).toBe(200);
+    expect((await request(server).get('/api/photographers')).body.photographers).toHaveLength(1);
+    expect((await request(server).get(`/api/photographers/${PHOTOGRAPHER_HANDLE}`)).status).toBe(200);
+    expect((await request(server).post('/api/bookings').send(bookingBody('2026-10-22T09:00:00+02:00'))).status).toBe(201);
+  });
+});

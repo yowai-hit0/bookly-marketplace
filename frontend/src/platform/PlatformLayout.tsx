@@ -1,4 +1,4 @@
-import { Banknote, LogOut, Repeat, ShieldCheck, SlidersHorizontal, Undo2, Users } from 'lucide-react'
+import { Banknote, History, LogOut, Repeat, ShieldCheck, SlidersHorizontal, Tags, Undo2, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet } from 'react-router'
 import { useAdminTheme } from '@/admin/theme'
@@ -15,7 +15,9 @@ import { EYEBROW } from '@/pages/admin/console/classes'
  * Phase 9): the studio console's shell (`design-system/bookly/admin-console.md`
  * 6.1) with its sections: photographers (Phase 2), every subscription
  * (Phase 5, R5.4), payouts and refunds (Phase 4, R4.4, R4.6), then the
- * platform's settings (Phase 5, R5.1). The guard is the route's (`RequireSession`, the
+ * platform's settings (Phase 5, R5.1). Phase 9 adds the categories (R9.2),
+ * after the photographers they tag, and the read-only audit trail (R9.4),
+ * before the settings, which stay last. The guard is the route's (`RequireSession`, the
  * platform session); the API refuses the data itself.
  *
  * DOM order is skip link -> top bar -> wordmark -> links -> sign-out ->
@@ -24,9 +26,11 @@ import { EYEBROW } from '@/pages/admin/console/classes'
 
 const NAV = [
   { page: 'photographers', icon: Users },
+  { page: 'categories', icon: Tags },
   { page: 'subscriptions', icon: Repeat },
   { page: 'payouts', icon: Banknote },
   { page: 'refunds', icon: Undo2 },
+  { page: 'activity', icon: History },
   { page: 'settings', icon: SlidersHorizontal },
 ] as const
 

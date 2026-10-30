@@ -15,6 +15,11 @@
 > - **One banner at a time** above every page, from `GET /api/studio/me` (`admin/studio-me.ts` `studioBanner`), by priority: **suspended** (destructive, `CircleX`, the suspension words plus "Reason: …", the platform's text as plain text) > **pending, not submitted** (info, `ListChecks`, "Finish setting up your studio…", link "Go to setup") > **pending, submitted** (info, `Clock`, waiting for review) > **past due** (warning, `TriangleAlert`, ended + hidden-after dates, link) > **expired** (destructive) > **trial ending** (info, `Clock`, the date, link) > **period ending** (info). "Ending" is the API's `endingSoon`, no longer a seven-day rule in the browser; the subscription is no longer read separately. The subscription page drops the subscription banners and the setup page the pending ones (each says it all itself). Callout `variant="console"`, `px-4 pt-4 lg:px-12 lg:pt-6`, inside `#admin-content`; the link is underlined at rest. Any failure of `/me`: no banner.
 > - **Re-read:** a page asks the layout to read `/me` again (`useStudioRefresh`, and `useSubscriptionRefresh` for the subscription page): the setup page after a submit, the subscription page once a payment settles.
 
+> **Updated 2026-10-27 (Phase 9, platform console).** The platform console (`/platform/*`, `frontend/src/platform/PlatformLayout.tsx`) wears this shell with its own label and links; the studio's nav above is unchanged.
+> - **Label:** `nav[aria-label="Platform"]` (`platform:nav.label`); the top bar's cell and the page eyebrows say "PLATFORM". No breadcrumbs and no banners.
+> - **Links, in order (seven):** Photographers (`Users`; also `/platform/photographers/:id`), **Categories** (`Tags`, new), Subscriptions (`Repeat`), Payouts (`Banknote`; also `/platform/payouts/:id`), Refunds (`Undo2`), **Activity** (`History`, new), Settings (`SlidersHorizontal`, last). Content first, then money, then the read-only trail, then configuration. Below `lg` the seven wrap in the nav row, each 44px; recheck at 375px whenever one is added.
+> - Page files: `platform-photographer-detail.md`, `platform-categories.md`, `platform-activity.md`.
+
 ## Structure
 
 `AdminLayout.tsx` keeps one navigation element and lets it **reflow**: a sidebar from `lg` (1024px) up, a top bar below.

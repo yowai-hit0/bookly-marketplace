@@ -117,3 +117,62 @@ describe('the review filters', () => {
     expect(awaitsSubmission(row({ status: 'suspended' }))).toBe(false)
   })
 })
+
+describe('platformApi.get (Phase 9, the detail page)', () => {
+  const DETAIL = {
+    photographer: { ...row({ status: 'approved' }), approvedBy: { id: 'u1', email: 'admin@bookly.example' } },
+    profile: { bio: 'Portraits.', contactPhone: null, whatsappPhone: null, contactEmail: null, coverImageUrl: null, districts: [], categories: [] },
+    setup: { items: [{ key: 'workingHours', done: true }, { key: 'profile', done: true }], missing: [], canSubmit: false },
+    subscription: null,
+    payoutMethod: { id: 'm1', kind: 'momo', provider: 'mtn', accountName: 'Kigali Lens', last4: '3456', createdAt: '2026-10-01T00:00:00.000Z' },
+    methodChangedRecently: true,
+    counts: { bookings: { confirmed: 2 }, services: { total: 3, active: 2 } },
+    earnings: { payableRwf: -5_000, inDraftRwf: 0, paidOutRwf: 45_000 },
+    activity: [],
+  }
+
+  it('reads one photographer with the platform token, no cache', async () => {
+    const api = stubApi(() => json(DETAIL))
+    const detail = await platformApi.get('p 1')
+    expect(api.sent[0]?.url).toBe('/api/platform/photographers/p%201')
+    expect(api.sent[0]?.headers.get('Authorization')).toBe('Bearer platform.jwt')
+    expect(detail.photographer.approvedBy).toEqual({ id: 'u1', email: 'admin@bookly.example' })
+    expect(detail.earnings.payableRwf).toBe(-5_000)
+    expect(detail.methodChangedRecently).toBe(true)
+  })
+
+  it('fills what a partial answer leaves out: every booking status, the checklist in its order', async () => {
+    stubApi(() => json(DETAIL))
+    const detail = await platformApi.get('p1')
+    expect(detail.counts.bookings).toEqual({
+      pending_payment: 0,
+      confirmed: 2,
+      completed: 0,
+      no_show: 0,
+      expired: 0,
+      cancelled_by_client: 0,
+      cancelled_by_photographer: 0,
+      cancelled_by_platform: 0,
+    })
+    expect(detail.setup.items.map((item) => item.key)).toEqual(['profile', 'workingHours'])
+  })
+
+  it('survives an answer missing whole sections', async () => {
+    const { photographer } = DETAIL
+    stubApi(() => json({ photographer }))
+    const detail = await platformApi.get('p1')
+    expect(detail.profile.districts).toEqual([])
+    expect(detail.subscription).toBeNull()
+    expect(detail.payoutMethod).toBeNull()
+    expect(detail.methodChangedRecently).toBe(false)
+    expect(detail.earnings).toEqual({ payableRwf: 0, inDraftRwf: 0, paidOutRwf: 0 })
+    expect(detail.activity).toEqual([])
+  })
+
+  it('refuses a 404 and a 400 as ApiErrors the page tells apart from a failure', async () => {
+    stubApi(() => json({ error: 'not_found' }, 404))
+    await expect(platformApi.get('p1')).rejects.toMatchObject({ status: 404 })
+    stubApi(() => json({ error: 'invalid_request' }, 400))
+    await expect(platformApi.get('nope')).rejects.toMatchObject({ status: 400 })
+  })
+})

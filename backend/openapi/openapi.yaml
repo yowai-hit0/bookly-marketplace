@@ -83,6 +83,10 @@ tags:
     description: Refunds of money paid online, which sits in the platform's account (Phase 4).
   - name: Platform settings
     description: The checkout hold, the free trial and the subscription plan; every photographer's subscription (Phase 5).
+  - name: Platform categories
+    description: Creating, renaming, reordering, deactivating and deleting the directory's categories (Phase 9).
+  - name: Platform activity
+    description: The audit trail of every platform action (Phase 9).
   - name: Account auth
     description: Signup, login, email verification, password reset and Google sign-in for a client.
   - name: Account
@@ -253,6 +257,8 @@ paths:
     $ref: paths/platform.yaml#/me
   /api/platform/photographers:
     $ref: paths/platform.yaml#/photographers
+  /api/platform/photographers/{id}:
+    $ref: paths/platform-console.yaml#/photographer
   /api/platform/photographers/{id}/approve:
     $ref: paths/platform.yaml#/approve
   /api/platform/photographers/{id}/suspend:
@@ -277,6 +283,14 @@ paths:
     $ref: paths/platform-settings.yaml#/settings
   /api/platform/subscriptions:
     $ref: paths/platform-settings.yaml#/subscriptions
+  /api/platform/audit:
+    $ref: paths/platform-console.yaml#/audit
+  /api/platform/categories:
+    $ref: paths/platform-console.yaml#/categories
+  /api/platform/categories/order:
+    $ref: paths/platform-console.yaml#/categoriesOrder
+  /api/platform/categories/{id}:
+    $ref: paths/platform-console.yaml#/category
   # --- Account --------------------------------------------------------------
   /api/account/auth/login:
     $ref: paths/account.yaml#/login

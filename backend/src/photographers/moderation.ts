@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { enqueue } from '../outbox/enqueue.js';
+import { type AuditDetails, type AuditRecord, type PlatformAuditAction, logAudit, recordAudit } from '../platform/audit.js';
 import { getPlatformSettings } from '../settings/index.js';
 import { createTrialSubscription } from '../subscriptions/lifecycle.js';
 
@@ -22,7 +23,10 @@ import { createTrialSubscription } from '../subscriptions/lifecycle.js';
  *
  * Who did it and when is recorded on the row where the data model has a
  * column for it (`approved_by_user_id`, `approved_at`, `suspended_at`,
- * `suspension_reason`) and, for every action, in the structured log (R9.4).
+ * `suspension_reason`) and, for every action that changed something, in a
+ * `platform_audit` row written in the same transaction and a structured log
+ * line after it commits (R9.4, Phase 9; platform/audit.ts). A no-op and a
+ * refusal (`not_submitted`, `invalid_transition`) write neither.
  *
  * Suspension keeps every existing booking (marketplace-spec.md decisions
  * table): it changes the status only, and `photographers/bookable.ts` stops
@@ -79,7 +83,7 @@ export type ModerationResult =
 export type ModerationDeps = {
   prisma: PrismaClient;
   now: () => Date;
-  /** The structured log (R9.4). Defaults to one JSON line on stdout. */
+  /** The structured log (R9.4; platform/audit.ts `logAudit`). Defaults to one JSON line on stdout. */
   log?: (entry: Record<string, unknown>) => void;
 };
 
@@ -133,6 +137,12 @@ export async function listPhotographers(prisma: PrismaClient, filters: Photograp
   return rows.map(toPlatformPhotographer);
 }
 
+/** One photographer as the console lists them, or null for an id that names nobody. */
+export async function findPlatformPhotographer(prisma: PrismaClient, photographerId: string): Promise<PlatformPhotographer | null> {
+  const row = await prisma.photographer.findUnique({ where: { id: photographerId }, select: SELECT });
+  return row === null ? null : toPlatformPhotographer(row);
+}
+
 /**
  * pending -> approved, recording who and when; starts the subscription and its
  * trial (R5.1), and emails `photographer_approved` with the trial's end. Only a
@@ -148,7 +158,7 @@ export function approvePhotographer(deps: ModerationDeps, action: ModerationActi
              updated_at = ${now}::timestamptz
        WHERE id = ${action.photographerId}::uuid AND status = 'pending' AND submitted_at IS NOT NULL
       RETURNING id`;
-    if (rows.length === 0) return false;
+    if (rows.length === 0) return null;
 
     // After the photographer row (held by the UPDATE above): the lock order of
     // every subscription writer is photographer, then subscription (payments/webhooks.ts).
@@ -169,7 +179,11 @@ export function approvePhotographer(deps: ModerationDeps, action: ModerationActi
         ...(subscription.created ? { trialEndsAt: subscription.currentPeriodEndsAt.toISOString() } : {}),
       },
     });
-    return true;
+    return {
+      status: 'approved',
+      trialStarted: subscription.created,
+      trialEndsAt: subscription.created ? subscription.currentPeriodEndsAt.toISOString() : null,
+    };
   });
 }
 
@@ -183,7 +197,7 @@ export function suspendPhotographer(deps: ModerationDeps, action: ModerationActi
              updated_at = ${now}::timestamptz
        WHERE id = ${action.photographerId}::uuid AND status IN ('pending', 'approved')
       RETURNING id`;
-    if (rows.length === 0) return false;
+    if (rows.length === 0) return null;
 
     const photographer = await tx.photographer.findUniqueOrThrow({ where: { id: action.photographerId }, select: SELECT });
     await enqueue(tx, {
@@ -194,7 +208,7 @@ export function suspendPhotographer(deps: ModerationDeps, action: ModerationActi
       dedupeKey: `email:photographer_suspended:${photographer.id}:${now.toISOString()}`,
       payload: { displayName: photographer.displayName, reason: action.reason },
     });
-    return true;
+    return { status: 'suspended', reason: action.reason };
   });
 }
 
@@ -208,18 +222,28 @@ export function suspendPhotographer(deps: ModerationDeps, action: ModerationActi
 export function reactivatePhotographer(deps: ModerationDeps, action: ModerationAction): Promise<ModerationResult> {
   const now = deps.now();
   return transition(deps, action, now, 'reactivate', null, async (tx) => {
-    const rows = await tx.$queryRaw<{ id: string }[]>`
+    const rows = await tx.$queryRaw<{ status: string }[]>`
       UPDATE photographer
          SET status = CASE WHEN approved_at IS NULL THEN 'pending' ELSE 'approved' END,
              suspended_at = NULL, suspension_reason = NULL, updated_at = ${now}::timestamptz
        WHERE id = ${action.photographerId}::uuid AND status = 'suspended'
-      RETURNING id`;
-    return rows.length > 0;
+      RETURNING status`;
+    const row = rows[0];
+    return row === undefined ? null : { status: row.status };
   });
 }
 
+const AUDIT_ACTIONS: Record<'approve' | 'suspend' | 'reactivate', PlatformAuditAction> = {
+  approve: 'photographer_approved',
+  suspend: 'photographer_suspended',
+  reactivate: 'photographer_reactivated',
+};
+
 /**
  * Runs one guarded transition in a transaction and classifies a no-op.
+ * `apply` answers the audit row's details when it changed the photographer, or
+ * null when its guarded UPDATE matched nothing; the audit row is written in the
+ * same transaction, so a no-op or a refusal writes none.
  * `target` is the status a no-op counts as already done for; null means any
  * status but `suspended` (reactivating a photographer who is not suspended
  * changes nothing and is not an error).
@@ -230,22 +254,29 @@ async function transition(
   now: Date,
   name: 'approve' | 'suspend' | 'reactivate',
   target: PhotographerStatus | null,
-  apply: (tx: Prisma.TransactionClient) => Promise<boolean>,
+  apply: (tx: Prisma.TransactionClient) => Promise<AuditDetails | null>,
 ): Promise<ModerationResult> {
-  const changed = await deps.prisma.$transaction(apply);
+  const audit: AuditRecord | null = await deps.prisma.$transaction(async (tx) => {
+    const details = await apply(tx);
+    if (details === null) return null;
+    return recordAudit(
+      tx,
+      {
+        actorUserId: action.adminUserId,
+        action: AUDIT_ACTIONS[name],
+        target: { type: 'photographer', id: action.photographerId },
+        photographerId: action.photographerId,
+        details,
+      },
+      now,
+    );
+  });
   const row = await deps.prisma.photographer.findUnique({ where: { id: action.photographerId }, select: SELECT });
   if (row === null) return { status: 'not_found' };
 
   const photographer = toPlatformPhotographer(row);
-  if (changed) {
-    (deps.log ?? logLine)({
-      level: 'info',
-      event: `photographer_${name}`,
-      photographerId: action.photographerId,
-      byUserId: action.adminUserId,
-      at: now.toISOString(),
-      status: photographer.status,
-    });
+  if (audit !== null) {
+    logAudit(deps.log, [audit]);
     return { status: 'ok', changed: true, photographer };
   }
   const alreadyDone = target === null ? photographer.status !== 'suspended' : photographer.status === target;
@@ -270,8 +301,4 @@ function toPlatformPhotographer(row: SelectedPhotographer): PlatformPhotographer
     suspendedAt: row.suspendedAt?.toISOString() ?? null,
     suspensionReason: row.suspensionReason,
   };
-}
-
-function logLine(entry: Record<string, unknown>): void {
-  console.log(JSON.stringify(entry));
 }

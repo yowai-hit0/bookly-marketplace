@@ -365,8 +365,10 @@ describe('delete', () => {
     await user.click(dialog.getByRole('button', { name: 'Yes, delete my account' }))
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/account/deleted'))
-    expect(readSession('account')).toBeNull()
+    // The deleted page forgets the session once it is on screen (so the
+    // profile's guard can't race it to the login): wait for that page first.
     expect(await screen.findByRole('heading', { level: 1, name: 'Your account is deleted' })).toBeInTheDocument()
+    expect(readSession('account')).toBeNull()
     expect(stub.sent.find((call) => call.url === '/api/account/delete')?.body).toEqual({ password: 'my password' })
     expect(within(screen.getByRole('banner')).getByRole('link', { name: 'Sign in' })).toBeInTheDocument()
   })

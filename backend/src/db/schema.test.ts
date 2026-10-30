@@ -30,10 +30,11 @@ beforeEach(async () => {
  * The 14 single-photographer tables, less `admin_user` and `setting`, plus the
  * nine Phase 1 adds (marketplace-spec.md brief decision 1), plus Phase 2's
  * `oauth_flow` (decision 6), plus Phase 4's `payout_method`, `payout` and
- * `payout_item`, plus Phase 5's `subscription` and `subscription_period`: 27,
- * the marketplace's full count (marketplace-data-model.md, amendments).
+ * `payout_item`, plus Phase 5's `subscription` and `subscription_period`, plus
+ * Phase 9's `platform_audit`: 28, the marketplace's full count
+ * (marketplace-data-model.md, amendments).
  */
-const APPLICATION_TABLE_COUNT = 27;
+const APPLICATION_TABLE_COUNT = 28;
 
 /** Phase 5's tables (marketplace-data-model.md §3.7). */
 const SUBSCRIPTION_TABLES = ['subscription', 'subscription_period'];
@@ -146,7 +147,7 @@ const SLOT = { startsAt: NINE, endsAt: TEN, bufferEndsAt: TEN_THIRTY };
 // --- Shape ------------------------------------------------------------------
 
 describe('the schema', () => {
-  it('has 27 application tables (Phase 1 of the marketplace, Phase 2 oauth_flow, Phase 4 payouts, Phase 5 subscriptions) plus Prisma migration history, and no view', async () => {
+  it('has 28 application tables (Phase 1 of the marketplace, Phase 2 oauth_flow, Phase 4 payouts, Phase 5 subscriptions, Phase 9 platform_audit) plus Prisma migration history, and no view', async () => {
     const tables = await db.query<{ tablename: string }>(
       `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`,
     );
@@ -1420,6 +1421,82 @@ describe('categories', () => {
   it('refuses a slug that is not URL-safe', async () => {
     expect(await sqlstateOf(db, () => db.query(`INSERT INTO category (slug, name_en) VALUES ('Real Estate', 'Real estate')`))).toBe('23514');
     await db.query(`INSERT INTO category (slug, name_en) VALUES ('real-estate', 'Real estate')`);
+  });
+});
+
+// --- The platform's audit trail (Phase 9) ------------------------------------------
+
+describe('platform_audit (Phase 9, R9.4)', () => {
+  async function insertAdmin(email = 'admin@example.com'): Promise<string> {
+    const user = await db.query<{ id: string }>(
+      `INSERT INTO app_user (email, role, password_hash) VALUES ($1, 'platform_admin', 'x') RETURNING id`,
+      [email],
+    );
+    return firstRow(user).id;
+  }
+  const insertAudit = (columns: Record<string, unknown>) => {
+    const keys = Object.keys(columns);
+    return db.query(
+      `INSERT INTO platform_audit (${keys.join(', ')}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING *`,
+      Object.values(columns),
+    );
+  };
+
+  it('holds the vocabulary of platform/audit.ts, exactly', async () => {
+    const { PLATFORM_AUDIT_ACTIONS, PLATFORM_AUDIT_TARGET_TYPES } = await import('../platform/audit.js');
+    const defOf = async (name: string) =>
+      firstRow(await db.query<{ def: string }>(`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = $1`, [name])).def;
+    const values = (def: string) => [...def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]).sort();
+
+    expect(values(await defOf('platform_audit_action_allowed'))).toEqual([...PLATFORM_AUDIT_ACTIONS].sort());
+    expect(values(await defOf('platform_audit_target_type_allowed'))).toEqual([...PLATFORM_AUDIT_TARGET_TYPES].sort());
+  });
+
+  it('accepts a full row, defaulting details to an empty object', async () => {
+    const actor = await insertAdmin();
+    const photographerId = await insertPhotographer();
+    const row = firstRow(await insertAudit({ actor_user_id: actor, action: 'photographer_approved', target_type: 'photographer', target_id: photographerId, photographer_id: photographerId }));
+    expect(row).toMatchObject({ details: {}, photographer_id: photographerId });
+    // A target with no uuid: the settings row.
+    await insertAudit({ actor_user_id: actor, action: 'settings_updated', target_type: 'platform_setting', details: JSON.stringify({ changed: { trialDays: { before: 30, after: 14 } } }) });
+  });
+
+  it.each<[string, Record<string, unknown>]>([
+    ['an action outside the vocabulary', { action: 'photographer_deleted' }],
+    ['a target type outside the vocabulary', { action: 'category_created', target_type: 'booking' }],
+    ['a target id with no type', { action: 'category_created', target_id: '00000000-0000-4000-8000-000000000001' }],
+    ['details that are not an object', { action: 'category_created', details: JSON.stringify(['x']) }],
+  ])('refuses %s', async (_label, columns) => {
+    const actor = await insertAdmin();
+    expect(await sqlstateOf(db, () => insertAudit({ actor_user_id: actor, ...columns }))).toBe('23514');
+  });
+
+  it('requires an actor that exists, and a photographer that exists', async () => {
+    const actor = await insertAdmin();
+    expect(await sqlstateOf(db, () => insertAudit({ action: 'category_created' }))).toBe('23502');
+    expect(await sqlstateOf(db, () => insertAudit({ actor_user_id: '00000000-0000-4000-8000-000000000001', action: 'category_created' }))).toBe('23503');
+    expect(
+      await sqlstateOf(db, () => insertAudit({ actor_user_id: actor, action: 'payout_created', photographer_id: '00000000-0000-4000-8000-000000000001' })),
+    ).toBe('23503');
+  });
+
+  it('keeps history: the acting admin and the photographer cannot be deleted while a row names them (RESTRICT)', async () => {
+    const actor = await insertAdmin();
+    const photographerId = await insertPhotographer();
+    await insertAudit({ actor_user_id: actor, action: 'photographer_suspended', target_type: 'photographer', target_id: photographerId, photographer_id: photographerId });
+
+    expect(await sqlstateOf(db, () => db.query(`DELETE FROM app_user WHERE id = $1`, [actor]))).toBe('23503');
+    expect(await sqlstateOf(db, () => db.query(`DELETE FROM photographer WHERE id = $1`, [photographerId]))).toBe('23503');
+  });
+
+  it('has the two newest-first indexes', async () => {
+    const result = await db.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'platform_audit' AND indexname <> 'platform_audit_pkey' ORDER BY indexname`,
+    );
+    expect(result.rows.map((row) => [row.indexname, /\(created_at DESC\)|\(photographer_id, created_at DESC\)/.test(row.indexdef)])).toEqual([
+      ['platform_audit_created_at_idx', true],
+      ['platform_audit_photographer_id_created_at_idx', true],
+    ]);
   });
 });
 

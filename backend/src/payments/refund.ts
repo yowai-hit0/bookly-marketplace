@@ -1,5 +1,7 @@
 import type { Payment, Prisma, PrismaClient } from '@prisma/client';
+import { refundAmountRwf } from '../booking/totals.js';
 import { isUniqueViolation } from '../db/errors.js';
+import { type AuditLog, type AuditRecord, logAudit, recordAudit } from '../platform/audit.js';
 
 /**
  * Recording a refund that has already been sent (plan.md Task 19; spec §6.16,
@@ -46,6 +48,12 @@ import { isUniqueViolation } from '../db/errors.js';
  * same answer). Cash references are the photographer's own words ("handed
  * back at the studio") and stay outside the rule.
  *
+ * A platform recording also writes a `refund_recorded` row to the platform's
+ * audit trail in its own transaction (Phase 9, R9.4; platform/audit.ts): the
+ * payment, the kind, the amount sent back and the reference -- never the
+ * client's contact details -- and a log line once it commits. A refusal writes
+ * neither.
+ *
  * In the studio, only a payment on the signed-in photographer's own bookings
  * (R1.4): another photographer's payment is `not_found` and is left exactly as
  * it was. Who recorded it is written on the payment (`refunded_by_user_id`).
@@ -79,6 +87,8 @@ export type RecordRefundDeps = {
   prisma: PrismaClient;
   now: () => Date;
   actor: RefundActor;
+  /** The platform's structured log of the recording (R9.4). */
+  log?: AuditLog;
 };
 
 export type RefundInput = {
@@ -121,7 +131,7 @@ export function pendingRefundKind(payment: { status: string; overpaidRwf: number
   return null;
 }
 
-type OnlineOutcome = Exclude<RecordRefundResult, { status: 'recorded' }> | { status: 'recorded'; refundKind: RefundKind };
+type OnlineOutcome = Exclude<RecordRefundResult, { status: 'recorded' }> | { status: 'recorded'; refundKind: RefundKind; audit: AuditRecord };
 
 /**
  * A platform admin's record of money paid online sent back. It takes no booking
@@ -149,19 +159,38 @@ async function recordOnlineRefund(deps: RecordRefundDeps, userId: string, paymen
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('bookly.refund_reference:' || ${refund.reference}))`;
       if (await onlineReferenceTaken(tx, refund.reference)) return { status: 'duplicate_refund_reference' };
 
-      if (pending === 'full') {
-        await tx.payment.update({
-          where: { id: paymentId },
-          data: { status: 'refunded', refundedAt, refundReference: refund.reference, refundedByUserId: userId },
-        });
-      } else {
-        // The status stays `succeeded`: the part that was due is still money correctly held.
-        await tx.payment.update({
-          where: { id: paymentId },
-          data: { overpaymentRefundedAt: refundedAt, overpaymentRefundReference: refund.reference, overpaymentRefundedByUserId: userId },
-        });
-      }
-      return { status: 'recorded', refundKind: pending };
+      const select = { kind: true, status: true, amountRwf: true, overpaidRwf: true, overpaymentRefundedAt: true, booking: { select: { id: true, photographerId: true } } } as const;
+      const updated =
+        pending === 'full'
+          ? await tx.payment.update({
+              where: { id: paymentId },
+              data: { status: 'refunded', refundedAt, refundReference: refund.reference, refundedByUserId: userId },
+              select,
+            })
+          : // The status stays `succeeded`: the part that was due is still money correctly held.
+            await tx.payment.update({
+              where: { id: paymentId },
+              data: { overpaymentRefundedAt: refundedAt, overpaymentRefundReference: refund.reference, overpaymentRefundedByUserId: userId },
+              select,
+            });
+      const audit = await recordAudit(
+        tx,
+        {
+          actorUserId: userId,
+          action: 'refund_recorded',
+          target: { type: 'payment', id: paymentId },
+          photographerId: updated.booking?.photographerId ?? null,
+          details: {
+            paymentKind: updated.kind,
+            refundKind: pending,
+            amountRwf: pending === 'full' ? refundAmountRwf(updated) : updated.overpaidRwf,
+            reference: refund.reference,
+            bookingId: updated.booking?.id ?? null,
+          },
+        },
+        deps.now(),
+      );
+      return { status: 'recorded', refundKind: pending, audit };
     });
   } catch (error) {
     // A recording that slipped past the check: the partial uniques refuse it the same way.
@@ -169,6 +198,7 @@ async function recordOnlineRefund(deps: RecordRefundDeps, userId: string, paymen
     throw error;
   }
   if (outcome.status !== 'recorded') return outcome;
+  logAudit(deps.log, [outcome.audit]);
   const payment = await deps.prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
   return { status: 'recorded', payment, refundKind: outcome.refundKind };
 }

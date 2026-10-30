@@ -1,0 +1,238 @@
+# The platform console's Phase 9 pages: one photographer's detail, the audit
+# trail (R9.4) and the categories (R9.2). Every operation requires a platform
+# admin's bearer token (`platformBearer`); a photographer's or a client's token
+# is a 401, whatever it says.
+
+photographer:
+  get:
+    operationId: getPlatformPhotographer
+    tags: [Platform photographers]
+    summary: One photographer, in full
+    description: |
+      Everything the console's detail page shows, in one read: the moderation
+      record and who approved them; the profile, with every category they are
+      tagged with (inactive ones marked); the setup checklist as it stands;
+      the subscription with its periods (status at the clock); the current
+      payout method, MASKED (the full number stays on the payouts screen),
+      with the 72-hour flag; bookings by status and services; earnings
+      (payable now, in a draft, paid out); and the latest 20 audit rows about
+      them.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '200':
+        description: The photographer.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformPhotographerDetail }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+
+audit:
+  get:
+    operationId: listPlatformAudit
+    tags: [Platform activity]
+    summary: The audit trail
+    description: |
+      Every platform action that changed something, newest first, 50 a page
+      (R9.4). Each row was written in the same transaction as its change, so
+      a refused or failed action has none. A page past the end is empty. An
+      unknown or repeated key, a malformed id or page is `400`; a page below
+      1 or above 1,000,000 is `422`.
+    security:
+      - platformBearer: []
+    parameters:
+      - name: action
+        in: query
+        required: false
+        schema: { $ref: ../components/platform.yaml#/schemas/AuditAction }
+      - name: photographerId
+        in: query
+        required: false
+        description: Only the rows about this photographer.
+        schema: { $ref: ../components/common.yaml#/schemas/Uuid }
+      - name: page
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+    responses:
+      '200':
+        description: One page of the trail.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/AuditPage }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+
+categories:
+  get:
+    operationId: listPlatformCategories
+    tags: [Platform categories]
+    summary: Every category
+    description: Active and inactive, in the platform's order, each with how many photographers have it.
+    security:
+      - platformBearer: []
+    responses:
+      '200':
+        description: The categories.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformCategoryList }
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+  post:
+    operationId: createPlatformCategory
+    tags: [Platform categories]
+    summary: Create a category
+    description: |
+      A new active category, last in the order. The slug is lowercase
+      letters and digits in hyphen-separated words, at most 64 characters,
+      and never changes afterwards (it is in shared directory links): a
+      malformed one is `400`, a long one `422`, one already used by any
+      category, active or not, `409 slug_taken`.
+    security:
+      - platformBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [slug, nameEn]
+            additionalProperties: false
+            properties:
+              slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 64, examples: [real-estate] }
+              nameEn: { $ref: ../components/platform.yaml#/schemas/CategoryName }
+    responses:
+      '201':
+        description: Created.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformCategoryEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '409':
+        description: The slug is taken (`slug_taken`).
+        content:
+          application/json:
+            schema: { $ref: ../components/common.yaml#/schemas/Error }
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+
+categoriesOrder:
+  put:
+    operationId: reorderPlatformCategories
+    tags: [Platform categories]
+    summary: Reorder the categories
+    description: |
+      Every category's id, each once, in the new order; `sort_order` becomes
+      0..n-1. A missing, extra, repeated or unknown id is `422 { fields:
+      ['ids'] }` and changes nothing; a malformed one is `400`.
+    security:
+      - platformBearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ids]
+            additionalProperties: false
+            properties:
+              ids:
+                type: array
+                items: { $ref: ../components/common.yaml#/schemas/Uuid }
+    responses:
+      '200':
+        description: Every category, in the new order.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformCategoryList }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+
+category:
+  patch:
+    operationId: updatePlatformCategory
+    tags: [Platform categories]
+    summary: Rename, deactivate or reactivate a category
+    description: |
+      Any subset. The slug is immutable: a `slug` key is a `400`.
+      Deactivating hides the category from the public filter bar, the
+      directory (its slug then filters like an unknown one, `422`), the
+      cards, the profiles and the studio's picker, while every photographer
+      keeps it; a studio with only inactive categories has its checklist's
+      `categories` item undone. Reactivating restores all of it.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              nameEn: { $ref: ../components/platform.yaml#/schemas/CategoryName }
+              isActive: { type: boolean }
+    responses:
+      '200':
+        description: The category as it now is.
+        content:
+          application/json:
+            schema: { $ref: ../components/platform.yaml#/schemas/PlatformCategoryEnvelope }
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '422':
+        $ref: ../components/common.yaml#/responses/ValidationFailed
+  delete:
+    operationId: deletePlatformCategory
+    tags: [Platform categories]
+    summary: Delete a category nobody uses
+    description: Allowed only while no photographer, of any status, has it; deactivate it instead.
+    security:
+      - platformBearer: []
+    parameters:
+      - $ref: ../components/common.yaml#/parameters/RowId
+    responses:
+      '204':
+        description: Deleted.
+      '400':
+        $ref: ../components/common.yaml#/responses/BadRequest
+      '401':
+        $ref: ../components/common.yaml#/responses/Unauthorized
+      '404':
+        $ref: ../components/common.yaml#/responses/NotFound
+      '409':
+        description: Photographers have it (`category_in_use`), with how many.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [error, photographerCount]
+              additionalProperties: false
+              properties:
+                error: { const: category_in_use }
+                photographerCount: { type: integer, minimum: 1 }

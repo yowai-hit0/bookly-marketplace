@@ -1,45 +1,37 @@
-import { CircleAlert, CircleCheck, CircleX, Clock, PencilLine, Users } from 'lucide-react'
-import { type FormEvent, useEffect, useId, useState } from 'react'
+import { CircleAlert, CircleCheck, Users } from 'lucide-react'
+import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { kigaliDateOf } from '@/admin/calendar-dates'
-import { ApiError, UnauthenticatedError } from '@/auth/api'
-import { Badge } from '@/components/ui/badge'
+import { UnauthenticatedError } from '@/auth/api'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { formatDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import {
   type Moderation,
   PHOTOGRAPHER_STATUSES,
-  type PhotographerStatus,
   type PhotographerFilter,
   type PlatformPhotographer,
   REVIEW_FILTERS,
   type ReviewFilter,
-  awaitsSubmission,
   handleChangedSinceSubmission,
   isPhotographerStatus,
   isReviewFilter,
   matchesFilter,
-  movesFor,
-  normalisePhotographer,
   platformApi,
 } from '@/platform/photographers'
-import { AdminField } from '@/pages/admin/AdminField'
-import { FormDialog } from '@/pages/admin/console/FormDialog'
 import { PageHeader } from '@/pages/admin/console/PageHeader'
 import { Line, LoadingRegion } from '@/pages/admin/console/Skeletons'
 import { Toolbar, ToolbarCell } from '@/pages/admin/console/Toolbar'
-import { EYEBROW, META, PAGE, SELECT, TD, TEXTAREA, TH, TR } from '@/pages/admin/console/classes'
-
-/** The API's cap on a suspension reason, trimmed. */
-const MAX_REASON = 500
+import { EYEBROW, LINK, META, PAGE, SELECT, TD, TH, TR } from '@/pages/admin/console/classes'
+import { HandleChangedBadge, ModerationButtons, ModerationDialog, type PendingModeration, PhotographerStatusBadge } from './PhotographerModeration'
 
 type Notice = { tone: 'success' | 'warning'; text: string }
-type Pending = { photographer: PlatformPhotographer; action: Moderation }
+
+/** The list's view, carried to a photographer's detail page so its Back link returns to it. */
+export type PhotographersListState = { listSearch: string }
 
 /**
  * `/platform/photographers` (Phase 2 brief decision 7): every photographer,
@@ -76,7 +68,7 @@ export function PlatformPhotographers() {
   const [rows, setRows] = useState<{ key: string; list: PlatformPhotographer[] } | null>(null)
   const [failedFor, setFailedFor] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
-  const [pending, setPending] = useState<Pending | null>(null)
+  const [pending, setPending] = useState<PendingModeration | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const key = review === undefined ? (status ?? 'all') : `review:${review}`
   // A failure belongs to the load that failed: another filter or a retry is a new load.
@@ -252,14 +244,18 @@ export function PlatformPhotographers() {
                 <tr key={photographer.id} role="row" className={cn(TR, '@max-[48rem]:flex @max-[48rem]:flex-col @max-[48rem]:gap-2 @max-[48rem]:py-4')}>
                   <td role="cell" className={cn(TD, '@max-[48rem]:p-0')}>
                     <div className="flex flex-col gap-1">
-                      <span className="wrap-anywhere">{photographer.displayName}</span>
+                      <Link
+                        to={`/platform/photographers/${encodeURIComponent(photographer.id)}`}
+                        state={{ listSearch: params.toString() } satisfies PhotographersListState}
+                        data-photographer-link={photographer.id}
+                        className={cn(LINK, 'self-start wrap-anywhere inline-flex items-center max-lg:min-h-11 pointer-coarse:min-h-11')}
+                      >
+                        {photographer.displayName}
+                      </Link>
                       <span className={cn(META, 'font-mono')}>/p/{photographer.handle}</span>
                       {handleChangedSinceSubmission(photographer) && (
                         <div className="flex flex-col items-start gap-1" data-handle-changed={photographer.handleChangedAt}>
-                          <Badge variant="console" className="bg-console-warning-tint text-console-warning">
-                            <PencilLine aria-hidden="true" />
-                            {t('platform:photographers.handleChanged')}
-                          </Badge>
+                          <HandleChangedBadge />
                           <span className={cn(META, 'wrap-anywhere')}>
                             {t('platform:photographers.handleChangedDetail', {
                               handle: photographer.handle,
@@ -275,7 +271,7 @@ export function PlatformPhotographers() {
                   </td>
                   <td role="cell" className={cn(TD, '@max-[48rem]:p-0')}>
                     <div className="flex flex-col items-start gap-1">
-                      <StatusBadge status={photographer.status} />
+                      <PhotographerStatusBadge status={photographer.status} />
                       {photographer.status === 'suspended' && photographer.suspensionReason !== null && (
                         <span className={cn(META, 'wrap-anywhere')}>
                           {t('platform:photographers.suspendedReason', { reason: photographer.suspensionReason })}
@@ -298,35 +294,15 @@ export function PlatformPhotographers() {
                     )}
                   </td>
                   <td role="cell" className={cn(TD, '@max-[48rem]:p-0')}>
-                    <div className="flex flex-col gap-1.5 @min-[48rem]:items-end">
-                      <div className="flex flex-wrap gap-2 @min-[48rem]:flex-nowrap @min-[48rem]:justify-end">
-                        {movesFor(photographer.status).map((action) => {
-                          const blocked = action === 'approve' && awaitsSubmission(photographer)
-                          return (
-                            <Button
-                              key={action}
-                              variant="console-outline"
-                              size="console-sm"
-                              // Every row has the same verbs: the name says whose, and starts with the visible word.
-                              aria-label={`${t(`platform:photographers.${action}`)} ${photographer.displayName}`}
-                              disabled={blocked}
-                              aria-describedby={blocked ? `${photographer.id}-not-submitted` : undefined}
-                              onClick={() => {
-                                setNotice(null)
-                                setPending({ photographer, action })
-                              }}
-                            >
-                              {t(`platform:photographers.${action}`)}
-                            </Button>
-                          )
-                        })}
-                      </div>
-                      {awaitsSubmission(photographer) && (
-                        <p id={`${photographer.id}-not-submitted`} className="text-muted-foreground text-[0.8125rem]">
-                          {t('platform:photographers.approveNeedsSubmission')}
-                        </p>
-                      )}
-                    </div>
+                    <ModerationButtons
+                      photographer={photographer}
+                      className="@min-[48rem]:items-end"
+                      buttonsClassName="@min-[48rem]:flex-nowrap @min-[48rem]:justify-end"
+                      onChoose={(next) => {
+                        setNotice(null)
+                        setPending(next)
+                      }}
+                    />
                   </td>
                 </tr>
               ))}
@@ -336,7 +312,7 @@ export function PlatformPhotographers() {
       )}
 
       {pending !== null && (
-        <ConfirmDialog
+        <ModerationDialog
           key={`${pending.photographer.id}:${pending.action}`}
           pending={pending}
           onClose={() => setPending(null)}
@@ -384,140 +360,5 @@ function ReviewViews({ review, onChoose }: { review: ReviewFilter | undefined; o
         })}
       </ul>
     </nav>
-  )
-}
-
-/** The status in a console badge: its word, with an icon of its own shape, never colour alone. */
-function StatusBadge({ status }: { status: PhotographerStatus }) {
-  const { t } = useTranslation()
-  const label = t(`platform:photographers.status.${status}`)
-  if (status === 'approved') {
-    return (
-      <Badge variant="console-success">
-        <CircleCheck aria-hidden="true" />
-        {label}
-      </Badge>
-    )
-  }
-  if (status === 'suspended') {
-    return (
-      <Badge variant="console" className="bg-console-danger-tint text-destructive">
-        <CircleX aria-hidden="true" />
-        {label}
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="console">
-      <Clock aria-hidden="true" />
-      {label}
-    </Badge>
-  )
-}
-
-/**
- * The confirmation step. A suspension asks for its reason (1 to 500
- * characters, trimmed); approve and reactivate only confirm. A refusal that
- * the dialog can fix (the reason) or retry (a failure) stays in it; a stale
- * or vanished row closes it and the page says why.
- */
-function ConfirmDialog({
-  pending,
-  onClose,
-  onDone,
-  onStale,
-  onNotSubmitted,
-  onGone,
-}: {
-  pending: Pending
-  onClose: () => void
-  onDone: (action: Moderation, photographer: PlatformPhotographer) => void
-  onStale: (photographer: PlatformPhotographer) => void
-  onNotSubmitted: (photographer: PlatformPhotographer) => void
-  onGone: (id: string) => void
-}) {
-  const { t } = useTranslation()
-  const { photographer, action } = pending
-  const name = photographer.displayName
-  const [busy, setBusy] = useState(false)
-  const [reasonError, setReasonError] = useState(false)
-  const [failed, setFailed] = useState(false)
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (busy) return
-    const reason = String(new FormData(event.currentTarget).get('reason') ?? '').trim()
-    if (action === 'suspend' && (reason === '' || reason.length > MAX_REASON)) {
-      setReasonError(true)
-      return
-    }
-    setReasonError(false)
-    setFailed(false)
-    setBusy(true)
-    try {
-      const answer =
-        action === 'approve'
-          ? await platformApi.approve(photographer.id)
-          : action === 'suspend'
-            ? await platformApi.suspend(photographer.id, reason)
-            : await platformApi.reactivate(photographer.id)
-      onDone(action, answer)
-    } catch (error) {
-      setBusy(false)
-      if (error instanceof UnauthenticatedError) return
-      if (error instanceof ApiError && error.status === 409) {
-        const now = (error.body as { photographer?: PlatformPhotographer } | null)?.photographer
-        if (now !== undefined && error.message === 'not_submitted') {
-          onNotSubmitted(normalisePhotographer(now))
-          return
-        }
-        if (now !== undefined) {
-          onStale(normalisePhotographer(now))
-          return
-        }
-      }
-      if (error instanceof ApiError && error.status === 404) {
-        onGone(photographer.id)
-        return
-      }
-      if (error instanceof ApiError && error.status === 422) {
-        setReasonError(true)
-        return
-      }
-      setFailed(true)
-    }
-  }
-
-  const title = t(`platform:photographers.confirm.${action}Title`, { name })
-  const body = t(`platform:photographers.confirm.${action}Body`)
-
-  return (
-    <FormDialog open onClose={onClose} title={title} description={body}>
-      <form className="flex flex-col gap-4" noValidate onSubmit={(event) => void onSubmit(event)}>
-        {action === 'suspend' && (
-          <AdminField
-            label={t('platform:photographers.confirm.reason')}
-            hint={t('platform:photographers.confirm.reasonHint')}
-            error={reasonError ? t('platform:photographers.confirm.reasonRequired') : null}
-          >
-            {(props) => <Textarea {...props} name="reason" rows={3} maxLength={MAX_REASON} required className={TEXTAREA} />}
-          </AdminField>
-        )}
-        {failed && (
-          <p className="text-destructive flex items-start gap-2 text-sm" role="alert">
-            <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            {t('platform:photographers.failed')}
-          </p>
-        )}
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Button type="button" variant="console-outline" size="console" onClick={onClose}>
-            {t('platform:photographers.confirm.cancel')}
-          </Button>
-          <Button type="submit" variant={action === 'suspend' ? 'console-destructive-solid' : 'default'} size="console" disabled={busy}>
-            {busy ? t('platform:photographers.confirm.working') : t(`platform:photographers.${action}`)}
-          </Button>
-        </div>
-      </form>
-    </FormDialog>
   )
 }

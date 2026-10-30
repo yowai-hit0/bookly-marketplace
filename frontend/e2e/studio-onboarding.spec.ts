@@ -255,7 +255,8 @@ test('a photographer signs up, sets up, submits; the platform approves; the stud
   await page.goto('/studio/verify/emailed-token')
   await page.getByLabel('Password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Confirm and sign in' }).click()
-  await expect(page).toHaveURL(/\/studio\/calendar$/)
+  // The calendar then writes its own view and date into the query.
+  await expect(page).toHaveURL(/\/studio\/calendar(\?|$)/)
 
   // The banner says what to do next; Setup is first in the nav while pending.
   const banner = page.locator('[data-studio-banner="setup"]')

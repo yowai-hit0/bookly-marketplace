@@ -3,6 +3,7 @@ import { refundAmountRwf } from '../booking/totals.js';
 import { isUniqueViolation } from '../db/errors.js';
 import { enqueue } from '../outbox/enqueue.js';
 import { photographerRecipient } from '../outbox/recipients.js';
+import { type AuditLog, type AuditRecord, logAudit, recordAudit } from '../platform/audit.js';
 import { type RefundKind, pendingRefundKind } from '../payments/refund.js';
 import { payableItems, payablePredicate, releaseDraftItems } from './ledger.js';
 import { type PayoutMethodView, currentPayoutMethod, maskedDestination, payoutMethodView } from './method.js';
@@ -15,7 +16,13 @@ import { type PayoutMethodView, currentPayoutMethod, maskedDestination, payoutMe
  *
  * Every action takes the platform admin from the verified token and writes them
  * on the row: who built (`created_by_user_id`), who paid (`paid_by_user_id`),
- * who cancelled (`cancelled_by_user_id`) -- Security summary, money out.
+ * who cancelled (`cancelled_by_user_id`) -- Security summary, money out. Each
+ * also writes a `platform_audit` row in its own transaction (Phase 9, R9.4;
+ * platform/audit.ts) -- `payout_created`, `payout_paid` with the transfer
+ * reference, `payout_cancelled` -- and a log line once it commits. A refusal
+ * (`draft_exists`, `nothing_payable`, `not_draft`, a duplicate reference)
+ * writes neither. The internal `note` and the destination's number are never
+ * in the row.
  *
  * Concurrency. A build takes a per-photographer advisory lock, so two builds
  * for one photographer queue: the second sees the first's draft and is
@@ -30,7 +37,7 @@ import { type PayoutMethodView, currentPayoutMethod, maskedDestination, payoutMe
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-export type PayoutDeps = { prisma: PrismaClient; now: () => Date };
+export type PayoutDeps = { prisma: PrismaClient; now: () => Date; log?: AuditLog };
 
 /** R4.1: a destination saved this recently is flagged on the platform's payout screen. */
 export const METHOD_CHANGE_FLAG_HOURS = 72;
@@ -362,7 +369,7 @@ export type BuildPayoutResult =
 export async function buildPayout(deps: PayoutDeps, input: { photographerId: string; adminUserId: string }): Promise<BuildPayoutResult> {
   const now = deps.now();
   try {
-    const outcome = await deps.prisma.$transaction(async (tx): Promise<Exclude<BuildPayoutResult, { status: 'created' }> | { status: 'created'; payoutId: string }> => {
+    const outcome = await deps.prisma.$transaction(async (tx): Promise<Exclude<BuildPayoutResult, { status: 'created' }> | { status: 'created'; payoutId: string; audit: AuditRecord }> => {
       // Builds for one photographer queue here; another photographer's never wait.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('bookly.payout_build:' || ${input.photographerId}::text))`;
       const photographer = await tx.photographer.findUnique({ where: { id: input.photographerId }, select: { id: true } });
@@ -387,9 +394,21 @@ export async function buildPayout(deps: PayoutDeps, input: { photographerId: str
       });
       // The rows are locked, so nothing can have taken one in between.
       if (count !== items.length) throw new Error(`Payout ${payout.id} took ${count} of ${items.length} locked items`);
-      return { status: 'created', payoutId: payout.id };
+      const audit = await recordAudit(
+        tx,
+        {
+          actorUserId: input.adminUserId,
+          action: 'payout_created',
+          target: { type: 'payout', id: payout.id },
+          photographerId: input.photographerId,
+          details: { amountRwf: total, itemCount: items.length, payoutMethodId: method.id },
+        },
+        now,
+      );
+      return { status: 'created', payoutId: payout.id, audit };
     });
     if (outcome.status !== 'created') return outcome;
+    logAudit(deps.log, [outcome.audit]);
     const payout = await findPayout(deps.prisma, outcome.payoutId, now);
     if (payout === null) throw new Error(`Payout ${outcome.payoutId} vanished after it was built`);
     return { status: 'created', payout };
@@ -418,7 +437,7 @@ export async function markPayoutPaid(
   input: { payoutId: string; adminUserId: string; transferReference: string; note: string | null },
 ): Promise<PayoutActionResult> {
   const now = deps.now();
-  let outcome: 'ok' | 'not_found' | 'not_draft' | 'duplicate_transfer_reference';
+  let outcome: AuditRecord | 'not_found' | 'not_draft' | 'duplicate_transfer_reference';
   try {
     outcome = await deps.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM payout WHERE id = ${input.payoutId}::uuid FOR UPDATE`;
@@ -449,29 +468,55 @@ export async function markPayoutPaid(
           destination: maskedDestination(payout.payoutMethod),
         },
       });
-      return 'ok';
+      return recordAudit(
+        tx,
+        {
+          actorUserId: input.adminUserId,
+          action: 'payout_paid',
+          target: { type: 'payout', id: payout.id },
+          photographerId: payout.photographerId,
+          details: { amountRwf: payout.amountRwf, itemCount: payout._count.items, transferReference: input.transferReference },
+        },
+        now,
+      );
     });
   } catch (error) {
     if (isUniqueViolation(error)) return { status: 'duplicate_transfer_reference' };
     throw error;
   }
-  return answerAction(deps, input.payoutId, outcome, now);
+  if (typeof outcome !== 'string') logAudit(deps.log, [outcome]);
+  return answerAction(deps, input.payoutId, typeof outcome === 'string' ? outcome : 'ok', now);
 }
 
 // --- The platform: cancel a draft --------------------------------------------------------------
 
 export async function cancelPayout(deps: PayoutDeps, input: { payoutId: string; adminUserId: string }): Promise<PayoutActionResult> {
   const now = deps.now();
-  const outcome = await deps.prisma.$transaction(async (tx): Promise<'ok' | 'not_found' | 'not_draft'> => {
+  const outcome = await deps.prisma.$transaction(async (tx): Promise<AuditRecord | 'not_found' | 'not_draft'> => {
     const locked = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM payout WHERE id = ${input.payoutId}::uuid FOR UPDATE`;
     if (locked[0] === undefined) return 'not_found';
     if (locked[0].status !== 'draft') return 'not_draft';
     // Its items return to the photographer's balance (§3.9), and carry forward.
     await releaseDraftItems(tx, input.payoutId, now);
-    await tx.payout.update({ where: { id: input.payoutId }, data: { status: 'cancelled', cancelledAt: now, cancelledByUserId: input.adminUserId } });
-    return 'ok';
+    const payout = await tx.payout.update({
+      where: { id: input.payoutId },
+      data: { status: 'cancelled', cancelledAt: now, cancelledByUserId: input.adminUserId },
+      select: { id: true, photographerId: true, amountRwf: true },
+    });
+    return recordAudit(
+      tx,
+      {
+        actorUserId: input.adminUserId,
+        action: 'payout_cancelled',
+        target: { type: 'payout', id: payout.id },
+        photographerId: payout.photographerId,
+        details: { amountRwf: payout.amountRwf },
+      },
+      now,
+    );
   });
-  return answerAction(deps, input.payoutId, outcome, now);
+  if (typeof outcome !== 'string') logAudit(deps.log, [outcome]);
+  return answerAction(deps, input.payoutId, typeof outcome === 'string' ? outcome : 'ok', now);
 }
 
 async function answerAction(

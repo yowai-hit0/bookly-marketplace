@@ -87,3 +87,316 @@ schemas:
     description: |
       Narrows to pending photographers: `awaiting` review (submitted, the only
       ones approval accepts) or still `setting_up` (not submitted).
+
+  # --- Phase 9: the console's detail page, the audit trail and the categories ---
+
+  AuditAction:
+    type: string
+    enum:
+      - photographer_approved
+      - photographer_suspended
+      - photographer_reactivated
+      - payout_created
+      - payout_paid
+      - payout_cancelled
+      - refund_recorded
+      - settings_updated
+      - category_created
+      - category_updated
+      - category_reordered
+      - category_deactivated
+      - category_reactivated
+      - category_deleted
+    description: |
+      What a platform admin did (R9.4). One row per action that changed
+      something; a refusal or a request that changed nothing has none.
+      `details` by action:
+
+      - `photographer_approved`: `{ status, trialStarted, trialEndsAt }`
+      - `photographer_suspended`: `{ status, reason }`
+      - `photographer_reactivated`: `{ status }` (`approved`, or `pending` if never approved)
+      - `payout_created`: `{ amountRwf, itemCount, payoutMethodId }`
+      - `payout_paid`: `{ amountRwf, itemCount, transferReference }`
+      - `payout_cancelled`: `{ amountRwf }`
+      - `refund_recorded`: `{ paymentKind, refundKind, amountRwf, reference, bookingId }`
+      - `settings_updated`: `{ changed: { <field>: { before, after } } }`, the changed fields only
+      - `category_created`: `{ slug, nameEn, sortOrder }`
+      - `category_updated`: `{ slug, nameEn: { before, after } }`
+      - `category_deactivated`, `category_reactivated`: `{ slug, nameEn, photographerCount }`
+      - `category_reordered`: `{ before: [id], after: [id] }`
+      - `category_deleted`: `{ slug, nameEn }`
+
+      Never a password, a token, a full payout account number or a client's
+      personal data.
+
+  AuditEntry:
+    type: object
+    required: [id, action, actor, target, photographer, details, createdAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      action: { $ref: '#/schemas/AuditAction' }
+      actor:
+        type: object
+        description: The platform admin who acted.
+        required: [id, email]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          email: { type: string, format: email }
+      target:
+        type: object
+        required: [type, id]
+        additionalProperties: false
+        properties:
+          type:
+            type: [string, 'null']
+            enum: [photographer, payout, payment, platform_setting, category, null]
+          id:
+            description: Null where the target has no id (the settings, the category order). A deleted category's id stays.
+            oneOf:
+              - $ref: 'common.yaml#/schemas/Uuid'
+              - type: 'null'
+      photographer:
+        description: The photographer the action concerns, if any.
+        oneOf:
+          - type: object
+            required: [id, handle, displayName]
+            additionalProperties: false
+            properties:
+              id: { $ref: 'common.yaml#/schemas/Uuid' }
+              handle: { type: string }
+              displayName: { type: string }
+          - type: 'null'
+      details:
+        type: object
+        description: See `AuditAction`.
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+
+  AuditPage:
+    type: object
+    required: [entries, total, page, pageSize, pageCount]
+    additionalProperties: false
+    properties:
+      entries:
+        type: array
+        description: Newest first. Empty for a page past the end.
+        items: { $ref: '#/schemas/AuditEntry' }
+      total: { type: integer, minimum: 0 }
+      page: { type: integer, minimum: 1 }
+      pageSize: { const: 50 }
+      pageCount: { type: integer, minimum: 0 }
+
+  PlatformCategory:
+    type: object
+    required: [id, slug, nameEn, isActive, sortOrder, photographerCount, createdAt, updatedAt]
+    additionalProperties: false
+    properties:
+      id: { $ref: 'common.yaml#/schemas/Uuid' }
+      slug:
+        type: string
+        description: Immutable. It is in every shared directory link (`/photographers?category=<slug>`).
+      nameEn: { type: string }
+      isActive:
+        type: boolean
+        description: |
+          False hides it everywhere public and in the studio's picker, while
+          photographers keep it; true restores everything.
+      sortOrder: { type: integer }
+      photographerCount:
+        type: integer
+        minimum: 0
+        description: Photographers tagged with it, of every status. Deleting needs 0.
+      createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+      updatedAt: { $ref: 'common.yaml#/schemas/Instant' }
+
+  PlatformCategoryList:
+    type: object
+    required: [categories]
+    additionalProperties: false
+    properties:
+      categories:
+        type: array
+        description: Every category, active and inactive, by sort order, then name, then slug.
+        items: { $ref: '#/schemas/PlatformCategory' }
+
+  PlatformCategoryEnvelope:
+    type: object
+    required: [category]
+    additionalProperties: false
+    properties:
+      category: { $ref: '#/schemas/PlatformCategory' }
+
+  CategoryName:
+    type: string
+    minLength: 1
+    maxLength: 80
+    description: Trimmed; 1 to 80 characters (code points). Blank or longer is a 422.
+
+  PlatformPhotographerDetail:
+    type: object
+    required: [photographer, profile, setup, subscription, payoutMethod, methodChangedRecently, counts, earnings, activity]
+    additionalProperties: false
+    properties:
+      photographer:
+        type: object
+        description: The list's row, plus who approved them.
+        required: [id, handle, displayName, email, status, createdAt, submittedAt, handleChangedAt, approvedAt, approvedByUserId, approvedBy, suspendedAt, suspensionReason]
+        additionalProperties: false
+        properties:
+          id: { $ref: 'common.yaml#/schemas/Uuid' }
+          handle: { type: string }
+          displayName: { type: string }
+          email: { type: string, format: email, description: The photographer's login address. }
+          status: { $ref: '#/schemas/PhotographerStatus' }
+          createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+          submittedAt: { type: [string, 'null'], format: date-time }
+          handleChangedAt: { type: [string, 'null'], format: date-time }
+          approvedAt: { type: [string, 'null'], format: date-time }
+          approvedByUserId:
+            oneOf:
+              - $ref: 'common.yaml#/schemas/Uuid'
+              - type: 'null'
+          approvedBy:
+            oneOf:
+              - type: object
+                required: [id, email]
+                additionalProperties: false
+                properties:
+                  id: { $ref: 'common.yaml#/schemas/Uuid' }
+                  email: { type: string, format: email }
+              - type: 'null'
+          suspendedAt: { type: [string, 'null'], format: date-time }
+          suspensionReason: { type: [string, 'null'] }
+      profile:
+        type: object
+        required: [bio, contactPhone, whatsappPhone, contactEmail, coverImageUrl, districts, categories]
+        additionalProperties: false
+        properties:
+          bio: { type: [string, 'null'] }
+          contactPhone: { type: [string, 'null'] }
+          whatsappPhone: { type: [string, 'null'] }
+          contactEmail: { type: [string, 'null'], description: The public contact address, not the login. }
+          coverImageUrl: { type: [string, 'null'] }
+          districts:
+            type: array
+            items: { $ref: 'catalogue.yaml#/schemas/PublicDistrict' }
+          categories:
+            type: array
+            description: Every category they are tagged with, in the platform's order; an inactive one is hidden from the public but still theirs.
+            items:
+              type: object
+              required: [slug, name, isActive]
+              additionalProperties: false
+              properties:
+                slug: { type: string }
+                name: { type: string }
+                isActive: { type: boolean }
+      setup:
+        type: object
+        description: The setup checklist as the studio's rows stand now (R7.3).
+        required: [items, missing, canSubmit]
+        additionalProperties: false
+        properties:
+          items:
+            type: array
+            items:
+              type: object
+              required: [key, done]
+              additionalProperties: false
+              properties:
+                key: { $ref: 'onboarding.yaml#/schemas/SetupItem' }
+                done: { type: boolean }
+          missing:
+            type: array
+            items: { $ref: 'onboarding.yaml#/schemas/SetupItem' }
+          canSubmit: { type: boolean }
+      subscription:
+        description: Null until approval creates it. The status is the status at the clock.
+        oneOf:
+          - type: object
+            required: [id, photographer, status, currentPeriodEndsAt, graceEndsAt, createdAt, takingBookings, periods]
+            additionalProperties: false
+            properties:
+              id: { $ref: 'common.yaml#/schemas/Uuid' }
+              photographer:
+                type: object
+                required: [id, handle, displayName, status]
+                additionalProperties: false
+                properties:
+                  id: { $ref: 'common.yaml#/schemas/Uuid' }
+                  handle: { type: string }
+                  displayName: { type: string }
+                  status: { $ref: '#/schemas/PhotographerStatus' }
+              status: { $ref: 'common.yaml#/schemas/SubscriptionStatus' }
+              currentPeriodEndsAt: { $ref: 'common.yaml#/schemas/Instant' }
+              graceEndsAt: { $ref: 'common.yaml#/schemas/Instant' }
+              createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+              takingBookings: { type: boolean }
+              periods:
+                type: array
+                description: Every period, newest first.
+                items: { $ref: 'subscriptions.yaml#/schemas/SubscriptionPeriod' }
+          - type: 'null'
+      payoutMethod:
+        description: |
+          The current payout destination, MASKED: the network or bank, the
+          account name and the last four digits. The payouts screen, which
+          transfers the money, shows the full number. Null with none.
+        oneOf:
+          - type: object
+            required: [id, kind, provider, accountName, last4, createdAt]
+            additionalProperties: false
+            properties:
+              id: { $ref: 'common.yaml#/schemas/Uuid' }
+              kind: { $ref: 'payouts.yaml#/schemas/PayoutMethodKind' }
+              provider:
+                type: string
+                description: The MoMo network (`mtn`, `airtel`) or the name of the bank.
+              accountName: { type: string }
+              last4: { type: string, maxLength: 4 }
+              createdAt: { $ref: 'common.yaml#/schemas/Instant' }
+          - type: 'null'
+      methodChangedRecently:
+        type: boolean
+        description: The current method was saved within the last 72 hours (R4.1). False with none.
+      counts:
+        type: object
+        required: [bookings, services]
+        additionalProperties: false
+        properties:
+          bookings:
+            type: object
+            description: Every booking status, 0 included.
+            required: [pending_payment, confirmed, completed, no_show, expired, cancelled_by_client, cancelled_by_photographer, cancelled_by_platform]
+            additionalProperties: false
+            properties:
+              pending_payment: { type: integer, minimum: 0 }
+              confirmed: { type: integer, minimum: 0 }
+              completed: { type: integer, minimum: 0 }
+              no_show: { type: integer, minimum: 0 }
+              expired: { type: integer, minimum: 0 }
+              cancelled_by_client: { type: integer, minimum: 0 }
+              cancelled_by_photographer: { type: integer, minimum: 0 }
+              cancelled_by_platform: { type: integer, minimum: 0 }
+          services:
+            type: object
+            required: [total, active]
+            additionalProperties: false
+            properties:
+              total: { type: integer, minimum: 0 }
+              active: { type: integer, minimum: 0 }
+      earnings:
+        type: object
+        required: [payableRwf, inDraftRwf, paidOutRwf]
+        additionalProperties: false
+        properties:
+          payableRwf:
+            type: integer
+            description: Payable now (§3.9), in no payout. May be negative when reversals outweigh new earnings.
+          inDraftRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+          paidOutRwf: { $ref: 'common.yaml#/schemas/Rwf' }
+      activity:
+        type: array
+        description: The latest 20 audit rows about this photographer, newest first.
+        items: { $ref: '#/schemas/AuditEntry' }

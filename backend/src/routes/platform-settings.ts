@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { AuthDeps } from '../auth/account-auth.js';
 import { platformAdminLocals } from '../auth/middleware.js';
 import { RECONCILE_MAX_AGE_MINUTES } from '../payments/reconcile.js';
-import { getPlatformSettings, updatePlatformSettings } from '../settings/index.js';
+import { type AuditLog, type AuditRecord, logAudit, recordAudit } from '../platform/audit.js';
+import { changePlatformSettings, getPlatformSettings } from '../settings/index.js';
 import { SUBSCRIPTION_STATUSES } from '../subscriptions/plan.js';
 import { listPlatformSubscriptions } from '../subscriptions/views.js';
 import { INT4_MAX, parseOrReject } from './validation.js';
@@ -41,8 +42,11 @@ import { INT4_MAX, parseOrReject } from './validation.js';
  * What a change touches: the hold, the next booking's hold; the trial, later
  * approvals; the prices, the next payment (one already started keeps its
  * frozen amount); the grace and the reminder days, every subscription at once
- * (listing and expiry compare the clock with them, R5.4). Every change is a
- * structured log line naming who and when (R9.4).
+ * (listing and expiry compare the clock with them, R5.4). Every change writes a
+ * `settings_updated` row to the platform's audit trail in the save's own
+ * transaction, with the before and after of the fields that changed only, and
+ * a structured log line once it commits (R9.4, Phase 9; platform/audit.ts). A
+ * save that changes no value writes neither.
  */
 
 /** A developer bound: see above. */
@@ -63,7 +67,7 @@ const settingsBody = z.strictObject({
 
 const subscriptionsQuery = z.strictObject({ status: z.enum(SUBSCRIPTION_STATUSES).optional() });
 
-export type PlatformSettingsDeps = AuthDeps & { log?: (entry: Record<string, unknown>) => void };
+export type PlatformSettingsDeps = AuthDeps & { log?: AuditLog };
 
 export function platformSettingsRouter(deps: PlatformSettingsDeps): Router {
   const router = Router();
@@ -76,22 +80,26 @@ export function platformSettingsRouter(deps: PlatformSettingsDeps): Router {
     const body = parseOrReject(settingsBody, req.body, res);
     if (body === undefined) return;
 
-    const settings = await updatePlatformSettings(
-      {
-        ...body,
-        // Stored largest first, the order they fall due in.
-        ...(body.subscriptionReminderDays === undefined ? {} : { subscriptionReminderDays: [...body.subscriptionReminderDays].sort((a, b) => b - a) }),
-      },
-      deps.prisma,
-    );
-    (deps.log ?? logLine)({
-      level: 'info',
-      event: 'platform_settings_updated',
-      byUserId: platformAdminLocals(res).user.id,
-      at: deps.now().toISOString(),
-      changed: Object.keys(body),
-      settings,
+    const update = {
+      ...body,
+      // Stored largest first, the order they fall due in.
+      ...(body.subscriptionReminderDays === undefined ? {} : { subscriptionReminderDays: [...body.subscriptionReminderDays].sort((a, b) => b - a) }),
+    };
+    const actorUserId = platformAdminLocals(res).user.id;
+    const now = deps.now();
+    const { settings, audit } = await deps.prisma.$transaction(async (tx) => {
+      const saved = await changePlatformSettings(update, tx);
+      let record: AuditRecord | null = null;
+      if (Object.keys(saved.changed).length > 0) {
+        record = await recordAudit(
+          tx,
+          { actorUserId, action: 'settings_updated', target: { type: 'platform_setting', id: null }, photographerId: null, details: { changed: saved.changed } },
+          now,
+        );
+      }
+      return { settings: saved.settings, audit: record };
     });
+    if (audit !== null) logAudit(deps.log, [audit]);
     res.json({ settings });
   });
 
@@ -102,8 +110,4 @@ export function platformSettingsRouter(deps: PlatformSettingsDeps): Router {
   });
 
   return router;
-}
-
-function logLine(entry: Record<string, unknown>): void {
-  console.log(JSON.stringify(entry));
 }

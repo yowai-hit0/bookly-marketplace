@@ -97,8 +97,22 @@ describe('PATCH /api/platform/settings', () => {
     const expected = { ...DEFAULTS, subscriptionMonthlyPriceRwf: 12_000, subscriptionReminderDays: [14, 3, 1] };
     expect(res.body).toEqual({ settings: expected });
     await expect(getPlatformSettings(prisma)).resolves.toEqual(expected);
+    // One audit row in the save's transaction, with the changed fields' before and after only (Phase 9, R9.4)...
+    const rows = await prisma.platformAudit.findMany();
+    expect(rows.map((row) => [row.action, row.actorUserId, row.targetType, row.targetId, row.photographerId, row.createdAt, row.details])).toEqual([
+      [
+        'settings_updated',
+        admin.id,
+        'platform_setting',
+        null,
+        null,
+        NOW,
+        { changed: { subscriptionMonthlyPriceRwf: { before: 10_000, after: 12_000 }, subscriptionReminderDays: { before: [7, 3, 1], after: [14, 3, 1] } } },
+      ],
+    ]);
+    // ...and its log line once it commits.
     expect(logged).toContainEqual(
-      expect.objectContaining({ event: 'platform_settings_updated', byUserId: admin.id, at: NOW.toISOString(), changed: ['subscriptionMonthlyPriceRwf', 'subscriptionReminderDays'] }),
+      expect.objectContaining({ event: 'platform_action', action: 'settings_updated', actorUserId: admin.id, auditId: rows[0]?.id, at: NOW.toISOString() }),
     );
   });
 
